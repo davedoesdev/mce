@@ -1,0 +1,556 @@
+(module expand (main main))
+
+(define (make-eq-table)
+    (vector assq '()))
+
+(define (make-equal-table)
+    (vector assoc '()))
+
+(define (table-ref table key)
+    ((vector-ref table 0) key (vector-ref table 1)))
+
+(define (ref-value ref)
+    (if ref (cdr ref) ref))
+
+(define (table-set! table key val)
+    (vector-set! table 1 (cons (cons key val) (vector-ref table 1))))
+
+(define (make-global-ctenv) (list '()))
+
+(define (extend-ctenv ctenv syms)
+    (cons syms ctenv))
+
+(define (ctenv-index ctenv sym)
+    (let loop1 ((i1 0) (e1 ctenv))
+        (if (null? e1)
+            #f
+            (let loop2 ((i2 0) (e2 (car e1)))
+                (if (null? e2)
+                    (loop1 (+ i1 1) (cdr e1))
+                    (if (equal? (car e2) sym)
+                        (cons i1 i2)
+                        (loop2 (+ i2 1) (cdr e2))))))))
+
+(define (putin-ctenv ctenv sym)
+    (let ((i (ctenv-index ctenv sym)))
+        (if i
+            i
+            (let ((e (car ctenv)))
+                (set-car! ctenv (append e (list sym)))
+                (cons 0 (length e))))))
+
+(define (ctenv-lookup i env)
+    (vector-ref (cdr (list-ref env (car i))) (cdr i)))
+
+(define (extend-vector vec index val)
+    (let ((newvec (make-vector (+ index 1))))
+        (let loop ((i 0))
+            (if (= i index)
+                (vector-set! newvec i val)
+                (begin (vector-set! newvec i (vector-ref vec i))
+                       (loop (+ i 1)))))
+        newvec))
+
+(define (ctenv-setvar i val env)
+    (let* ((senv (list-ref env (car i)))
+           (vec (cdr senv))
+           (index (cdr i)))
+        (if (< index (vector-length vec))
+            (vector-set! vec index val)
+            (set-cdr! senv (extend-vector vec index val))))
+    val)
+
+(define (extend-env env syms values)
+    (cons (cons syms (list->vector values)) env))
+
+(define (improper-extend-env env syms values)
+    (let loop ((syms syms) (values values) (done-syms '()) (done-values '()))
+        (if (symbol? syms)
+            (cons (reverse (cons syms done-syms))
+                  (list->vector (append (reverse done-values) values)))
+            (if (and (not (null? syms)) (not (null? values)))
+                (loop (cdr syms)
+                      (cdr values)
+                      (cons (car syms) done-syms)
+                      (cons (car values) done-values))
+                (cons (reverse done-syms)
+                      (list->vector (reverse done-values)))))))
+
+(define (lookup sym env)
+    (let loop1 ((env env))
+        (if (null? env)
+            (lookup-global sym)
+            (let* ((values (cdar env))
+                   (len (vector-length values)))
+                (let loop2 ((syms (caar env)) (i 0))
+                    (if (or (null? syms) (= i len))
+                        (loop1 (cdr env))
+                        (if (equal? (car syms) sym)
+                            (vector-ref values i)
+                            (loop2 (cdr syms) (+ i 1)))))))))
+
+(define (setvar sym value env)
+    (let loop1 ((env env))
+        (if (null? env)
+            (string-append "setvar: symbol not found: " (symbol->string sym))
+            (let* ((values (cdar env))
+                   (len (vector-length values)))
+                (let loop2 ((syms (caar env)) (i 0))
+                    (if (or (null? syms) (= i len))
+                        (loop1 (cdr env))
+                        (if (equal? (car syms) sym)
+                            (begin (vector-set! values i value) value)
+                            (loop2 (cdr syms) (+ i 1)))))))))
+
+(define (make-step-contn k args) (cons 'MCE-STEP-CONTN (cons k args)))
+(define (step-contn? exp) (and (pair? exp) (equal? (car exp) 'MCE-STEP-CONTN)))
+(define (step-contn-k exp) (cadr exp))
+(define (step-contn-args exp) (cddr exp))
+
+(define send cons)
+
+(define (make-global-env) (list (cons '() '#())))
+
+(define (make-env-args env supenv args)
+    (cons 'MCE-ENV-ARGS (cons supenv (cons env args))))
+
+(define (env-args? exp) (and (pair? exp) (equal? (car exp) 'MCE-ENV-ARGS)))
+
+(define (env-args-supenv env-args)
+    (if (env-args? env-args) (cadr env-args) #f))
+
+(define (env-args-env env-args)
+    (if (env-args? env-args) (caddr env-args) (make-global-env)))
+
+(define (env-args-args env-args)
+    (if (env-args? env-args) (cdddr env-args) env-args))
+
+(define (replacing? args)
+    (and (not (null? args)) (equal? (car args) 'MCE-YIELD-DEFINITION)))
+
+(define (get-procedure-defn proc)
+    (proc 'MCE-YIELD-DEFINITION))
+
+(define (memoize-lambda proc defn)
+    (lambda args (if (replacing? args) defn (apply proc args))))
+
+(define (improper? l)
+    (cond ((null? l) #f)
+          ((pair? l) (improper? (cdr l)))
+          (else #t)))
+
+(define (->proper l)
+    (let loop ((todo l) (done '()))
+        (if (null? todo)
+            (reverse done)
+            (if (symbol? todo)
+                (reverse (cons todo done))
+                (loop (cdr todo) (cons (car todo) done))))))
+
+(define forms '#())
+
+(define-syntax define-form
+    (syntax-rules ()
+        ((define-form name body ...)
+         (begin
+            (define name (vector-length forms))
+            (let ((len (vector-length forms)))
+                (set! forms (extend-vector forms len body ...)))))))
+
+(define-form symbol-lookup
+    (lambda (this i)
+        (lambda (k env)
+            (send k (ctenv-lookup i env)))))
+
+(define-form send-value
+    (lambda (this exp)
+        (lambda (k env)
+            (send k exp))))
+
+(define-form runtime-lookup
+    (lambda (this name)
+        (lambda (k env)
+            (send k (lookup name env)))))
+
+(define-form constructed-function
+    (lambda (this args cf)
+        (let ((r (apply cf args)))
+            (if (procedure? r)
+                (wrap-global-lambda r this)
+                r))))
+
+(define-form global-lambda
+    (lambda (this defn)
+        (wrap-global-lambda (find-global defn) this)))
+
+(define-form if0
+    (lambda (this scan0 scan1 scan2)
+        (lambda (k env)
+            (scan0 (make-form if1 k env scan1 scan2) env))))
+
+(define-form if1
+    (lambda (this k env scan1 scan2)
+        (lambda (v)
+            (if v
+                (scan1 k env)
+                (scan2 k env)))))
+
+(define-form sclis0
+    (lambda (this first rest)
+        (lambda (k env)
+            (first (make-form sclis1 k env rest) env))))
+
+(define-form sclis1
+    (lambda (this k env rest)
+        (lambda (v)
+            (rest (make-form sclis2 k v) env))))
+
+(define-form sclis2
+    (lambda (this k v)
+        (lambda (w)
+            (send k (cons v w)))))
+
+(define-form scseq0
+    (lambda (this first rest)
+        (lambda (k env)
+            (first (make-form scseq1 k env rest) env))))
+
+(define-form scseq1
+    (lambda (this k env rest)
+        (lambda (v) (rest k env))))
+
+(define-form lambda0
+    (lambda (this params scanned)
+        (lambda (k env)
+            (send k (make-form lambda1 params scanned env)))))
+
+(define-form lambda1
+    (lambda (this params scanned env)
+        (lambda args
+            (handle-lambda args params scanned env extend-env))))
+
+(define-form improper-lambda0
+    (lambda (this params scanned)
+        (lambda (k env)
+            (send k (make-form improper-lambda1 params scanned env)))))
+
+(define-form improper-lambda1
+    (lambda (this params scanned env)
+        (lambda args
+            (handle-lambda args params scanned env improper-extend-env))))
+
+(define-form hlambda0
+    (lambda (this params scanned)
+        (lambda (k env)
+            (send k (make-form lambda1 params scanned (make-global-env))))))
+
+(define-form improper-hlambda0
+    (lambda (this params scanned)
+        (lambda (k env)
+            (send k
+                  (make-form improper-lambda1
+                             params
+                             scanned
+                             (make-global-env))))))
+
+(define-form let/cc0
+    (lambda (this name scanned)
+        (lambda (k env)
+            (scanned k (extend-env env
+                                   (list name)
+                                   (list (make-form let/cc1 k)))))))
+
+(define-form let/cc1
+    (lambda (this k)
+        (lambda args
+            (handle-contn-lambda args k))))
+
+(define-form define0
+    (lambda (this i scanned)
+        (lambda (k env)
+            (scanned (make-form define1 k env i) env))))
+
+(define-form define1
+    (lambda (this k env i)
+        (lambda (v)
+            (send k (ctenv-setvar i v env)))))
+
+(define-form set0
+    (lambda (this name scanned)
+        (lambda (k env)
+            (scanned (make-form set1 k env name) env))))
+
+(define-form set1
+    (lambda (this k env name)
+        (lambda (v)
+            (send k (setvar name v env)))))
+
+(define-form application0
+    (lambda (this scanned)
+        (lambda (k env)
+            (scanned (make-form application1 k env) env))))
+
+(define-form application1
+    (lambda (this k env)
+        (lambda (v)
+            (applyx k env (car v) (cdr v)))))
+
+(define-form evalx-initial
+    (lambda (this k env scanned)
+        (lambda (v)
+            (scanned k env))))
+
+(define (make-form n . args)
+    (letrec*
+        ((defn (cons n args))
+         (f2 (memoize-lambda (lambda args (apply f args)) defn))
+         (f (memoize-lambda (apply (vector-ref forms n) (cons f2 args)) defn)))
+        f))
+
+(define (make-scan-form exp ctenv n . args)
+    (letrec*
+        ((defn (list -1 exp ctenv))
+         (f2 (memoize-lambda (lambda args (apply f args)) defn))
+         (f (memoize-lambda (apply (vector-ref forms n) (cons f2 args)) defn)))
+        f))
+
+(define (make-sclis-form exp ctenv n . args)
+    (letrec*
+        ((defn (list -2 exp ctenv))
+         (f2 (memoize-lambda (lambda args (apply f args)) defn))
+         (f (memoize-lambda (apply (vector-ref forms n) (cons f2 args)) defn)))
+       f))
+
+(define (make-scseq-form exp ctenv n . args)
+    (letrec*
+        ((defn (list -3 exp ctenv))
+         (f2 (memoize-lambda (lambda args (apply f args)) defn))
+         (f (memoize-lambda (apply (vector-ref forms n) (cons f2 args)) defn)))
+        f))
+
+(define (sclis exp ctenv)
+    (if (null? exp)
+        (make-form send-value '())
+        (make-sclis-form exp
+                         ctenv
+                         sclis0
+                         (scan-aux (car exp) ctenv)
+                         (sclis (cdr exp) ctenv))))
+
+(define (scseq exp ctenv)
+    (if (null? exp)
+        (make-form send-value '())
+        (let ((first (scan-aux (car exp) ctenv)))
+            (if (null? (cdr exp))
+                first
+                (make-scseq-form exp
+                                 ctenv
+                                 scseq0
+                                 first
+                                 (scseq (cdr exp) ctenv))))))
+
+(define (scan-aux exp ctenv)
+    (cond ((symbol? exp)
+           (let ((i (ctenv-index ctenv exp)))
+               (if i
+                   (make-scan-form exp ctenv symbol-lookup i)
+                   (let ((g (lookup-global exp)))
+                       (if g
+                           (make-scan-form exp ctenv send-value g)
+                           (make-scan-form exp ctenv runtime-lookup exp))))))
+          ((pair? exp)
+           (let ((op (car exp)))
+               (cond ((equal? op 'quote)
+                      (make-scan-form exp ctenv send-value (cadr exp)))
+                     ((equal? op 'if)
+                      (let ((scan0 (scan-aux (cadr exp) ctenv))
+                            (scan1 (scan-aux (caddr exp) ctenv))
+                            (scan2 (scan-aux (if (pair? (cdddr exp))
+                                                 (cadddr exp)
+                                                 '())
+                                             ctenv)))
+                          (make-scan-form exp ctenv if0 scan0 scan1 scan2)))
+                     ((equal? op 'lambda)
+                      (let ((params (cadr exp)))
+                          (if (improper? params)
+                              (let ((scanned
+                                     (scseq (cddr exp)
+                                            (extend-ctenv ctenv
+                                                          (->proper params)))))
+                                  (make-scan-form exp
+                                                  ctenv
+                                                  improper-lambda0
+                                                  params
+                                                  scanned))
+                              (let ((scanned
+                                     (scseq (cddr exp)
+                                            (extend-ctenv ctenv
+                                                          params))))
+                                  (make-scan-form exp
+                                                  ctenv
+                                                  lambda0
+                                                  params
+                                                  scanned)))))
+                     ((equal? op 'hlambda)
+                      (let ((params (cadr exp)))
+                          (if (improper? params)
+                              (let ((scanned
+                                     (scseq (cddr exp)
+                                            (extend-ctenv (make-global-ctenv)
+                                                          (->proper params)))))
+                                  (make-scan-form exp
+                                                  ctenv
+                                                  improper-hlambda0
+                                                  params
+                                                  scanned))
+                              (let ((scanned
+                                     (scseq (cddr exp)
+                                            (extend-ctenv (make-global-ctenv)
+                                                          params))))
+                                  (make-scan-form exp
+                                                  ctenv
+                                                  hlambda0
+                                                  params scanned)))))
+                     ((equal? op 'let/cc)
+                      (let* ((name (cadr exp))
+                             (scanned (scseq (cddr exp)
+                                             (extend-ctenv ctenv (list name)))))
+                          (make-scan-form exp ctenv let/cc0 name scanned)))
+                     ((equal? op 'set!)
+                      (let* ((name (cadr exp))
+                             (i (ctenv-index ctenv name))
+                             (scanned (scseq (cddr exp) ctenv)))
+                        (if i
+                            (make-scan-form exp ctenv define0 i scanned)
+                            (make-scan-form exp ctenv set0 name scanned))))
+                     ((equal? op 'define)
+                      (let* ((name (cadr exp))
+                             (i (putin-ctenv ctenv name))
+                             (scanned (scseq (cddr exp) ctenv)))
+                          (make-scan-form exp define0 i scanned)))
+                     ((equal? op 'begin)
+                      (scseq (cdr exp) ctenv))
+                     (else
+                      (let ((scanned (sclis exp ctenv)))
+                          (make-scan-form exp ctenv application0 scanned))))))
+          (else
+           (make-scan-form exp ctenv send-value exp))))
+
+(define (scan exp)
+    (scan-aux exp (make-global-ctenv)))
+
+(define (mce-step state)
+    ((car state) (cdr state)))
+
+(define (result v)
+    (vector 'MCE-RESULT v))
+
+(define (result? exp)
+    (and (vector? exp)
+         (= (vector-length exp) 2)
+         (equal? (vector-ref exp 0) 'MCE-RESULT)))
+
+(define (result-val exp)
+    (vector-ref exp 1))
+
+(define (run state)
+    (let loop ((state state))
+        (if (result? state)
+            (result-val state)
+            (loop (mce-step state)))))
+
+(define (evalx k exp env)
+    (let ((scanned (scan exp)))
+        (send (make-form evalx-initial k env scanned) 'unspecified)))
+
+(define (applyx k env fn args)
+    (apply fn (make-step-contn k (make-env-args env #f args))))
+
+(define (handle-lambda args params fn env extend-env)
+    (if (step-contn? args)
+        (let* ((sca (step-contn-args args))
+               (eas (env-args-supenv sca))
+               (env (if eas (append env eas) env)))
+            (fn (step-contn-k args)
+                (extend-env env params (env-args-args sca))))
+        (let* ((eas (env-args-supenv args))
+               (env (if eas (append env eas) env)))
+            (run (fn (lookup-global 'result)
+                 (extend-env env params (env-args-args args)))))))
+
+(define (handle-contn-lambda args k)
+    (if (step-contn? args)
+        (apply k (env-args-args (step-contn-args args)))
+        (run (apply k (env-args-args args)))))
+
+(define global-table (make-equal-table))
+
+(define (globalize x args cf)
+    (if (procedure? x)
+        (letrec* ((defn (list constructed-function args cf))
+                  (f2 (memoize-lambda (lambda args (apply f args)) defn))
+                  (f (memoize-lambda (wrap-global-lambda x f2) defn)))
+            f)
+        x))
+
+(define (handle-global-lambda args fn cf)
+    (if (step-contn? args)
+        (send (step-contn-k args)
+              (let ((eaa (env-args-args (step-contn-args args))))
+                  (globalize (apply fn eaa) eaa cf)))
+        (let ((eaa (env-args-args args)))
+            (globalize (apply fn eaa) eaa cf))))
+
+(define (handle-global-lambda-kenv args fn)
+    (if (step-contn? args)
+        (let* ((sca (step-contn-args args))
+               (eas (env-args-supenv sca))
+               (eae (env-args-env sca))
+               (eaa (env-args-args sca))
+               (env (if eas (append eae eas) eae)))
+            (apply fn (cons (step-contn-k args) (cons env eaa))))
+        (let* ((eas (env-args-supenv args))
+               (eae (env-args-env args))
+               (eaa (env-args-args args))
+               (env (if eas (append eae eas) eae)))
+            (apply fn (cons env eaa)))))
+
+(define (wrap-global-lambda fn cf)
+    (if (table-ref kenvfn-table fn)
+        (lambda args (handle-global-lambda-kenv args fn))
+        (lambda args (handle-global-lambda args fn cf))))
+
+(define (find-global sym)
+    (let ((r (table-ref global-table sym)))
+        (if r
+            (ref-value r)
+            (string-append "lookup: symbol not found: " (symbol->string sym)))))
+
+(define (lookup-global sym)
+    (let ((r (find-global sym)))
+        (if (procedure? r)
+            (letrec*
+                ((defn (list global-lambda sym))
+                 (f2 (memoize-lambda (lambda args (apply f args)) defn))
+                 (f (memoize-lambda (wrap-global-lambda r f2) defn)))
+                f)
+            r)))
+
+(define (print . args)
+    (for-each display args)
+    (newline))
+
+(table-set! global-table 'result result)
+(table-set! global-table 'print print)
+(table-set! global-table '< <)
+(table-set! global-table '+ +)
+
+(define kenvfn-table (make-eq-table))
+
+(define (mce-eval exp . env)
+    (run (evalx (lookup-global 'result)
+                exp
+                (if (null? env) (make-global-env) (car env)))))
+
+(define (main argv)
+    (mce-eval (read)))
