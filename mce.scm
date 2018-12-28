@@ -239,20 +239,6 @@
         (lambda args
             (handle-lambda args params scanned env improper-extend-env))))
 
-(define-form hlambda0
-    (lambda (this params scanned)
-        (lambda (k env)
-            (send k (make-form lambda1 params scanned (make-global-env))))))
-
-(define-form improper-hlambda0
-    (lambda (this params scanned)
-        (lambda (k env)
-            (send k
-                  (make-form improper-lambda1
-                             params
-                             scanned
-                             (make-global-env))))))
-
 (define-form let/cc0
     (lambda (this name scanned)
         (lambda (k env)
@@ -391,26 +377,6 @@
                                                   lambda0
                                                   params
                                                   scanned)))))
-                     ((equal? op 'hlambda)
-                      (let ((params (cadr exp)))
-                          (if (improper? params)
-                              (let ((scanned
-                                     (scseq (cddr exp)
-                                            (extend-ctenv (make-global-ctenv)
-                                                          (->proper params)))))
-                                  (make-scan-form exp
-                                                  ctenv
-                                                  improper-hlambda0
-                                                  params
-                                                  scanned))
-                              (let ((scanned
-                                     (scseq (cddr exp)
-                                            (extend-ctenv (make-global-ctenv)
-                                                          params))))
-                                  (make-scan-form exp
-                                                  ctenv
-                                                  hlambda0
-                                                  params scanned)))))
                      ((equal? op 'let/cc)
                       (let* ((name (cadr exp))
                              (scanned (scseq (cddr exp)
