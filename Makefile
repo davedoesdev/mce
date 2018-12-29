@@ -3,5 +3,8 @@ all: mce expand
 %: %.scm
 	bigloo -o $@ $^
 
-test: test.scm
-	./expand < test.scm | ./mce
+test-loop: test-loop.scm
+	./expand < $^ | ./mce
+
+test-state: test-state.scm
+	./expand < $^ | ./mce

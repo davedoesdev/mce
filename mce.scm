@@ -13,7 +13,8 @@
     (if ref (cdr ref) ref))
 
 (define (table-set! table key val)
-    (vector-set! table 1 (cons (cons key val) (vector-ref table 1))))
+    (vector-set! table 1 (cons (cons key val) (vector-ref table 1)))
+    val)
 
 (define (make-global-ctenv) (list '()))
 
@@ -389,11 +390,11 @@
                         (if i
                             (make-scan-form exp ctenv define0 i scanned)
                             (make-scan-form exp ctenv set0 name scanned))))
-                     ((equal? op 'define)
+                     ((or (equal? op 'define) (equal? op 'mce-define))
                       (let* ((name (cadr exp))
                              (i (putin-ctenv ctenv name))
                              (scanned (scseq (cddr exp) ctenv)))
-                          (make-scan-form exp define0 i scanned)))
+                          (make-scan-form exp ctenv define0 i scanned)))
                      ((equal? op 'begin)
                       (scseq (cdr exp) ctenv))
                      (else
@@ -510,8 +511,86 @@
 (table-set! global-table 'print print)
 (table-set! global-table '< <)
 (table-set! global-table '+ +)
+(table-set! global-table 'unmemoize unmemoize)
+(table-set! global-table 'pickle pickle)
 
 (define kenvfn-table (make-eq-table))
+
+(define (cmap f l tab)
+    (cond ((null? l) '())
+          ((pair? l)
+           (let ((ref (table-ref tab l)))
+               (if ref
+                   (ref-value ref)
+                   (let ((entry (table-set! tab l (cons '() '()))))
+                       (set-car! entry (f (car l)))
+                       (set-cdr! entry (cmap f (cdr l) tab))
+                       entry))))
+          (else (f l))))
+
+(define (vector-cmap f vec tab)
+    (let ((len (vector-length vec))
+          (ref (table-ref tab vec)))
+        (if ref
+            (ref-value ref)
+            (let ((entry (table-set! tab vec (make-vector len))))
+                (let loop ((i 0))
+                    (if (= i len)
+                        entry
+                        (begin (vector-set! entry i (f (vector-ref vec i)))
+                               (loop (+ i 1)))))))))
+
+(define (unmemoize-aux exp tab fn)
+    (cond ((pair? exp)
+           (cmap fn exp tab))
+          ((vector? exp)
+           (vector-cmap fn exp tab))
+          ((procedure? exp)
+           (let ((ref (table-ref tab exp)))
+               (if ref
+                   (ref-value ref)
+                   (let ((entry (table-set! tab exp (make-vector 2))))
+                       (vector-set! entry 0 'MCE-MEMOIZE-REPLACED)
+                       (vector-set! entry 1 (fn (get-procedure-defn exp)))
+                       entry))))
+          (else exp)))
+
+(define (unmemoize exp)
+    (letrec ((tab (make-eq-table))
+             (fn (lambda (x) (unmemoize-aux x tab fn))))
+        (fn exp)))
+
+(define null-code    "a")
+(define boolean-code "b")
+(define number-code  "c")
+(define char-code    "d")
+(define string-code  "e")
+(define symbol-code  "f")
+(define pair-code    "g")
+(define vector-code  "h")
+
+(define (pickle-aux s)
+   (cond ((null? exp)
+          (list null-code))
+         ((boolean? exp)
+          (list boolean-code (if exp "t" "f")))
+         ((number? exp)
+          (list number-code exp))
+         ((char? exp)
+          (list char-code (string exp)))
+         ((string? exp)
+          (list string-code exp))
+         ((symbol? exp)
+          (list symbol-code (symbol->string exp)))
+         ((pair? exp)
+          (list pair-code (pickle-aux (car exp)) (pickle-aux (cdr exp))))
+         ((vector? exp)
+          (list vector-code (map pickle-aux (vector->list exp))))
+         (else
+          exp)))
+
+(define (pickle exp)
+    (pickle-aux exp))
 
 (define (mce-eval exp . env)
     (run (evalx (lookup-global 'result)
