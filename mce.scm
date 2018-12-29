@@ -513,8 +513,13 @@
 (table-set! global-table 'print print)
 (table-set! global-table '< <)
 (table-set! global-table '+ +)
+(table-set! global-table 'eq? eq?)
+(table-set! global-table '= =)
+(table-set! global-table 'procedure? procedure?)
 (table-set! global-table 'unmemoize unmemoize)
 (table-set! global-table 'pickle pickle)
+(table-set! global-table 'memoize memoize)
+; add mce-pickle and mce-unpickle
 
 (define kenvfn-table (make-eq-table))
 
@@ -541,6 +546,37 @@
                         entry
                         (begin (vector-set! entry i (f (vector-ref vec i)))
                                (loop (+ i 1)))))))))
+
+(define (reform exp)
+    (let ((n (car exp)))
+        (cond ((= n -1) (scan-aux (cadr exp) (caddr exp)))
+              ((= n -2) (sclis (cadr exp) (caddr exp)))
+              ((= n -3) (scseq (cadr exp) (caddr exp)))
+              (else (apply make-form (cons (car exp) (cdr exp)))))))
+
+(define (memoize-aux exp tab fn)
+    (cond ((pair? exp)
+           (cmap fn exp tab))
+          ((vector? exp)
+           (if (and (= (vector-length exp) 2)
+                    (equal? (vector-ref exp 0) 'MCE-MEMOIZE-REPLACED))
+               (let ((ref (table-ref tab exp)))
+                   (if ref
+                       (ref-value ref)
+                       (let* ((repexp (vector-ref exp 1))
+                              (r 'unspecified)
+                              (entry (table-set! tab exp
+                                  (memoize-lambda (lambda args (apply r args))
+                                                  repexp))))
+                           (set! r (reform (fn repexp)))
+                           r)))
+               (vector-cmap fn exp tab)))
+          (else exp)))
+
+(define (memoize exp)
+    (letrec ((tab (make-eq-table))
+             (fn (lambda (x) (memoize-aux x tab fn))))
+       (fn exp)))
 
 (define (unmemoize-aux exp tab fn)
     (cond ((pair? exp)
