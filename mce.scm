@@ -1,4 +1,6 @@
-(module expand (main main))
+(module expand
+    (library packrat)
+    (main main))
 
 (define (make-eq-table)
     (vector assq '()))
@@ -569,7 +571,7 @@
 (define pair-code    "g")
 (define vector-code  "h")
 
-(define (pickle-aux s)
+(define (pickle-aux exp)
    (cond ((null? exp)
           (list null-code))
          ((boolean? exp)
@@ -585,12 +587,14 @@
          ((pair? exp)
           (list pair-code (pickle-aux (car exp)) (pickle-aux (cdr exp))))
          ((vector? exp)
-          (list vector-code (map pickle-aux (vector->list exp))))
+          (list vector-code (pickle-aux (vector->list exp))))
          (else
           exp)))
 
 (define (pickle exp)
-    (pickle-aux exp))
+    (let ((s (open-output-string)))
+        (json-write (pickle-aux exp) s)
+        (get-output-string s)))
 
 (define (mce-eval exp . env)
     (run (evalx (lookup-global 'result)
