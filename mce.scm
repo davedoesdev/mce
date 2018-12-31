@@ -522,7 +522,9 @@
 (table-set! global-table 'result result)
 (table-set! global-table 'print print)
 (table-set! global-table '< <)
+(table-set! global-table '> >)
 (table-set! global-table '+ +)
+(table-set! global-table '* *)
 (table-set! global-table 'eq? eq?)
 (table-set! global-table '= =)
 (table-set! global-table 'procedure? procedure?)
@@ -532,6 +534,9 @@
 (table-set! global-table 'write write)
 (table-set! global-table 'newline newline)
 (table-set! global-table 'transfer transfer) 
+(table-set! global-table 'memv memv)
+(table-set! global-table 'car car)
+(table-set! global-table 'cdr cdr)
 ; add mce-pickle and mce-unpickle
 
 (define kenvfn-table (make-eq-table))
