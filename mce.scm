@@ -348,60 +348,58 @@
                            (make-scan-form exp ctenv send-value g)
                            (make-scan-form exp ctenv runtime-lookup exp))))))
           ((pair? exp)
-           (let ((op (car exp)))
-               (cond ((equal? op 'quote)
-                      (make-scan-form exp ctenv send-value (cadr exp)))
-                     ((equal? op 'if)
-                      (let ((scan0 (scan-aux (cadr exp) ctenv))
-                            (scan1 (scan-aux (caddr exp) ctenv))
-                            (scan2 (scan-aux (if (pair? (cdddr exp))
-                                                 (cadddr exp)
-                                                 '())
-                                             ctenv)))
-                          (make-scan-form exp ctenv if0 scan0 scan1 scan2)))
-                     ((equal? op 'lambda)
-                      (let ((params (cadr exp)))
-                          (if (improper? params)
-                              (let ((scanned
-                                     (scseq (cddr exp)
-                                            (extend-ctenv ctenv
-                                                          (->proper params)))))
-                                  (make-scan-form exp
-                                                  ctenv
-                                                  improper-lambda0
-                                                  params
-                                                  scanned))
-                              (let ((scanned
-                                     (scseq (cddr exp)
-                                            (extend-ctenv ctenv
-                                                          params))))
-                                  (make-scan-form exp
-                                                  ctenv
-                                                  lambda0
-                                                  params
-                                                  scanned)))))
-                     ((equal? op 'let/cc)
-                      (let* ((name (cadr exp))
-                             (scanned (scseq (cddr exp)
-                                             (extend-ctenv ctenv (list name)))))
-                          (make-scan-form exp ctenv let/cc0 name scanned)))
-                     ((equal? op 'set!)
-                      (let* ((name (cadr exp))
-                             (i (ctenv-index ctenv name))
-                             (scanned (scseq (cddr exp) ctenv)))
-                        (if i
-                            (make-scan-form exp ctenv define0 i scanned)
-                            (make-scan-form exp ctenv set0 name scanned))))
-                     ((or (equal? op 'define) (equal? op 'mce-define))
-                      (let* ((name (cadr exp))
-                             (i (putin-ctenv ctenv name))
-                             (scanned (scseq (cddr exp) ctenv)))
-                          (make-scan-form exp ctenv define0 i scanned)))
-                     ((equal? op 'begin)
-                      (scseq (cdr exp) ctenv))
-                     (else
-                      (let ((scanned (sclis exp ctenv)))
-                          (make-scan-form exp ctenv application0 scanned))))))
+           (case (car exp)
+               ((quote)
+                (make-scan-form exp ctenv send-value (cadr exp)))
+               ((if)
+                (let ((scan0 (scan-aux (cadr exp) ctenv))
+                      (scan1 (scan-aux (caddr exp) ctenv))
+                      (scan2 (scan-aux (if (pair? (cdddr exp)) (cadddr exp) '())
+                                       ctenv)))
+                    (make-scan-form exp ctenv if0 scan0 scan1 scan2)))
+               ((lambda)
+                (let ((params (cadr exp)))
+                    (if (improper? params)
+                        (let ((scanned
+                               (scseq (cddr exp)
+                                      (extend-ctenv ctenv
+                                                    (->proper params)))))
+                            (make-scan-form exp
+                                            ctenv
+                                            improper-lambda0
+                                            params
+                                            scanned))
+                        (let ((scanned
+                               (scseq (cddr exp)
+                                      (extend-ctenv ctenv
+                                                    params))))
+                            (make-scan-form exp
+                                            ctenv
+                                            lambda0
+                                            params
+                                            scanned)))))
+               ((let/cc)
+                (let* ((name (cadr exp))
+                       (scanned (scseq (cddr exp)
+                                       (extend-ctenv ctenv (list name)))))
+                    (make-scan-form exp ctenv let/cc0 name scanned)))
+               ((set!)
+                (let* ((name (cadr exp))
+                       (i (ctenv-index ctenv name))
+                       (scanned (scseq (cddr exp) ctenv)))
+                    (if i
+                        (make-scan-form exp ctenv define0 i scanned)
+                        (make-scan-form exp ctenv set0 name scanned))))
+               ((define mce-define)
+                (let* ((name (cadr exp))
+                       (i (putin-ctenv ctenv name))
+                       (scanned (scseq (cddr exp) ctenv)))
+                    (make-scan-form exp ctenv define0 i scanned)))
+               ((begin)
+                (scseq (cdr exp) ctenv))
+               (else
+                (let ((scanned (sclis exp ctenv)))
+                    (make-scan-form exp ctenv application0 scanned)))))
           (else
            (make-scan-form exp ctenv send-value exp))))
 
@@ -530,6 +528,7 @@
 (table-set! global-table 'procedure? procedure?)
 (table-set! global-table 'unmemoize unmemoize)
 (table-set! global-table 'pickle pickle)
+(table-set! global-table 'unpickle unpickle)
 (table-set! global-table 'memoize memoize)
 (table-set! global-table 'write write)
 (table-set! global-table 'newline newline)
@@ -537,7 +536,8 @@
 (table-set! global-table 'memv memv)
 (table-set! global-table 'car car)
 (table-set! global-table 'cdr cdr)
-; add mce-pickle and mce-unpickle
+(table-set! global-table 'set-car! set-car!)
+(table-set! global-table 'set-cdr! set-cdr!)
 
 (define kenvfn-table (make-eq-table))
 
@@ -568,11 +568,11 @@
                                (loop (+ i 1)))))))))
 
 (define (reform exp)
-    (let ((n (car exp)))
-        (cond ((= n -1) (scan-aux (cadr exp) (caddr exp)))
-              ((= n -2) (sclis (cadr exp) (caddr exp)))
-              ((= n -3) (scseq (cadr exp) (caddr exp)))
-              (else (apply make-form (cons (car exp) (cdr exp)))))))
+    (case (car exp)
+        ((-1) (scan-aux (cadr exp) (caddr exp)))
+        ((-2) (sclis (cadr exp) (caddr exp)))
+        ((-3) (scseq (cadr exp) (caddr exp)))
+        (else (apply make-form (cons (car exp) (cdr exp))))))
 
 (define (memoize-aux exp tab fn)
     (cond ((pair? exp)
@@ -648,9 +648,36 @@
           exp)))
 
 (define (pickle exp)
-    (let ((s (open-output-string)))
-        (json-write (pickle-aux exp) s)
-        (get-output-string s)))
+    (let ((port (open-output-string)))
+        (json-write (pickle-aux exp) port)
+        (get-output-string port)))
+
+(define (unpickle-aux exp)
+    (let ((code (car exp)))
+        (cond ((equal? code null-code)
+               '())
+              ((equal? code boolean-code)
+               (if (equal? (cadr exp) "t") #t #f))
+              ((equal? code number-code)
+               (cadr exp))
+              ((equal? code char-code)
+               (string-ref (cadr exp) 0))
+              ((equal? code string-code)
+               (cadr exp))
+              ((equal? code symbol-code)
+               (string->symbol (cadr exp)))
+              ((equal? code pair-code)
+               (cons (unpickle-aux (cadr exp)) (unpickle-aux (caddr exp))))
+              ((equal? code vector-code)
+               (list->vector (unpickle-aux (cadr exp))))
+              (else
+               exp))))
+
+(define (unpickle s)
+    (unpickle-aux (json-read (open-input-string s))))
+
+; what about cycles?
+; add mce-pickle and mce-unpickle
 
 (define (mce-eval exp . env)
     (run (evalx (lookup-global 'result)
