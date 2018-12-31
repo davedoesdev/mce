@@ -1,7 +1,7 @@
 (module expand (main main))
 
 (define (main argv)
-    (display (expand `(let ()
+    (write (expand `(let ()
 
 (define-syntax define
   (syntax-rules ()

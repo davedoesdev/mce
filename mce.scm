@@ -128,14 +128,14 @@
 (define (env-args-args env-args)
     (if (env-args? env-args) (cdddr env-args) env-args))
 
-(define (replacing? args)
+(define (yield-defn? args)
     (and (not (null? args)) (equal? (car args) 'MCE-YIELD-DEFINITION)))
 
 (define (get-procedure-defn proc)
     (proc 'MCE-YIELD-DEFINITION))
 
 (define (memoize-lambda proc defn)
-    (lambda args (if (replacing? args) defn (apply proc args))))
+    (lambda args (if (yield-defn? args) defn (apply proc args))))
 
 (define (improper? l)
     (cond ((null? l) #f)
@@ -464,9 +464,13 @@
 
 (define (handle-global-lambda args fn cf)
     (if (step-contn? args)
-        (send (step-contn-k args)
-              (let ((eaa (env-args-args (step-contn-args args))))
-                  (globalize (apply fn eaa) eaa cf)))
+        (let ((sck (step-contn-k args))
+              (sca (step-contn-args args)))
+            (if (transfer? sca)
+                (apply fn (make-step-contn sck (transfer-args sca)))
+                (send sck
+                      (let ((eaa (env-args-args sca)))
+                          (globalize (apply fn eaa) eaa cf)))))
         (let ((eaa (env-args-args args)))
             (globalize (apply fn eaa) eaa cf))))
 
@@ -488,6 +492,12 @@
     (if (table-ref kenvfn-table fn)
         (lambda args (handle-global-lambda-kenv args fn))
         (lambda args (handle-global-lambda args fn cf))))
+
+(define (transfer? exp) (and (pair? exp) (equal? (car exp) 'MCE-TRANSFER)))
+(define (transfer-args exp) (cdr exp))
+
+(define (transfer k env fn . args)
+    (apply fn (make-step-contn k (cons 'MCE-TRANSFER args))))
 
 (define (find-global sym)
     (let ((r (table-ref global-table sym)))
@@ -519,9 +529,14 @@
 (table-set! global-table 'unmemoize unmemoize)
 (table-set! global-table 'pickle pickle)
 (table-set! global-table 'memoize memoize)
+(table-set! global-table 'write write)
+(table-set! global-table 'newline newline)
+(table-set! global-table 'transfer transfer) 
 ; add mce-pickle and mce-unpickle
 
 (define kenvfn-table (make-eq-table))
+
+(table-set! kenvfn-table transfer #t)
 
 (define (cmap f l tab)
     (cond ((null? l) '())
@@ -559,7 +574,7 @@
            (cmap fn exp tab))
           ((vector? exp)
            (if (and (= (vector-length exp) 2)
-                    (equal? (vector-ref exp 0) 'MCE-MEMOIZE-REPLACED))
+                    (equal? (vector-ref exp 0) 'MCE-UNMEMOIZED))
                (let ((ref (table-ref tab exp)))
                    (if ref
                        (ref-value ref)
@@ -576,7 +591,7 @@
 (define (memoize exp)
     (letrec ((tab (make-eq-table))
              (fn (lambda (x) (memoize-aux x tab fn))))
-       (fn exp)))
+        (fn exp)))
 
 (define (unmemoize-aux exp tab fn)
     (cond ((pair? exp)
@@ -588,7 +603,7 @@
                (if ref
                    (ref-value ref)
                    (let ((entry (table-set! tab exp (make-vector 2))))
-                       (vector-set! entry 0 'MCE-MEMOIZE-REPLACED)
+                       (vector-set! entry 0 'MCE-UNMEMOIZED)
                        (vector-set! entry 1 (fn (get-procedure-defn exp)))
                        entry))))
           (else exp)))
