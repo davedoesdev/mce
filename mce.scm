@@ -406,7 +406,7 @@
 (define (scan exp)
     (scan-aux exp (make-global-ctenv)))
 
-(define (mce-step state)
+(define (step state)
     ((car state) (cdr state)))
 
 (define (result v)
@@ -424,7 +424,7 @@
     (let loop ((state state))
         (if (result? state)
             (result-val state)
-            (loop (mce-step state)))))
+            (loop (step state)))))
 
 (define (evalx k exp env)
     (let ((scanned (scan exp)))
@@ -526,10 +526,8 @@
 (table-set! global-table 'eq? eq?)
 (table-set! global-table '= =)
 (table-set! global-table 'procedure? procedure?)
-(table-set! global-table 'unmemoize unmemoize)
-(table-set! global-table 'pickle pickle)
-(table-set! global-table 'unpickle unpickle)
-(table-set! global-table 'memoize memoize)
+(table-set! global-table 'save mce-save)
+(table-set! global-table 'restore mce-restore)
 (table-set! global-table 'write write)
 (table-set! global-table 'newline newline)
 (table-set! global-table 'transfer transfer) 
@@ -543,24 +541,26 @@
 
 (table-set! kenvfn-table transfer #t)
 
-(define (cmap f l tab)
+(define (cmap f l tab set-entry!)
     (cond ((null? l) '())
           ((pair? l)
            (let ((ref (table-ref tab l)))
                (if ref
                    (ref-value ref)
-                   (let ((entry (table-set! tab l (cons '() '()))))
+                   (let ((entry (cons '() '())))
+                       (set-entry! tab l entry)
                        (set-car! entry (f (car l)))
-                       (set-cdr! entry (cmap f (cdr l) tab))
+                       (set-cdr! entry (cmap f (cdr l) tab set-entry!))
                        entry))))
           (else (f l))))
 
-(define (vector-cmap f vec tab)
+(define (vector-cmap f vec tab set-entry!)
     (let ((len (vector-length vec))
           (ref (table-ref tab vec)))
         (if ref
             (ref-value ref)
-            (let ((entry (table-set! tab vec (make-vector len))))
+            (let ((entry (make-vector len)))
+                (set-entry! tab vec entry)
                 (let loop ((i 0))
                     (if (= i len)
                         entry
@@ -576,7 +576,7 @@
 
 (define (memoize-aux exp tab fn)
     (cond ((pair? exp)
-           (cmap fn exp tab))
+           (cmap fn exp tab table-set!))
           ((vector? exp)
            (if (and (= (vector-length exp) 2)
                     (equal? (vector-ref exp 0) 'MCE-UNMEMOIZED))
@@ -590,7 +590,7 @@
                                                   repexp))))
                            (set! r (reform (fn repexp)))
                            r)))
-               (vector-cmap fn exp tab)))
+               (vector-cmap fn exp tab table-set!)))
           (else exp)))
 
 (define (memoize exp)
@@ -600,9 +600,9 @@
 
 (define (unmemoize-aux exp tab fn)
     (cond ((pair? exp)
-           (cmap fn exp tab))
+           (cmap fn exp tab table-set!))
           ((vector? exp)
-           (vector-cmap fn exp tab))
+           (vector-cmap fn exp tab table-set!))
           ((procedure? exp)
            (let ((ref (table-ref tab exp)))
                (if ref
@@ -616,6 +616,50 @@
 (define (unmemoize exp)
     (letrec ((tab (make-eq-table))
              (fn (lambda (x) (unmemoize-aux x tab fn))))
+        (fn exp)))
+
+(define (make-serialized n)
+    (vector 'MCE-SERIALIZED n))
+
+(define (serialized? exp)
+    (and (vector? exp)
+         (= (vector-length exp) 2)
+         (equal? (vector-ref exp 0) 'MCE-SERIALIZED)))
+
+(define (serialized-n exp)
+    (vector-ref exp 1))
+
+(define (serialize-aux exp tab counter fn set-entry!)
+    (cond ((pair? exp) (cmap fn exp tab set-entry!))
+          ((vector? exp) (vector-cmap fn exp tab set-entry!))
+          (else exp)))
+
+(define (serialize exp)
+    (letrec ((counter (list 0))
+             (tab (make-eq-table))
+             (set-entry!
+              (lambda (tab v entry)
+                  (table-set! tab v (make-serialized (car counter)))
+                  (set-car! counter (+ (car counter) 1))))
+             (fn (lambda (x) (serialize-aux x tab counter fn set-entry!))))
+        (fn exp)))
+
+(define (deserialize-aux exp tab counter fn set-entry!)
+    (cond ((pair? exp) (cmap fn exp tab set-entry!))
+          ((vector? exp)
+           (if (serialized? exp)
+               (ref-value (table-ref tab (serialized-n exp)))
+               (vector-cmap fn exp tab set-entry!)))
+          (else exp)))
+
+(define (deserialize exp)
+    (letrec ((counter (list 0))
+             (tab (make-eq-table))
+             (set-entry!
+              (lambda (tab v entry)
+                  (table-set! tab (car counter) entry)
+                  (set-car! counter (+ (car counter) 1))))
+             (fn (lambda (x) (deserialize-aux x tab counter fn set-entry!))))
         (fn exp)))
 
 (define null-code    "a")
@@ -676,8 +720,11 @@
 (define (unpickle s)
     (unpickle-aux (json-read (open-input-string s))))
 
-; what about cycles?
-; add mce-pickle and mce-unpickle
+(define (mce-save exp)
+    (pickle (serialize (unmemoize exp))))
+
+(define (mce-restore s)
+    (memoize (deserialize (unpickle s))))
 
 (define (mce-eval exp . env)
     (run (evalx (lookup-global 'result)
