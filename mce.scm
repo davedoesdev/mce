@@ -132,7 +132,7 @@
     (and (not (null? args)) (equal? (car args) 'MCE-YIELD-DEFINITION)))
 
 (define (get-procedure-defn proc)
-    (proc 'MCE-YIELD-DEFINITION))
+    (apply proc '(MCE-YIELD-DEFINITION)))
 
 (define (memoize-lambda proc defn)
     (lambda args (if (yield-defn? args) defn (apply proc args))))
