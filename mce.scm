@@ -297,35 +297,10 @@
          (f (memoize-lambda (apply (vector-ref forms n) (cons f2 args)) defn)))
         f))
 
-(define (make-scan-form exp ctenv n . args)
-    (letrec*
-        ((defn (list -1 exp ctenv))
-         (f2 (memoize-lambda (lambda args (apply f args)) defn))
-         (f (memoize-lambda (apply (vector-ref forms n) (cons f2 args)) defn)))
-        f))
-
-(define (make-sclis-form exp ctenv n . args)
-    (letrec*
-        ((defn (list -2 exp ctenv))
-         (f2 (memoize-lambda (lambda args (apply f args)) defn))
-         (f (memoize-lambda (apply (vector-ref forms n) (cons f2 args)) defn)))
-       f))
-
-(define (make-scseq-form exp ctenv n . args)
-    (letrec*
-        ((defn (list -3 exp ctenv))
-         (f2 (memoize-lambda (lambda args (apply f args)) defn))
-         (f (memoize-lambda (apply (vector-ref forms n) (cons f2 args)) defn)))
-        f))
-
 (define (sclis exp ctenv)
     (if (null? exp)
         (make-form send-value '())
-        (make-sclis-form exp
-                         ctenv
-                         sclis0
-                         (scan-aux (car exp) ctenv)
-                         (sclis (cdr exp) ctenv))))
+        (make-form sclis0 (scan-aux (car exp) ctenv) (sclis (cdr exp) ctenv))))
 
 (define (scseq exp ctenv)
     (if (null? exp)
@@ -333,31 +308,27 @@
         (let ((first (scan-aux (car exp) ctenv)))
             (if (null? (cdr exp))
                 first
-                (make-scseq-form exp
-                                 ctenv
-                                 scseq0
-                                 first
-                                 (scseq (cdr exp) ctenv))))))
+                (make-form scseq0 first (scseq (cdr exp) ctenv))))))
 
 (define (scan-aux exp ctenv)
     (cond ((symbol? exp)
            (let ((i (ctenv-index ctenv exp)))
                (if i
-                   (make-scan-form exp ctenv symbol-lookup i)
+                   (make-form symbol-lookup i)
                    (let ((g (lookup-global exp)))
                        (if g
-                           (make-scan-form exp ctenv send-value g)
-                           (make-scan-form exp ctenv runtime-lookup exp))))))
+                           (make-form send-value g)
+                           (make-form runtime-lookup exp))))))
           ((pair? exp)
            (case (car exp)
                ((quote)
-                (make-scan-form exp ctenv send-value (cadr exp)))
+                (make-form send-value (cadr exp)))
                ((if)
                 (let ((scan0 (scan-aux (cadr exp) ctenv))
                       (scan1 (scan-aux (caddr exp) ctenv))
                       (scan2 (scan-aux (if (pair? (cdddr exp)) (cadddr exp) '())
                                        ctenv)))
-                    (make-scan-form exp ctenv if0 scan0 scan1 scan2)))
+                    (make-form if0 scan0 scan1 scan2)))
                ((lambda)
                 (let ((params (cadr exp)))
                     (if (improper? params)
@@ -365,44 +336,36 @@
                                (scseq (cddr exp)
                                       (extend-ctenv ctenv
                                                     (->proper params)))))
-                            (make-scan-form exp
-                                            ctenv
-                                            improper-lambda0
-                                            params
-                                            scanned))
+                            (make-form improper-lambda0 params scanned))
                         (let ((scanned
                                (scseq (cddr exp)
                                       (extend-ctenv ctenv
                                                     params))))
-                            (make-scan-form exp
-                                            ctenv
-                                            lambda0
-                                            params
-                                            scanned)))))
+                            (make-form lambda0 params scanned)))))
                ((let/cc)
                 (let* ((name (cadr exp))
                        (scanned (scseq (cddr exp)
                                        (extend-ctenv ctenv (list name)))))
-                    (make-scan-form exp ctenv let/cc0 name scanned)))
+                    (make-form let/cc0 name scanned)))
                ((set!)
                 (let* ((name (cadr exp))
                        (i (ctenv-index ctenv name))
                        (scanned (scseq (cddr exp) ctenv)))
                     (if i
-                        (make-scan-form exp ctenv define0 i scanned)
-                        (make-scan-form exp ctenv set0 name scanned))))
+                        (make-form define0 i scanned)
+                        (make-form set0 name scanned))))
                ((define)
                 (let* ((name (cadr exp))
                        (i (putin-ctenv ctenv name))
                        (scanned (scseq (cddr exp) ctenv)))
-                    (make-scan-form exp ctenv define0 i scanned)))
+                    (make-form define0 i scanned)))
                ((begin)
                 (scseq (cdr exp) ctenv))
                (else
                 (let ((scanned (sclis exp ctenv)))
-                    (make-scan-form exp ctenv application0 scanned)))))
+                    (make-form application0 scanned)))))
           (else
-           (make-scan-form exp ctenv send-value exp))))
+           (make-form send-value exp))))
 
 (define (scan exp)
     (scan-aux exp (make-global-ctenv)))
@@ -571,13 +534,6 @@
                         (begin (vector-set! entry i (f (vector-ref vec i)))
                                (loop (+ i 1)))))))))
 
-(define (reform exp)
-    (case (car exp)
-        ((-1) (scan-aux (cadr exp) (caddr exp)))
-        ((-2) (sclis (cadr exp) (caddr exp)))
-        ((-3) (scseq (cadr exp) (caddr exp)))
-        (else (apply make-form (cons (car exp) (cdr exp))))))
-
 (define (memoize-aux exp tab fn)
     (cond ((pair? exp)
            (cmap fn exp tab table-set!))
@@ -592,7 +548,7 @@
                               (entry (table-set! tab exp
                                   (memoize-lambda (lambda args (apply r args))
                                                   repexp))))
-                           (set! r (reform (fn repexp)))
+                           (set! r (apply make-form (fn repexp)))
                            r)))
                (vector-cmap fn exp tab table-set!)))
           (else exp)))
@@ -738,7 +694,6 @@
 (define (main argv)
     (mce-eval (read)))
 
-; remove scan forms
 ; remove env args
 ; remove dynamic lookup? what if want to add new global later?
 ; why do we extend env with syms but not setenv?
