@@ -3,9 +3,27 @@
 (define (main argv)
     (write (expand `(let ()
 
-(define-syntax define
+(define-syntax call/cc
   (syntax-rules ()
-    ((_ arg ...) (mce-define arg ...))))
+    ((call/cc f)
+     (let/cc k (f k)))))
+
+(define-syntax call-with-current-continuation
+  (syntax-rules ()
+    ((call-with-current-continuation f)
+     (call/cc f))))
+
+; Simple version of values and call-with-values for the common case
+
+(define-syntax values
+  (syntax-rules ()
+    ((values v ...)
+     (list v ...))))
+
+(define-syntax call-with-values
+  (syntax-rules ()
+    ((call-with-values producer consumer)
+     (apply consumer (producer)))))
 
 ; R5RS Section 7.3
 ; https://schemers.org/Documents/Standards/R5RS/HTML/
@@ -126,6 +144,80 @@
        ...
        (let () body1 body2 ...)))))
 
+(define-syntax let-values
+  (syntax-rules ()
+    ((let-values (binding ...) body1 body2 ...)
+     (let-values-helper1
+       ()
+       (binding ...)
+       body1 body2 ...))))
+
+(define-syntax let-values-helper1
+  ;; map over the bindings
+  (syntax-rules ()
+    ((let-values
+       ((id temp) ...)
+       ()
+       body1 body2 ...)
+     (let ((id temp) ...) body1 body2 ...))
+    ((let-values
+       assocs
+       ((formals1 expr1) (formals2 expr2) ...)
+       body1 body2 ...)
+     (let-values-helper2
+       formals1
+       ()
+       expr1
+       assocs
+       ((formals2 expr2) ...)
+       body1 body2 ...))))
+
+(define-syntax let-values-helper2
+  ;; create temporaries for the formals
+  (syntax-rules ()
+    ((let-values-helper2
+       ()
+       temp-formals
+       expr1
+       assocs
+       bindings
+       body1 body2 ...)
+     (call-with-values
+       (lambda () expr1)
+       (lambda temp-formals
+         (let-values-helper1
+           assocs
+           bindings
+           body1 body2 ...))))
+    ((let-values-helper2
+       (first . rest)
+       (temp ...)
+       expr1
+       (assoc ...)
+       bindings
+       body1 body2 ...)
+     (let-values-helper2
+       rest
+       (temp ... newtemp)
+       expr1
+       (assoc ... (first newtemp))
+       bindings
+       body1 body2 ...))
+    ((let-values-helper2
+       rest-formal
+       (temp ...)
+       expr1
+       (assoc ...)
+       bindings
+       body1 body2 ...)
+     (call-with-values
+       (lambda () expr1)
+       (lambda (temp ... . newtemp)
+         (let-values-helper1
+           (assoc ... (rest-formal newtemp))
+           bindings
+           body1 body2 ...))))))
+
 (define-syntax let
   (syntax-rules ()
     ((let ((name val) ...) body1 body2 ...)
@@ -136,5 +228,15 @@
                       body1 body2 ...)))
         tag)
       val ...))))
+
+(define-syntax let*-values
+  (syntax-rules ()
+    ((let*-values () body1 body2 ...)
+     (let () body1 body2 ...))
+    ((let*-values (binding1 binding2 ...)
+       body1 body2 ...)
+     (let-values (binding1)
+       (let*-values (binding2 ...)
+         body1 body2 ...)))))
 
 ,(read)))))

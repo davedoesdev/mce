@@ -69,8 +69,9 @@
 (define (improper-extend-env env syms values)
     (let loop ((syms syms) (values values) (done-syms '()) (done-values '()))
         (if (symbol? syms)
-            (cons (reverse (cons syms done-syms))
-                  (list->vector (append (reverse done-values) values)))
+            (cons (cons (reverse (cons syms done-syms))
+                        (list->vector (reverse (cons values done-values))))
+                  env)
             (if (and (not (null? syms)) (not (null? values)))
                 (loop (cdr syms)
                       (cdr values)
@@ -390,7 +391,7 @@
                     (if i
                         (make-scan-form exp ctenv define0 i scanned)
                         (make-scan-form exp ctenv set0 name scanned))))
-               ((define mce-define)
+               ((define)
                 (let* ((name (cadr exp))
                        (i (putin-ctenv ctenv name))
                        (scanned (scseq (cddr exp) ctenv)))
@@ -536,10 +537,13 @@
 (table-set! global-table 'cdr cdr)
 (table-set! global-table 'set-car! set-car!)
 (table-set! global-table 'set-cdr! set-cdr!)
+(table-set! global-table 'list list)
+(table-set! global-table 'apply applyx)
 
 (define kenvfn-table (make-eq-table))
 
 (table-set! kenvfn-table transfer #t)
+(table-set! kenvfn-table applyx #t)
 
 (define (cmap f l tab set-entry!)
     (cond ((null? l) '())
@@ -733,3 +737,9 @@
 
 (define (main argv)
     (mce-eval (read)))
+
+; remove scan forms
+; remove env args
+; remove dynamic lookup? what if want to add new global later?
+; why do we extend env with syms but not setenv?
+
