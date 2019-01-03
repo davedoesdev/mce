@@ -115,19 +115,16 @@
 
 (define (make-global-env) (list (cons '() '#())))
 
-(define (make-env-args env supenv args)
-    (cons 'MCE-ENV-ARGS (cons supenv (cons env args))))
+(define (make-env-args env args)
+    (cons 'MCE-ENV-ARGS (cons env args)))
 
 (define (env-args? exp) (and (pair? exp) (equal? (car exp) 'MCE-ENV-ARGS)))
 
-(define (env-args-supenv env-args)
-    (if (env-args? env-args) (cadr env-args) #f))
-
 (define (env-args-env env-args)
-    (if (env-args? env-args) (caddr env-args) (make-global-env)))
+    (if (env-args? env-args) (cadr env-args) (make-global-env)))
 
 (define (env-args-args env-args)
-    (if (env-args? env-args) (cdddr env-args) env-args))
+    (if (env-args? env-args) (cddr env-args) env-args))
 
 (define (yield-defn? args)
     (and (not (null? args)) (equal? (car args) 'MCE-YIELD-DEFINITION)))
@@ -395,19 +392,15 @@
         (send (make-form evalx-initial k env scanned) 'unspecified)))
 
 (define (applyx k env fn args)
-    (apply fn (make-step-contn k (make-env-args env #f args))))
+    (apply fn (make-step-contn k (make-env-args env args))))
 
 (define (handle-lambda args params fn env extend-env)
     (if (step-contn? args)
-        (let* ((sca (step-contn-args args))
-               (eas (env-args-supenv sca))
-               (env (if eas (append env eas) env)))
+        (let ((sca (step-contn-args args)))
             (fn (step-contn-k args)
                 (extend-env env params (env-args-args sca))))
-        (let* ((eas (env-args-supenv args))
-               (env (if eas (append env eas) env)))
-            (run (fn (lookup-global 'result)
-                 (extend-env env params (env-args-args args)))))))
+        (run (fn (lookup-global 'result)
+                 (extend-env env params (env-args-args args))))))
 
 (define (handle-contn-lambda args k)
     (if (step-contn? args)
@@ -438,17 +431,13 @@
 
 (define (handle-global-lambda-kenv args fn)
     (if (step-contn? args)
-        (let* ((sca (step-contn-args args))
-               (eas (env-args-supenv sca))
-               (eae (env-args-env sca))
-               (eaa (env-args-args sca))
-               (env (if eas (append eae eas) eae)))
-            (apply fn (cons (step-contn-k args) (cons env eaa))))
-        (let* ((eas (env-args-supenv args))
-               (eae (env-args-env args))
-               (eaa (env-args-args args))
-               (env (if eas (append eae eas) eae)))
-            (apply fn (cons env eaa)))))
+        (let ((sca (step-contn-args args)))
+            (apply fn (cons (step-contn-k args)
+                            (cons (env-args-env sca)
+                                  (env-args-args sca)))))
+        (run (apply fn (cons (lookup-global 'result)
+                             (cons (env-args-env args)
+                                   (env-args-args args)))))))
 
 (define (wrap-global-lambda fn cf)
     (if (table-ref kenvfn-table fn)
@@ -694,7 +683,6 @@
 (define (main argv)
     (mce-eval (read)))
 
-; remove env args
 ; remove dynamic lookup? what if want to add new global later?
 ; why do we extend env with syms but not setenv?
 
