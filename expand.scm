@@ -3,6 +3,15 @@
 (define (main argv)
     (write (expand `(let ()
 
+(define-syntax define
+  (syntax-rules ()
+    ((define (f params ...) body ...)
+     (define f (lambda (params ...) body ...)))
+    ((define (f params . rest) body ...)
+     (define f (lambda (params . rest) body ...)))
+    ((define var val ...)
+     (mce-define var val ...))))
+
 (define-syntax call/cc
   (syntax-rules ()
     ((call/cc f)

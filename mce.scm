@@ -351,7 +351,7 @@
                     (if i
                         (make-form define0 i scanned)
                         (make-form set0 name scanned))))
-               ((define)
+               ((mce-define)
                 (let* ((name (cadr exp))
                        (i (putin-ctenv ctenv name))
                        (scanned (scseq (cddr exp) ctenv)))
@@ -491,6 +491,7 @@
 (table-set! global-table 'set-cdr! set-cdr!)
 (table-set! global-table 'list list)
 (table-set! global-table 'apply applyx)
+(table-set! global-table 'unmemoize unmemoize)
 
 (define kenvfn-table (make-eq-table))
 
@@ -683,6 +684,6 @@
 (define (main argv)
     (mce-eval (read)))
 
+; why do we extend env with syms but not setenv (define)?
 ; remove dynamic lookup? what if want to add new global later?
-; why do we extend env with syms but not setenv?
 
