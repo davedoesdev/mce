@@ -54,13 +54,26 @@
                        (loop (+ i 1)))))
         newvec))
 
-(define (ctenv-setvar i val env)
+(define (extend-list l index val)
+    (let ((newl (make-list (+ index 1))))
+        (let loop ((src l) (dst newl))
+            (if (null? src)
+                (set-car! dst val)
+                (begin (set-car! dst (car src))
+                       (loop (cdr src) (cdr dst)))))
+        newl))
+
+(define (ctenv-setvar name i val env)
     (let* ((senv (list-ref env (car i)))
-           (vec (cdr senv))
+           (syms (car senv))
+           (vals (cdr senv))
            (index (cdr i)))
-        (if (< index (vector-length vec))
-            (vector-set! vec index val)
-            (set-cdr! senv (extend-vector vec index val))))
+        (if (< index (vector-length vals))
+            (vector-set! vals index val)
+            (set-cdr! senv (extend-vector vals index val)))
+        (if (< index (length syms))
+            (list-set! syms index name)
+            (set-car! senv (extend-list syms index name))))
     val)
 
 (define (extend-env env syms values)
@@ -253,14 +266,14 @@
             (handle-contn-lambda args k))))
 
 (define-form define0
-    (lambda (this i scanned)
+    (lambda (this name i scanned)
         (lambda (k env)
-            (scanned (make-form define1 k env i) env))))
+            (scanned (make-form define1 k env name i) env))))
 
 (define-form define1
-    (lambda (this k env i)
+    (lambda (this k env name i)
         (lambda (v)
-            (send k (ctenv-setvar i v env)))))
+            (send k (ctenv-setvar name i v env)))))
 
 (define-form set0
     (lambda (this name scanned)
@@ -349,13 +362,13 @@
                        (i (ctenv-index ctenv name))
                        (scanned (scseq (cddr exp) ctenv)))
                     (if i
-                        (make-form define0 i scanned)
+                        (make-form define0 name i scanned)
                         (make-form set0 name scanned))))
                ((mce-define)
                 (let* ((name (cadr exp))
                        (i (putin-ctenv ctenv name))
                        (scanned (scseq (cddr exp) ctenv)))
-                    (make-form define0 i scanned)))
+                    (make-form define0 name i scanned)))
                ((begin)
                 (scseq (cdr exp) ctenv))
                (else
@@ -683,7 +696,3 @@
 
 (define (main argv)
     (mce-eval (read)))
-
-; why do we extend env with syms but not setenv (define)?
-; remove dynamic lookup? what if want to add new global later?
-
