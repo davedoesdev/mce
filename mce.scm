@@ -483,14 +483,20 @@
     (for-each display args)
     (newline))
 
+(define (eprint . args)
+    (for-each (lambda (v) (display v (current-error-port))) args)
+    (newline (current-error-port)))
+
 (table-set! global-table 'result result)
 (table-set! global-table 'print print)
+(table-set! global-table 'eprint eprint)
 (table-set! global-table '< <)
 (table-set! global-table '> >)
 (table-set! global-table '+ +)
 (table-set! global-table '* *)
 (table-set! global-table 'eq? eq?)
 (table-set! global-table '= =)
+(table-set! global-table 'not not)
 (table-set! global-table 'procedure? procedure?)
 (table-set! global-table 'save mce-save)
 (table-set! global-table 'restore mce-restore)
@@ -505,6 +511,7 @@
 (table-set! global-table 'list list)
 (table-set! global-table 'apply applyx)
 (table-set! global-table 'unmemoize unmemoize)
+(table-set! global-table 'getpid getpid)
 
 (define kenvfn-table (make-eq-table))
 
@@ -695,4 +702,7 @@
                 (if (null? env) (make-global-env) (car env)))))
 
 (define (main argv)
-    (mce-eval (read)))
+    (let ((v (read)))
+        (if (string? v)
+            ((mce-restore v))
+            (mce-eval v))))
