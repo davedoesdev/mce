@@ -704,5 +704,5 @@
 (define (main argv)
     (let ((v (read)))
         (if (string? v)
-            ((mce-restore v))
+            (apply (mce-restore v) '())
             (mce-eval v))))

@@ -8,3 +8,6 @@ test-loop: test-loop.scm
 
 test-state: test-state.scm
 	./expand < $^ | ./mce
+
+clean:
+	rm -f mce expand *.o
