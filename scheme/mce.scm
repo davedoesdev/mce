@@ -326,7 +326,7 @@
                (if i
                    (make-form symbol-lookup i)
                    (let ((g (lookup-global exp)))
-                       (if g
+                       (if (procedure? g)
                            (make-form send-value g)
                            (make-form runtime-lookup exp))))))
           ((pair? exp)
@@ -696,13 +696,16 @@
 (define (mce-restore s)
     (memoize (deserialize (unpickle s))))
 
-(define (mce-eval exp . env)
-    (run (evalx (lookup-global 'result)
-                exp
-                (if (null? env) (make-global-env) (car env)))))
+(define (mce-eval exp)
+    (evalx (lookup-global 'result) exp (make-global-env)))
+
+(define (mce-run exp . env)
+    (run (mce-eval exp)))
 
 (define (main argv)
     (let ((v (read)))
-        (if (string? v)
-            (apply (mce-restore v) '())
-            (mce-eval v))))
+        (if (string-suffix? "scan" (car argv))
+            (write (mce-save (mce-eval v)))
+            (if (string? v)
+                (apply (mce-restore v) '())
+                (mce-run v)))))

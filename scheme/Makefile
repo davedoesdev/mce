@@ -1,7 +1,10 @@
-all: mce expand
+all: mce expand scan
 
 %: %.scm
 	bigloo -o $@ $^
+
+scan: mce
+	ln -s $^ $@
 
 test-loop: test-loop.scm
 	./expand < $^ | ./mce
