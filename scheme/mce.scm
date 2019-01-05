@@ -109,7 +109,7 @@
 (define (setvar sym value env)
     (let loop1 ((env env))
         (if (null? env)
-            (string-append "setvar: symbol not found: " (symbol->string sym))
+            (error "setvar" "symbol not found" sym)
             (let* ((values (cdar env))
                    (len (vector-length values)))
                 (let loop2 ((syms (caar env)) (i 0))
@@ -325,7 +325,7 @@
            (let ((i (ctenv-index ctenv exp)))
                (if i
                    (make-form symbol-lookup i)
-                   (let ((g (lookup-global exp)))
+                   (let ((g (lookup-global exp #f)))
                        (if (procedure? g)
                            (make-form send-value g)
                            (make-form runtime-lookup exp))))))
@@ -463,14 +463,16 @@
 (define (transfer k env fn . args)
     (apply fn (make-step-contn k (cons 'MCE-TRANSFER args))))
 
-(define (find-global sym)
+(define (find-global sym #!optional (err #t))
     (let ((r (table-ref global-table sym)))
         (if r
             (ref-value r)
-            (string-append "lookup: symbol not found: " (symbol->string sym)))))
+            (if err
+                (error "lookup" "symbol not found" sym)
+                r))))
 
-(define (lookup-global sym)
-    (let ((r (find-global sym)))
+(define (lookup-global sym #!optional (err #t))
+    (let ((r (find-global sym err)))
         (if (procedure? r)
             (letrec*
                 ((defn (list global-lambda sym))

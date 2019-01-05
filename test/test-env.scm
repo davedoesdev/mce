@@ -2,6 +2,5 @@
     (define b 2)
     (set! b 3)
     (set! a 5)
-    (print (set! c 4))
-    (print a b c)
+    (print a b)
     (print (unmemoize (lambda () '()))))
