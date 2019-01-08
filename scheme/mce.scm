@@ -601,7 +601,7 @@
 (define (serialized-n exp)
     (vector-ref exp 1))
 
-(define (serialize-aux exp tab counter fn set-entry!)
+(define (serialize-aux exp tab fn set-entry!)
     (cond ((pair? exp) (cmap fn exp tab set-entry!))
           ((vector? exp) (vector-cmap fn exp tab set-entry!))
           (else exp)))
@@ -613,10 +613,10 @@
               (lambda (tab v entry)
                   (table-set! tab v (make-serialized (car counter)))
                   (set-car! counter (+ (car counter) 1))))
-             (fn (lambda (x) (serialize-aux x tab counter fn set-entry!))))
+             (fn (lambda (x) (serialize-aux x tab fn set-entry!))))
         (fn exp)))
 
-(define (deserialize-aux exp tab counter fn set-entry!)
+(define (deserialize-aux exp tab fn set-entry!)
     (cond ((pair? exp) (cmap fn exp tab set-entry!))
           ((vector? exp)
            (if (serialized? exp)
@@ -631,7 +631,7 @@
               (lambda (tab v entry)
                   (table-set! tab (car counter) entry)
                   (set-car! counter (+ (car counter) 1))))
-             (fn (lambda (x) (deserialize-aux x tab counter fn set-entry!))))
+             (fn (lambda (x) (deserialize-aux x tab fn set-entry!))))
         (fn exp)))
 
 (define null-code    "a")
