@@ -599,13 +599,12 @@
 (define (make-serialized n)
     (vector 'MCE-SERIALIZED n))
 
-(define (serialized? exp)
-    (and (vector? exp)
-         (= (vector-length exp) 2)
-         (equal? (vector-ref exp 0) 'MCE-SERIALIZED)))
+(define (serialized? v)
+    (and (= (vector-length v) 2)
+         (equal? (vector-ref v 0) 'MCE-SERIALIZED)))
 
-(define (serialized-n exp)
-    (vector-ref exp 1))
+(define (serialized-n v)
+    (vector-ref v 1))
 
 (define (serialize-aux exp tab fn set-entry!)
     (cond ((pair? exp) (cmap fn exp tab set-entry!))
