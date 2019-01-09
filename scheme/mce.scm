@@ -546,16 +546,22 @@
                         (begin (vector-set! entry i (f (vector-ref vec i)))
                                (loop (+ i 1)))))))))
 
+(define (unmemoized? exp)
+    (and (= (vector-length exp) 2)
+         (equal? (vector-ref exp 0) 'MCE-UNMEMOIZED)))
+
+(define (unmemoized-repexp exp)
+    (vector-ref exp 1))
+
 (define (memoize-aux exp tab fn)
     (cond ((pair? exp)
            (cmap fn exp tab table-set!))
           ((vector? exp)
-           (if (and (= (vector-length exp) 2)
-                    (equal? (vector-ref exp 0) 'MCE-UNMEMOIZED))
+           (if (unmemoized? exp)
                (let ((ref (table-ref tab exp)))
                    (if ref
                        (ref-value ref)
-                       (let* ((repexp (vector-ref exp 1))
+                       (let* ((repexp (unmemoized-repexp exp))
                               (r 'unspecified)
                               (entry (table-set! tab exp
                                   (memoize-lambda (lambda args (apply r args))
