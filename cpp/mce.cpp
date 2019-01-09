@@ -112,7 +112,6 @@ bool is_yield_defn(std::shared_ptr<any> args) {
     if (args->type() != typeid(std::shared_ptr<pair>)) {
         return false;
     }
-
     auto p = any_cast<std::shared_ptr<pair>>(*args);
     return (p->first->type() == typeid(symbol)) &&
            (any_cast<symbol>(*p->first) == "MCE-YIELD-DEFINITION");
@@ -152,6 +151,12 @@ std::shared_ptr<any> make_form(std::shared_ptr<any> n,
 std::shared_ptr<any> make_form(std::shared_ptr<any> args) {
     auto p = any_cast<std::shared_ptr<pair>>(*args);
     return make_form(p->first, p->second);
+}
+
+bool is_unmemoized(std::shared_ptr<vector> v) {
+    return (v->size() == 2) &&
+           ((*v)[0]->type() == typeid(symbol)) &&
+           (any_cast<symbol>(*(*v)[0]) == "MCE-UNMEMOIZED");
 }
 
 std::shared_ptr<any> memoize_aux(std::shared_ptr<any> exp,

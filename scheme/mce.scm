@@ -546,12 +546,12 @@
                         (begin (vector-set! entry i (f (vector-ref vec i)))
                                (loop (+ i 1)))))))))
 
-(define (unmemoized? exp)
-    (and (= (vector-length exp) 2)
-         (equal? (vector-ref exp 0) 'MCE-UNMEMOIZED)))
+(define (unmemoized? v)
+    (and (= (vector-length v) 2)
+         (equal? (vector-ref v 0) 'MCE-UNMEMOIZED)))
 
-(define (unmemoized-repexp exp)
-    (vector-ref exp 1))
+(define (unmemoized-repexp v)
+    (vector-ref v 1))
 
 (define (memoize-aux exp tab fn)
     (cond ((pair? exp)
