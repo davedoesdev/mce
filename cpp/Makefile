@@ -1,7 +1,7 @@
 all: mce
 
 %: %.cpp
-	$(CXX) -o $@ $^
+	$(CXX) -g -o $@ $^
 
 clean:
 	rm -f mce
