@@ -90,8 +90,9 @@
                       (cdr values)
                       (cons (car syms) done-syms)
                       (cons (car values) done-values))
-                (cons (reverse done-syms)
-                      (list->vector (reverse done-values)))))))
+                (cons (cons (reverse done-syms)
+                            (list->vector (reverse done-values)))
+                      env)))))
 
 (define (lookup sym env)
     (let loop1 ((env env))
