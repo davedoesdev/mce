@@ -181,6 +181,65 @@ std::shared_ptr<any> ctenv_lookup(std::shared_ptr<any> i,
     return (*v)[second];
 }
 
+std::shared_ptr<any> ctenv_setvar(std::shared_ptr<any> name,
+                                  std::shared_ptr<any> i,
+                                  std::shared_ptr<any> val,
+                                  std::shared_ptr<any> env) {
+    auto ip = any_cast<std::shared_ptr<pair>>(*i);
+    auto first = any_cast<double>(*ip->first);
+    auto second = any_cast<double>(*ip->second);
+    auto bindings = any_cast<std::shared_ptr<pair>>(*list_ref(env, first));
+    auto v = any_cast<std::shared_ptr<vector>>(*bindings->second);
+
+    if (second >= v->size()) {
+        v->resize(second + 1, nil);
+    }
+    (*v)[second] = val;
+
+    if (bindings->first->empty()) {
+        bindings->first = cons(nil, nil);
+    }
+    auto p = any_cast<std::shared_ptr<pair>>(*bindings->first);
+    while (second > 0) {
+        if (p->second->empty()) {
+            p->second = cons(nil, nil);
+        }
+        p = any_cast<std::shared_ptr<pair>>(*p->second);
+        --second;
+    }
+    p->first = name;
+
+    return val;
+}
+
+std::shared_ptr<any> setvar(std::shared_ptr<any> sym,
+                            std::shared_ptr<any> value,
+                            std::shared_ptr<any> env) {
+    auto name = any_cast<std::shared_ptr<symbol>>(*sym);
+
+    while (!env->empty()) {
+        auto ep = any_cast<std::shared_ptr<pair>>(*env);
+        auto bindings = any_cast<std::shared_ptr<pair>>(*ep->first);
+        auto values = any_cast<std::shared_ptr<vector>>(*bindings->second);
+        auto syms = bindings->first;
+        size_t i = 0;
+
+        while (!syms->empty() && (i < values->size())) {
+            auto sp = any_cast<std::shared_ptr<pair>>(*syms);
+            if (*any_cast<std::shared_ptr<symbol>>(*sp->first) == *name) {
+                (*values)[i] = value;
+                return value;
+            }
+            syms = sp->second;
+            ++i;
+        }
+
+        env = ep->second;
+    }
+
+    throw std::range_error(*name);
+}
+
 std::shared_ptr<any> symbol_lookup(std::shared_ptr<any> args) {
     auto i = list_ref(args, 1);
     return std::make_shared<any>(lambda(
@@ -506,6 +565,10 @@ std::shared_ptr<any> improper_lambda0(std::shared_ptr<any> args);
 std::shared_ptr<any> improper_lambda1(std::shared_ptr<any> args);
 std::shared_ptr<any> letcc0(std::shared_ptr<any> args);
 std::shared_ptr<any> letcc1(std::shared_ptr<any> args);
+std::shared_ptr<any> define0(std::shared_ptr<any> args);
+std::shared_ptr<any> define1(std::shared_ptr<any> args);
+std::shared_ptr<any> set0(std::shared_ptr<any> args);
+std::shared_ptr<any> set1(std::shared_ptr<any> args);
 
 #define define_forms(...) \
 std::vector<lambda> forms { \
@@ -533,7 +596,11 @@ define_forms(
     improper_lambda0,
     improper_lambda1,
     letcc0,
-    letcc1
+    letcc1,
+    define0,
+    define1,
+    set0,
+    set1
 )
 
 std::shared_ptr<any> make_form(std::shared_ptr<any> n,
@@ -761,6 +828,59 @@ std::shared_ptr<any> letcc0(std::shared_ptr<any> args) {
                           nil)));
         }));
 }
+
+std::shared_ptr<any> define1(std::shared_ptr<any> args) {
+    auto k = list_ref(args, 1);
+    auto env = list_ref(args, 2);
+    auto name = list_ref(args, 3);
+    auto i = list_ref(args, 4);
+    return std::make_shared<any>(lambda([k, env, name, i]
+        (std::shared_ptr<any> args) -> std::shared_ptr<any> {
+            auto v = list_ref(args, 0);
+            return send(k, ctenv_setvar(name, i, v, env));
+        }));
+}
+
+std::shared_ptr<any> define0(std::shared_ptr<any> args) {
+    auto name = list_ref(args, 1);
+    auto i = list_ref(args, 2);
+    auto scanned = list_ref(args, 3);
+    return std::make_shared<any>(lambda([name, i, scanned]
+        (std::shared_ptr<any> args) -> std::shared_ptr<any> {
+            auto k = list_ref(args, 0);
+            auto env = list_ref(args, 1);
+            return any_cast<lambda>(*scanned)(
+                cons(make_form(forms::define1,
+                               cons(k, cons(env, cons(name, cons(i, nil))))),
+                     cons(env, nil)));
+        }));
+}
+
+std::shared_ptr<any> set1(std::shared_ptr<any> args) {
+    auto k = list_ref(args, 1);
+    auto env = list_ref(args, 2);
+    auto name = list_ref(args, 3);
+    return std::make_shared<any>(lambda([k, env, name]
+        (std::shared_ptr<any> args) -> std::shared_ptr<any> {
+            auto v = list_ref(args, 0);
+            return send(k, setvar(name, v, env));
+        }));
+}
+
+std::shared_ptr<any> set0(std::shared_ptr<any> args) {
+    auto name = list_ref(args, 1);
+    auto scanned = list_ref(args, 2);
+    return std::make_shared<any>(lambda([name, scanned]
+        (std::shared_ptr<any> args) -> std::shared_ptr<any> {
+            auto k = list_ref(args, 0);
+            auto env = list_ref(args, 1);
+            return any_cast<lambda>(*scanned)(
+                cons(make_form(forms::set1,
+                               cons(k, cons(env, cons(name, nil)))),
+                     cons(env, nil)));
+        }));
+}
+
 
 bool is_unmemoized(std::shared_ptr<vector> v) {
     return (v->size() == 2) &&
