@@ -426,7 +426,7 @@ std::shared_ptr<any> handle_global_lambda_kenv(std::shared_ptr<any> args,
 
 std::shared_ptr<any> wrap_global_lambda(std::shared_ptr<any> fn,
                                         std::shared_ptr<any> cf) {
-    const lambda l = any_cast<lambda>(fn);
+    const lambda l = any_cast<lambda>(*fn);
     auto p = l.target<function*>();
 
     if (kenvfn_table.find(*p) != kenvfn_table.end()) {
