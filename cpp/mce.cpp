@@ -332,6 +332,13 @@ std::shared_ptr<any> env_args_args(std::shared_ptr<any> args) {
     return is_env_args(args) ? list_rest(args, 1) : args;
 }
 
+std::shared_ptr<any> applyx(std::shared_ptr<any> k,
+                            std::shared_ptr<any> env,
+                            std::shared_ptr<any> fn,
+                            std::shared_ptr<any> args) {
+    return any_cast<lambda>(*fn)(make_step_contn(k, make_env_args(env, args)));
+}
+
 std::shared_ptr<any> result(std::shared_ptr<any> exp) {
     auto a = std::make_shared<any>(std::make_shared<vector>());
     auto v = any_cast<std::shared_ptr<vector>>(*a);
@@ -552,6 +559,16 @@ std::shared_ptr<any> global_lambda(std::shared_ptr<any> args) {
     return wrap_global_lambda(find_global(*defn), self);
 }
 
+std::shared_ptr<any> evalx_initial(std::shared_ptr<any> args) {
+    auto k = list_ref(args, 1);
+    auto env = list_ref(args, 2);
+    auto scanned = list_ref(args, 3);
+    return std::make_shared<any>(lambda([k, env, scanned]
+        (std::shared_ptr<any> args) -> std::shared_ptr<any> {
+            return any_cast<lambda>(*scanned)(cons(k, cons(env, nil)));
+        }));
+}
+
 std::shared_ptr<any> if0(std::shared_ptr<any> args);
 std::shared_ptr<any> if1(std::shared_ptr<any> args);
 std::shared_ptr<any> sclis0(std::shared_ptr<any> args);
@@ -569,6 +586,8 @@ std::shared_ptr<any> define0(std::shared_ptr<any> args);
 std::shared_ptr<any> define1(std::shared_ptr<any> args);
 std::shared_ptr<any> set0(std::shared_ptr<any> args);
 std::shared_ptr<any> set1(std::shared_ptr<any> args);
+std::shared_ptr<any> application0(std::shared_ptr<any> args);
+std::shared_ptr<any> application1(std::shared_ptr<any> args);
 
 #define define_forms(...) \
 std::vector<lambda> forms { \
@@ -600,7 +619,10 @@ define_forms(
     define0,
     define1,
     set0,
-    set1
+    set1,
+    application0,
+    application1,
+    evalx_initial
 )
 
 std::shared_ptr<any> make_form(std::shared_ptr<any> n,
@@ -881,6 +903,27 @@ std::shared_ptr<any> set0(std::shared_ptr<any> args) {
         }));
 }
 
+std::shared_ptr<any> application1(std::shared_ptr<any> args) {
+    auto k = list_ref(args, 1);
+    auto env = list_ref(args, 2);
+    return std::make_shared<any>(lambda([k, env]
+        (std::shared_ptr<any> args) -> std::shared_ptr<any> {
+            auto v = list_ref(args, 0);
+            return applyx(k, env, list_ref(v, 0), list_rest(v, 0));
+        }));
+}
+
+std::shared_ptr<any> application0(std::shared_ptr<any> args) {
+    auto scanned = list_ref(args, 2);
+    return std::make_shared<any>(lambda([scanned]
+        (std::shared_ptr<any> args) -> std::shared_ptr<any> {
+            auto k = list_ref(args, 0);
+            auto env = list_ref(args, 1);
+            return any_cast<lambda>(*scanned)(
+                cons(make_form(forms::application1, cons(k, cons(env, nil))),
+                     cons(env, nil)));
+        }));
+}
 
 bool is_unmemoized(std::shared_ptr<vector> v) {
     return (v->size() == 2) &&
@@ -1005,5 +1048,7 @@ std::shared_ptr<any> mce_restore(const std::string& s) {
 int main(int argc, char *argv[]) {
     json s;
     std::cin >> s;
-    mce_restore(s.get<std::string>());
+    auto f = mce_restore(s.get<std::string>());
+    any_cast<lambda>(*f)(cons(nil, nil));
+    return 0;
 }
