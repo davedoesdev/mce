@@ -261,7 +261,7 @@ std::shared_ptr<any> send_value(std::shared_ptr<any> args) {
 
 std::shared_ptr<any> make_step_contn(std::shared_ptr<any> k,
                                      std::shared_ptr<any> args) {
-    return cons(make_symbol("MCE-STEP_CONTN"), cons(k, args));
+    return cons(make_symbol("MCE-STEP-CONTN"), cons(k, args));
 }
 
 bool is_step_contn(std::shared_ptr<any> args) {
@@ -361,18 +361,69 @@ std::shared_ptr<any> result_val(std::shared_ptr<any> exp) {
     return (*any_cast<std::shared_ptr<vector>>(*exp))[1];
 }
 
+std::shared_ptr<any> less_than(std::shared_ptr<any> args) {
+    bool r = any_cast<double>(*list_ref(args, 0)) <
+             any_cast<double>(*list_ref(args, 1));
+    return std::make_shared<any>(r);
+}
+
+std::shared_ptr<any> display(std::shared_ptr<any> args) {
+    auto exp = list_ref(args, 0);
+    if (exp->type() == typeid(double)) {
+        std::cout << any_cast<double>(*exp);
+    }
+    // TODO: other types
+
+    return exp;
+}
+
+std::shared_ptr<any> newline(std::shared_ptr<any> args) {
+    std::cout << std::endl;
+    return nil;
+}
+
+std::shared_ptr<any> print(std::shared_ptr<any> args) {
+    auto r = nil;
+    while (!args->empty()) {
+        auto p = any_cast<std::shared_ptr<pair>>(*args);
+        display(cons(p->first, nil));
+        r = p->first;
+        args = p->second;
+    }
+    newline(args);
+    return r;
+}
+
+std::shared_ptr<any> plus(std::shared_ptr<any> args) {
+    double r = 0;
+    while (!args->empty()) {
+        auto p = any_cast<std::shared_ptr<pair>>(*args);
+        r += any_cast<double>(*p->first);
+        args = p->second;
+    }
+    return std::make_shared<any>(r);
+}
+
 std::unordered_map<std::string, function*> global_table {
-    { "result", result }
+    { "result", result },
+    { "<", less_than },
+    { "print", print },
+    { "+", plus }
 };
 
 std::unordered_set<function*> kenvfn_table;
 
 std::shared_ptr<any> find_global(const symbol& sym) {
-    return std::make_shared<any>(lambda(global_table.at(sym)));
+    auto it = global_table.find(sym);
+    if (it == global_table.end()) {
+        throw std::range_error(sym);
+    }
+    return std::make_shared<any>(lambda(it->second));
 }
 
 std::shared_ptr<any> step(std::shared_ptr<any> state) {
-    return any_cast<lambda>(*list_ref(state, 0))(list_rest(state, 1));
+    return any_cast<lambda>(*list_ref(state, 0))(
+        cons(list_rest(state, 0), nil));
 }
 
 std::shared_ptr<any> run(std::shared_ptr<any> state) {
@@ -914,7 +965,7 @@ std::shared_ptr<any> application1(std::shared_ptr<any> args) {
 }
 
 std::shared_ptr<any> application0(std::shared_ptr<any> args) {
-    auto scanned = list_ref(args, 2);
+    auto scanned = list_ref(args, 1);
     return std::make_shared<any>(lambda([scanned]
         (std::shared_ptr<any> args) -> std::shared_ptr<any> {
             auto k = list_ref(args, 0);
@@ -1048,7 +1099,11 @@ std::shared_ptr<any> mce_restore(const std::string& s) {
 int main(int argc, char *argv[]) {
     json s;
     std::cin >> s;
-    auto f = mce_restore(s.get<std::string>());
-    any_cast<lambda>(*f)(cons(nil, nil));
+    auto r = mce_restore(s.get<std::string>());
+    if (r->type() == typeid(lambda)) {
+        any_cast<lambda>(*r)(cons(nil, nil));
+    } else {
+        run(r);
+    }
     return 0;
 }
