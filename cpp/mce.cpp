@@ -524,6 +524,12 @@ std::shared_ptr<any> less_than(std::shared_ptr<any> args) {
     return std::make_shared<any>(r);
 }
 
+std::shared_ptr<any> greater_than(std::shared_ptr<any> args) {
+    bool r = any_cast<double>(*list_ref(args, 0)) >
+             any_cast<double>(*list_ref(args, 1));
+    return std::make_shared<any>(r);
+}
+
 std::shared_ptr<any> plus(std::shared_ptr<any> args) {
     double r = 0;
     while (!args->empty()) {
@@ -667,9 +673,25 @@ std::shared_ptr<any> is_eq(std::shared_ptr<any> args) {
     return std::make_shared<any>(false);
 }
 
+std::shared_ptr<any> gunmemoize(std::shared_ptr<any> args) {
+    return unmemoize(list_ref(args, 0));
+}
+
+std::shared_ptr<any> gserialize(std::shared_ptr<any> args) {
+    return serialize(list_ref(args, 0));
+}
+
+std::shared_ptr<any> gapplyx(std::shared_ptr<any> args) {
+    return applyx(list_ref(args, 0),
+                  list_ref(args, 1),
+                  list_ref(args, 2),
+                  list_ref(args, 3));
+}
+
 std::unordered_map<std::string, function*> global_table {
     { "result", result },
     { "<", less_than },
+    { ">", greater_than },
     { "print", print },
     { "+", plus },
     { "*", multiply },
@@ -683,10 +705,15 @@ std::unordered_map<std::string, function*> global_table {
     { "string=?", is_string_equal },
     { "vector?" , is_vector },
     { "vector-length", vector_length },
-    { "vector-ref", vector_ref }
+    { "vector-ref", vector_ref },
+    { "unmemoize", gunmemoize },
+    { "serialize", gserialize },
+    { "apply", gapplyx }
 };
 
-std::unordered_set<function*> kenvfn_table;
+std::unordered_set<function*> kenvfn_table {
+    gapplyx
+};
 
 std::shared_ptr<any> find_global(const symbol& sym) {
     auto it = global_table.find(sym);

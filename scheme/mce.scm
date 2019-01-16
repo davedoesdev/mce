@@ -515,6 +515,7 @@
 (table-set! global-table 'set-cdr! set-cdr!)
 (table-set! global-table 'apply applyx)
 (table-set! global-table 'unmemoize unmemoize)
+(table-set! global-table 'serialize serialize)
 (table-set! global-table 'getpid getpid)
 (table-set! global-table 'null? null?)
 (table-set! global-table 'string? string?)
