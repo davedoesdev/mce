@@ -43,7 +43,8 @@
                 (cons 0 (length e))))))
 
 (define (ctenv-lookup i env)
-    (vector-ref (cdr (list-ref env (car i))) (cdr i)))
+    (vector-ref (cdr (list-ref env (inexact->exact (car i)))) 
+                (inexact->exact (cdr i))))
 
 (define (extend-vector vec index val)
     (let ((newvec (make-vector (+ index 1))))
@@ -64,10 +65,10 @@
         newl))
 
 (define (ctenv-setvar name i val env)
-    (let* ((senv (list-ref env (car i)))
+    (let* ((senv (list-ref env (inexact->exact (car i))))
            (syms (car senv))
            (vals (cdr senv))
-           (index (cdr i)))
+           (index (inexact->exact (cdr i))))
         (if (< index (vector-length vals))
             (vector-set! vals index val)
             (set-cdr! senv (extend-vector vals index val)))
@@ -308,7 +309,9 @@
     (letrec*
         ((defn (cons n args))
          (f2 (memoize-lambda (lambda args (apply f args)) defn))
-         (f (memoize-lambda (apply (vector-ref forms n) (cons f2 args)) defn)))
+         (f (memoize-lambda (apply (vector-ref forms (inexact->exact n))
+                                   (cons f2 args))
+                            defn)))
         f))
 
 (define (sclis exp ctenv)
@@ -635,7 +638,7 @@
     (cond ((pair? exp) (cmap fn exp tab set-entry!))
           ((vector? exp)
            (if (serialized? exp)
-               (ref-value (table-ref tab (serialized-n exp)))
+               (ref-value (table-ref tab (inexact->exact (serialized-n exp))))
                (vector-cmap fn exp tab set-entry!)))
           (else exp)))
 

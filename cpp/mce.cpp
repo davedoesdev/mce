@@ -230,53 +230,66 @@ std::shared_ptr<any> get_procedure_defn(std::shared_ptr<any> proc) {
         cons(make_symbol("MCE-YIELD-DEFINITION"), nil));
 }
 
-std::shared_ptr<any> display(std::shared_ptr<any> args) {
+std::shared_ptr<any> xdisplay(std::shared_ptr<any> args,
+                              std::ostream& out,
+                              bool is_write) {
     auto exp = list_ref(args, 0);
     if (exp->empty()) {
-        std::cout << "()";
+        out << "()";
     } else {
         auto& type = exp->type();
         if (type == typeid(bool)) {
-            std::cout << (any_cast<bool>(*exp) ? "#t" : "#f");
+            out << (any_cast<bool>(*exp) ? "#t" : "#f");
         } else if (type == typeid(double)) {
-            std::cout << any_cast<double>(*exp);
+            out << any_cast<double>(*exp);
         } else if (type == typeid(char)) {
-            std::cout << any_cast<char>(*exp);
+            auto c = any_cast<char>(*exp);
+            if (is_write) {
+                out << "#\\x" << std::hex << static_cast<int>(c);
+            } else {
+                out <<c;
+            }
         } else if (type == typeid(std::shared_ptr<std::string>)) {
-            std::cout << *any_cast<std::shared_ptr<std::string>>(*exp);
+            auto& s = *any_cast<std::shared_ptr<std::string>>(*exp);
+            if (is_write) {
+                json j = s;
+                out << j.dump();
+            } else {
+                out << s;
+            }
         } else if (type == typeid(std::shared_ptr<symbol>)) {
-            std::cout << *any_cast<std::shared_ptr<symbol>>(*exp);
+            out << *any_cast<std::shared_ptr<symbol>>(*exp);
         } else if (type == typeid(std::shared_ptr<pair>)) {
             bool first = true;
             std:: cout << "(";
             while (exp->type() == typeid(std::shared_ptr<pair>)) {
                 if (!first) {
-                    std::cout << " ";
+                    out << " ";
                 }
                 first = false;
                 auto p = any_cast<std::shared_ptr<pair>>(*exp);
-                display(cons(p->first, nil));
+                xdisplay(cons(p->first, nil), out, is_write);
                 exp = p->second;
             }
             if (!exp->empty()) {
-                std::cout << " . ";
-                display(cons(exp, nil));
+                out << " . ";
+                xdisplay(cons(exp, nil), out, is_write);
             }
-            std::cout << ")";
+            out << ")";
         } else if (type == typeid(std::shared_ptr<vector>)) {
             bool first = true;
-            std::cout << "#(";
+            out << "#(";
             auto vec = any_cast<std::shared_ptr<vector>>(*exp);
             for (auto v : *vec) {
                 if (!first) {
-                    std::cout << " ";
+                    out << " ";
                 }
                 first = false;
-                display(cons(v, nil));
+                xdisplay(cons(v, nil), out, is_write);
             }
-            std::cout << ")";
+            out << ")";
         } else if (type == typeid(lambda)) {
-            std::cout << "#<procedure>";
+            out << "#<procedure>";
         } else {
             throw std::range_error("unknown display expression");
         }
@@ -284,21 +297,50 @@ std::shared_ptr<any> display(std::shared_ptr<any> args) {
     return exp;
 }
 
-std::shared_ptr<any> newline(std::shared_ptr<any> args) {
-    std::cout << std::endl;
+std::shared_ptr<any> newline(std::ostream& out) {
+    out << std::endl;
     return nil;
 }
 
-std::shared_ptr<any> print(std::shared_ptr<any> args) {
+std::shared_ptr<any> xprint(std::shared_ptr<any> args,
+                            std::ostream& out) {
     auto r = nil;
     while (!args->empty()) {
         auto p = any_cast<std::shared_ptr<pair>>(*args);
-        display(cons(p->first, nil));
+        xdisplay(cons(p->first, nil), out, false);
         r = p->first;
         args = p->second;
     }
-    newline(args);
+    newline(out);
     return r;
+}
+
+std::shared_ptr<any> print(std::shared_ptr<any> args) {
+    return xprint(args, std::cout);
+}
+
+std::shared_ptr<any> eprint(std::shared_ptr<any> args) {
+    return xprint(args, std::cerr);
+}
+
+std::shared_ptr<any> xwrite(std::shared_ptr<any> args,
+                            std::ostream& out) {
+    auto r = nil;
+    while (!args->empty()) {
+        auto p = any_cast<std::shared_ptr<pair>>(*args);
+        xdisplay(cons(p->first, nil), out, true);
+        r = p->first;
+        args = p->second;
+    }
+    return r;
+}
+
+std::shared_ptr<any> write(std::shared_ptr<any> args) {
+    return xwrite(args, std::cout);
+}
+
+std::shared_ptr<any> ewrite(std::shared_ptr<any> args) {
+    return xwrite(args, std::cerr);
 }
 
 std::shared_ptr<any> unmemoize(std::shared_ptr<any> exp);
@@ -720,11 +762,18 @@ std::shared_ptr<any> restore(std::shared_ptr<any> args) {
     return mce_restore(*any_cast<std::shared_ptr<std::string>>(*a));
 }
 
+std::shared_ptr<any> getpid(std::shared_ptr<any> args) {
+    return std::make_shared<any>(static_cast<double>(getpid()));
+}
+
 std::unordered_map<std::string, function*> global_table {
     { "result", result },
     { "<", less_than },
     { ">", greater_than },
     { "print", print },
+    { "eprint", eprint },
+    { "write", write },
+    { "ewrite", write },
     { "+", plus },
     { "*", multiply },
     { "null?" , is_null },
@@ -746,7 +795,8 @@ std::unordered_map<std::string, function*> global_table {
     { "apply", gapplyx },
     { "save", save },
     { "restore", restore },
-    { "transfer", transfer }
+    { "transfer", transfer },
+    { "getpid", getpid }
 };
 
 std::unordered_set<function*> kenvfn_table {
