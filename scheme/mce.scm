@@ -527,6 +527,7 @@
 (table-set! global-table 'vector? vector?)
 (table-set! global-table 'vector-length vector-length)
 (table-set! global-table 'vector-ref vector-ref)
+(table-set! global-table 'cons cons)
 
 (define kenvfn-table (make-eq-table))
 

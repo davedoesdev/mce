@@ -766,6 +766,10 @@ std::shared_ptr<any> getpid(std::shared_ptr<any> args) {
     return std::make_shared<any>(static_cast<double>(getpid()));
 }
 
+std::shared_ptr<any> gcons(std::shared_ptr<any> args) {
+    return cons(list_ref(args, 0), list_ref(args, 1));
+}
+
 std::unordered_map<std::string, function*> global_table {
     { "result", result },
     { "<", less_than },
@@ -796,7 +800,8 @@ std::unordered_map<std::string, function*> global_table {
     { "save", save },
     { "restore", restore },
     { "transfer", transfer },
-    { "getpid", getpid }
+    { "getpid", getpid },
+    { "cons", gcons }
 };
 
 std::unordered_set<function*> kenvfn_table {

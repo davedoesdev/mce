@@ -252,6 +252,11 @@
 
 (define (list . args) args)
 
+(define (cons* . args)
+    (if (null? (cdr args))
+        (car args)
+        (cons (car args) (apply cons* (cdr args)))))
+
 (define eqv? eq?)
 
 (define (equal? x y)
