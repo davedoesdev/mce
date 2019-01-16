@@ -568,6 +568,13 @@ std::shared_ptr<any> is_pair(std::shared_ptr<any> args) {
         (a->type() == typeid(std::shared_ptr<pair>)));
 }
 
+std::shared_ptr<any> is_procedure(std::shared_ptr<any> args) {
+    auto a = list_ref(args, 0);
+    return std::make_shared<any>(
+        !a->empty() &&
+        (a->type() == typeid(lambda)));
+}
+
 std::shared_ptr<any> is_vector(std::shared_ptr<any> args) {
     auto a = list_ref(args, 0);
     return std::make_shared<any>(
@@ -609,6 +616,20 @@ std::shared_ptr<any> car(std::shared_ptr<any> args) {
 
 std::shared_ptr<any> cdr(std::shared_ptr<any> args) {
     return list_rest(list_ref(args, 0), 0);
+}
+
+std::shared_ptr<any> set_car(std::shared_ptr<any> args) {
+    auto p = list_ref(args, 0);
+    auto v = list_ref(args, 1);
+    any_cast<std::shared_ptr<pair>>(*p)->first = v;
+    return p;
+}
+
+std::shared_ptr<any> set_cdr(std::shared_ptr<any> args) {
+    auto p = list_ref(args, 0);
+    auto v = list_ref(args, 1);
+    any_cast<std::shared_ptr<pair>>(*p)->second = v;
+    return p;
 }
 
 std::shared_ptr<any> is_eq(std::shared_ptr<any> args) {
@@ -688,6 +709,17 @@ std::shared_ptr<any> gapplyx(std::shared_ptr<any> args) {
                   list_ref(args, 3));
 }
 
+std::string mce_save(std::shared_ptr<any> exp);
+std::shared_ptr<any> save(std::shared_ptr<any> args) {
+    return make_string(mce_save(list_ref(args, 0)));
+}
+
+std::shared_ptr<any> mce_restore(const std::string& s);
+std::shared_ptr<any> restore(std::shared_ptr<any> args) {
+    auto a = list_ref(args, 0);
+    return mce_restore(*any_cast<std::shared_ptr<std::string>>(*a));
+}
+
 std::unordered_map<std::string, function*> global_table {
     { "result", result },
     { "<", less_than },
@@ -698,21 +730,28 @@ std::unordered_map<std::string, function*> global_table {
     { "null?" , is_null },
     { "car", car },
     { "cdr", cdr },
+    { "set-car!", set_car },
+    { "set-cdr!", set_cdr },
     { "eq?" , is_eq },
     { "=" , is_number_equal },
     { "string?", is_string },
     { "pair?", is_pair },
+    { "procedure?", is_procedure },
     { "string=?", is_string_equal },
     { "vector?" , is_vector },
     { "vector-length", vector_length },
     { "vector-ref", vector_ref },
     { "unmemoize", gunmemoize },
     { "serialize", gserialize },
-    { "apply", gapplyx }
+    { "apply", gapplyx },
+    { "save", save },
+    { "restore", restore },
+    { "transfer", transfer }
 };
 
 std::unordered_set<function*> kenvfn_table {
-    gapplyx
+    gapplyx,
+    transfer
 };
 
 std::shared_ptr<any> find_global(const symbol& sym) {
@@ -782,7 +821,7 @@ std::shared_ptr<any> wrap_global_lambda(std::shared_ptr<any> fn,
     const lambda l = any_cast<lambda>(*fn);
     auto p = l->target<function*>();
 
-    if (kenvfn_table.find(*p) != kenvfn_table.end()) {
+    if (p && (kenvfn_table.find(*p) != kenvfn_table.end())) {
         return std::make_shared<any>(std::make_shared<func>(
             [fn](std::shared_ptr<any> args) -> std::shared_ptr<any> {
                 return handle_global_lambda_kenv(args, fn);
