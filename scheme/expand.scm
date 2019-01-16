@@ -9,6 +9,8 @@
      (define f (lambda (params ...) body ...)))
     ((define (f params . rest) body ...)
      (define f (lambda (params . rest) body ...)))
+    ((define (f . args) body ...)
+     (define f (lambda args body ...)))
     ((define var val ...)
      (mce-define var val ...))))
 
@@ -247,5 +249,30 @@
      (let-values (binding1)
        (let*-values (binding2 ...)
          body1 body2 ...)))))
+
+(define (list . args) args)
+
+(define eqv? eq?)
+
+(define (equal? x y)
+    (cond ((eqv? x y) #t)
+          ((and (string? x) (string? y)) (string=? x y))
+          ((and (pair? x) (pair? y))
+           (and (equal? (car x) (car y)) (equal? (cdr x) (cdr y))))
+          ((and (vector? x) (vector? y))
+           (let ((len (vector-length x)))
+               (if (= (vector-length y) len)
+                   (let loop ((i 0))
+                       (cond ((= i len) #t)
+                             ((equal? (vector-ref x i) (vector-ref y i))
+                              (loop (+ i 1)))
+                             (else #f)))
+                   #f)))
+          (else #f)))
+
+(define (memv o l)
+    (cond ((null? l) #f)
+          ((eqv? (car l) o) #t)
+          (else (memv o (cdr l)))))
 
 ,(read)))))

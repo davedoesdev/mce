@@ -147,7 +147,10 @@
     (apply proc '(MCE-YIELD-DEFINITION)))
 
 (define (memoize-lambda proc defn)
-    (lambda args (if (yield-defn? args) defn (apply proc args))))
+    (lambda args
+        (if (yield-defn? args)
+            (if (procedure? defn) (defn) defn)
+            (apply proc args))))
 
 (define (improper? l)
     (cond ((null? l) #f)
@@ -506,15 +509,20 @@
 (table-set! global-table 'write write)
 (table-set! global-table 'newline newline)
 (table-set! global-table 'transfer transfer) 
-(table-set! global-table 'memv memv)
 (table-set! global-table 'car car)
 (table-set! global-table 'cdr cdr)
 (table-set! global-table 'set-car! set-car!)
 (table-set! global-table 'set-cdr! set-cdr!)
-(table-set! global-table 'list list)
 (table-set! global-table 'apply applyx)
 (table-set! global-table 'unmemoize unmemoize)
 (table-set! global-table 'getpid getpid)
+(table-set! global-table 'null? null?)
+(table-set! global-table 'string? string?)
+(table-set! global-table 'pair? pair?)
+(table-set! global-table 'string=? string=?)
+(table-set! global-table 'vector? vector?)
+(table-set! global-table 'vector-length vector-length)
+(table-set! global-table 'vector-ref vector-ref)
 
 (define kenvfn-table (make-eq-table))
 
@@ -522,17 +530,14 @@
 (table-set! kenvfn-table applyx #t)
 
 (define (cmap f l tab set-entry!)
-    (cond ((null? l) '())
-          ((pair? l)
-           (let ((ref (table-ref tab l)))
-               (if ref
-                   (ref-value ref)
-                   (let ((entry (cons '() '())))
-                       (set-entry! tab l entry)
-                       (set-car! entry (f (car l)))
-                       (set-cdr! entry (cmap f (cdr l) tab set-entry!))
-                       entry))))
-          (else (f l))))
+   (let ((ref (table-ref tab l)))
+       (if ref
+           (ref-value ref)
+           (let ((entry (cons '() '())))
+               (set-entry! tab l entry)
+               (set-car! entry (f (car l)))
+               (set-cdr! entry (f (cdr l)))
+               entry))))
 
 (define (vector-cmap f vec tab set-entry!)
     (let ((len (vector-length vec))
@@ -562,13 +567,16 @@
                (let ((ref (table-ref tab exp)))
                    (if ref
                        (ref-value ref)
-                       (let* ((repexp (unmemoized-repexp exp))
-                              (r 'unspecified)
-                              (entry (table-set! tab exp
-                                  (memoize-lambda (lambda args (apply r args))
-                                                  repexp))))
-                           (set! r (apply make-form (fn repexp)))
-                           r)))
+                       (letrec*
+                           ((repexp (unmemoized-repexp exp))
+                            (entry (table-set! tab exp
+                                (memoize-lambda (lambda args (apply f args))
+                                                (lambda () r))))
+                            (r (fn repexp))
+                            (f (lambda args
+                                   (set! f (apply make-form r))
+                                   (apply f args))))
+                           entry)))
                (vector-cmap fn exp tab table-set!)))
           (else exp)))
 
