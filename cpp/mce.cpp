@@ -113,16 +113,96 @@ typedef std::shared_ptr<any> extend_env_fn(std::shared_ptr<any> env,
 
 const auto nil = std::make_shared<any>();
 
+std::unordered_map<pair*, std::weak_ptr<pair>> allocated_pairs;
+std::unordered_map<vector*, std::weak_ptr<vector>> allocated_vectors;
+std::unordered_map<func*, std::weak_ptr<func>> allocated_functions;
+
+std::string mce_save(std::shared_ptr<any> exp);
+std::shared_ptr<any> mce_restore(const std::string& s);
+
+std::shared_ptr<any> maybe_gc(std::shared_ptr<any> state) {
+    // TODO: allow threshold to be configured
+    if ((allocated_pairs.size() > 10000) ||
+        (allocated_vectors.size() > 10000) ||
+        (allocated_functions.size() > 10000)) {
+        auto saved = mce_save(state);
+
+        std::unordered_set<std::shared_ptr<pair>> ps;
+        for (auto const& entry : allocated_pairs) {
+            if (auto p = entry.second.lock()) {
+                ps.insert(p);
+            }
+        }
+        for (auto const& p : ps) {
+            p->first = nullptr;
+            p->second = nullptr;
+        }
+        allocated_pairs.clear();
+
+        std::unordered_set<std::shared_ptr<vector>> vs;
+        for (auto const& entry : allocated_vectors) {
+            if (auto v = entry.second.lock()) {
+                vs.insert(v);
+            }
+        }
+        for (auto const& v : vs) {
+            v->clear();
+        }
+        allocated_vectors.clear();
+
+        std::unordered_set<lambda> fs;
+        for (auto const& entry : allocated_functions) {
+            if (auto f = entry.second.lock()) {
+                fs.insert(f);
+            }
+        }
+        for (auto const& f : fs) {
+            *f = nullptr;
+        }
+        allocated_functions.clear();
+
+        state = mce_restore(saved);
+    }
+    return state;
+}
+
+std::shared_ptr<any> cons(std::shared_ptr<any> car, std::shared_ptr<any> cdr) {
+    auto p = std::shared_ptr<pair>(new pair(car, cdr), [](auto pptr) {
+        allocated_pairs.erase(pptr);
+        delete pptr;
+    });
+    allocated_pairs[p.get()] = p;
+    return std::make_shared<any>(p);
+}
+
+std::shared_ptr<any> make_vector() {
+    auto v = std::shared_ptr<vector>(new vector(), [](auto vptr) {
+        allocated_vectors.erase(vptr);
+        delete vptr;
+    });
+    allocated_vectors[v.get()] = v;
+    return std::make_shared<any>(v);
+}
+
+std::shared_ptr<func> make_lambda2(func fn) {
+    auto f = std::shared_ptr<func>(new func(fn), [](auto fptr) {
+        allocated_functions.erase(fptr);
+        delete fptr;
+    });
+    allocated_functions[f.get()] = f;
+    return f;
+}
+
+std::shared_ptr<any> make_lambda(func fn) {
+    return std::make_shared<any>(make_lambda2(fn));
+}
+
 std::shared_ptr<any> make_symbol(const std::string& s) {
     return std::make_shared<any>(std::make_shared<symbol>(s));
 }
 
 std::shared_ptr<any> make_string(const std::string& s) {
     return std::make_shared<any>(std::make_shared<std::string>(s));
-}
-
-std::shared_ptr<any> cons(std::shared_ptr<any> car, std::shared_ptr<any> cdr) {
-    return std::make_shared<any>(std::make_shared<pair>(car, cdr));
 }
 
 std::shared_ptr<any> list_ref(std::shared_ptr<any> l, size_t i) {
@@ -144,7 +224,7 @@ std::shared_ptr<any> list_rest(std::shared_ptr<any> l, size_t i) {
 }
 
 std::shared_ptr<any> list_to_vector(std::shared_ptr<any> l) {
-    auto a = std::make_shared<any>(std::make_shared<vector>());
+    auto a = make_vector();
     auto v = any_cast<std::shared_ptr<vector>>(*a);
 
     while (!l->empty()) {
@@ -194,7 +274,7 @@ std::shared_ptr<any> vector_cmap(map_fn f,
         return ref->second;
     }
 
-    auto entry = std::make_shared<any>(std::make_shared<vector>());
+    auto entry = make_vector();
     set_entry(tab, v, entry);
 
     auto ev = any_cast<std::shared_ptr<vector>>(*entry);
@@ -347,7 +427,7 @@ std::shared_ptr<any> unmemoize(std::shared_ptr<any> exp);
 std::shared_ptr<any> serialize(std::shared_ptr<any> exp);
 
 std::shared_ptr<any> memoize_lambda(lambda proc, std::shared_ptr<any> defn) {
-    return std::make_shared<any>(std::make_shared<func>(
+    return make_lambda(
         [proc, defn](std::shared_ptr<any> args) -> std::shared_ptr<any> {
             if (is_yield_defn(args)) {
                 if (defn->type() == typeid(lambda)) {
@@ -357,7 +437,7 @@ std::shared_ptr<any> memoize_lambda(lambda proc, std::shared_ptr<any> defn) {
             }
             //print(cons(serialize(unmemoize(defn)), nil));
             return (*proc)(args);
-        }));
+        });
 }
 
 std::shared_ptr<any> memoize_lambda(std::shared_ptr<any> proc,
@@ -440,21 +520,21 @@ std::shared_ptr<any> setvar(std::shared_ptr<any> sym,
 
 std::shared_ptr<any> symbol_lookup(std::shared_ptr<any> args) {
     auto i = list_ref(args, 1);
-    return std::make_shared<any>(std::make_shared<func>(
+    return make_lambda(
         [i](std::shared_ptr<any> args) -> std::shared_ptr<any> {
             auto k = list_ref(args, 0);
             auto env = list_ref(args, 1);
             return send(k, ctenv_lookup(i, env));
-        }));
+        });
 }
 
 std::shared_ptr<any> send_value(std::shared_ptr<any> args) {
     auto exp = list_ref(args, 1);
-    return std::make_shared<any>(std::make_shared<func>(
+    return make_lambda(
         [exp](std::shared_ptr<any> args) -> std::shared_ptr<any> {
             auto k = list_ref(args, 0);
             return send(k, exp);
-        }));
+        });
 }
 
 std::shared_ptr<any> make_step_contn(std::shared_ptr<any> k,
@@ -502,7 +582,7 @@ std::shared_ptr<any> transfer(std::shared_ptr<any> args) {
 }
 
 std::shared_ptr<any> make_global_env() {
-    auto values = std::make_shared<any>(std::make_shared<vector>());
+    auto values = make_vector();
     auto bindings = cons(nil, values);
     return cons(bindings, nil);
 }
@@ -539,7 +619,7 @@ std::shared_ptr<any> applyx(std::shared_ptr<any> k,
 }
 
 std::shared_ptr<any> result(std::shared_ptr<any> exp) {
-    auto a = std::make_shared<any>(std::make_shared<vector>());
+    auto a = make_vector();
     auto v = any_cast<std::shared_ptr<vector>>(*a);
     v->push_back(make_symbol("MCE-RESULT"));
     v->push_back(exp);
@@ -814,7 +894,7 @@ std::shared_ptr<any> find_global(const symbol& sym) {
     if (it == global_table.end()) {
         throw std::range_error(sym);
     }
-    return std::make_shared<any>(std::make_shared<func>(it->second));
+    return make_lambda(it->second);
 }
 
 std::shared_ptr<any> step(std::shared_ptr<any> state) {
@@ -824,7 +904,7 @@ std::shared_ptr<any> step(std::shared_ptr<any> state) {
 
 std::shared_ptr<any> run(std::shared_ptr<any> state) {
     while (!is_result(state)) {
-        state = step(state);
+        state = maybe_gc(step(state));
     }
 
     return result_val(state);
@@ -877,16 +957,16 @@ std::shared_ptr<any> wrap_global_lambda(std::shared_ptr<any> fn,
     auto p = l->target<function*>();
 
     if (p && (kenvfn_table.find(*p) != kenvfn_table.end())) {
-        return std::make_shared<any>(std::make_shared<func>(
+        return make_lambda(
             [fn](std::shared_ptr<any> args) -> std::shared_ptr<any> {
                 return handle_global_lambda_kenv(args, fn);
-            }));
+            });
     }
 
-    return std::make_shared<any>(std::make_shared<func>(
+    return make_lambda(
         [fn, cf](std::shared_ptr<any> args) -> std::shared_ptr<any> {
             return handle_global_lambda(args, fn, cf);
-        }));
+        });
 }
 
 std::shared_ptr<any> extend_env(std::shared_ptr<any> env,
@@ -899,7 +979,7 @@ std::shared_ptr<any> improper_extend_env(std::shared_ptr<any> env,
                                          std::shared_ptr<any> syms,
                                          std::shared_ptr<any> values) {
     vector s;
-    auto av = std::make_shared<any>(std::make_shared<vector>());
+    auto av = make_vector();
     auto v = any_cast<std::shared_ptr<vector>>(*av);
 
     while (!syms->empty()) {
@@ -982,12 +1062,12 @@ std::shared_ptr<any> lookup(symbol& sym, std::shared_ptr<any> env) {
 
 std::shared_ptr<any> runtime_lookup(std::shared_ptr<any> args) {
     auto name = any_cast<std::shared_ptr<symbol>>(*list_ref(args, 1));
-    return std::make_shared<any>(std::make_shared<func>(
+    return make_lambda(
         [name](std::shared_ptr<any> args) -> std::shared_ptr<any> {
             auto k = list_ref(args, 0);
             auto env = list_ref(args, 1);
             return send(k, lookup(*name, env));
-        }));
+        });
 }
 
 std::shared_ptr<any> constructed_function(std::shared_ptr<any> args) {
@@ -1011,10 +1091,10 @@ std::shared_ptr<any> evalx_initial(std::shared_ptr<any> args) {
     auto k = list_ref(args, 1);
     auto env = list_ref(args, 2);
     auto scanned = list_ref(args, 3);
-    return std::make_shared<any>(std::make_shared<func>([k, env, scanned]
+    return make_lambda([k, env, scanned]
         (std::shared_ptr<any> args) -> std::shared_ptr<any> {
             return (*any_cast<lambda>(*scanned))(cons(k, cons(env, nil)));
-        }));
+        });
 }
 
 std::shared_ptr<any> if0(std::shared_ptr<any> args);
@@ -1078,7 +1158,7 @@ std::shared_ptr<any> make_form(std::shared_ptr<any> n,
     auto defn = cons(n, args);
 
     auto f = std::make_shared<any>();
-    auto f2 = memoize_lambda(std::make_shared<func>(
+    auto f2 = memoize_lambda(make_lambda2(
         [f](std::shared_ptr<any> args) -> std::shared_ptr<any> {
             return (*any_cast<lambda>(*f))(args);
         }),
@@ -1105,7 +1185,7 @@ std::shared_ptr<any> lookup_global(const symbol& sym) {
     auto r = find_global(sym);
     auto defn = cons(aform(forms::global_lambda), cons(make_symbol(sym), nil));
     auto f = std::make_shared<any>();
-    auto f2 = memoize_lambda(std::make_shared<func>(
+    auto f2 = memoize_lambda(make_lambda2(
         [f](std::shared_ptr<any> args) -> std::shared_ptr<any> {
             return (*any_cast<lambda>(*f))(args);
         }),
@@ -1124,7 +1204,7 @@ std::shared_ptr<any> globalize(std::shared_ptr<any> x,
     auto defn = cons(aform(forms::constructed_function),
                      cons(args, cons(cf, nil)));
     auto f = std::make_shared<any>();
-    auto f2 = memoize_lambda(std::make_shared<func>(
+    auto f2 = memoize_lambda(make_lambda2(
         [f](std::shared_ptr<any> args) -> std::shared_ptr<any> {
             return (*any_cast<lambda>(*f))(args);
         }),
@@ -1138,19 +1218,19 @@ std::shared_ptr<any> if1(std::shared_ptr<any> args) {
     auto env = list_ref(args, 2);
     auto scan1 = list_ref(args, 3);
     auto scan2 = list_ref(args, 4);
-    return std::make_shared<any>(std::make_shared<func>([k, env, scan1, scan2]
+    return make_lambda([k, env, scan1, scan2]
         (std::shared_ptr<any> args) -> std::shared_ptr<any> {
             auto v = any_cast<bool>(*list_ref(args, 0));
             auto f = any_cast<lambda>(v ? *scan1 : *scan2);
             return (*f)(cons(k, cons(env, nil)));
-        }));
+        });
 }
 
 std::shared_ptr<any> if0(std::shared_ptr<any> args) {
     auto scan0 = list_ref(args, 1);
     auto scan1 = list_ref(args, 2);
     auto scan2 = list_ref(args, 3);
-    return std::make_shared<any>(std::make_shared<func>([scan0, scan1, scan2]
+    return make_lambda([scan0, scan1, scan2]
         (std::shared_ptr<any> args) -> std::shared_ptr<any> {
             auto k = list_ref(args, 0);
             auto env = list_ref(args, 1);
@@ -1159,36 +1239,36 @@ std::shared_ptr<any> if0(std::shared_ptr<any> args) {
                                cons(k, cons(env, cons(scan1, cons(scan2,
                                     nil))))),
                      cons(env, nil)));
-        }));
+        });
 }
 
 std::shared_ptr<any> sclis2(std::shared_ptr<any> args) {
     auto k = list_ref(args, 1);
     auto v = list_ref(args, 2);
-    return std::make_shared<any>(std::make_shared<func>([k, v]
+    return make_lambda([k, v]
         (std::shared_ptr<any> args) -> std::shared_ptr<any> {
             auto w = list_ref(args, 0);
             return send(k, cons(v, w));
-        }));
+        });
 }
 
 std::shared_ptr<any> sclis1(std::shared_ptr<any> args) {
     auto k = list_ref(args, 1);
     auto env = list_ref(args, 2);
     auto rest = list_ref(args, 3);
-    return std::make_shared<any>(std::make_shared<func>([k, env, rest]
+    return make_lambda([k, env, rest]
         (std::shared_ptr<any> args) -> std::shared_ptr<any> {
             auto v = list_ref(args, 0);
             return (*any_cast<lambda>(*rest))(
                 cons(make_form(forms::sclis2, cons(k, cons(v, nil))),
                      cons(env, nil)));
-        }));
+        });
 }
 
 std::shared_ptr<any> sclis0(std::shared_ptr<any> args) {
     auto first = list_ref(args, 1);
     auto rest = list_ref(args, 2);
-    return std::make_shared<any>(std::make_shared<func>([first, rest]
+    return make_lambda([first, rest]
         (std::shared_ptr<any> args) -> std::shared_ptr<any> {
             auto k = list_ref(args, 0);
             auto env = list_ref(args, 1);
@@ -1196,23 +1276,23 @@ std::shared_ptr<any> sclis0(std::shared_ptr<any> args) {
                 cons(make_form(forms::sclis1,
                                cons(k, cons(env, cons(rest, nil)))),
                      cons(env, nil)));
-        }));
+        });
 }
 
 std::shared_ptr<any> scseq1(std::shared_ptr<any> args) {
     auto k = list_ref(args, 1);
     auto env = list_ref(args, 2);
     auto rest = list_ref(args, 3);
-    return std::make_shared<any>(std::make_shared<func>([k, env, rest]
+    return make_lambda([k, env, rest]
         (std::shared_ptr<any> args) -> std::shared_ptr<any> {
             return (*any_cast<lambda>(*rest))(cons(k, cons(env, nil)));
-        }));
+        });
 }
 
 std::shared_ptr<any> scseq0(std::shared_ptr<any> args) {
     auto first = list_ref(args, 1);
     auto rest = list_ref(args, 2);
-    return std::make_shared<any>(std::make_shared<func>([first, rest]
+    return make_lambda([first, rest]
         (std::shared_ptr<any> args) -> std::shared_ptr<any> {
             auto k = list_ref(args, 0);
             auto env = list_ref(args, 1);
@@ -1220,71 +1300,71 @@ std::shared_ptr<any> scseq0(std::shared_ptr<any> args) {
                 cons(make_form(forms::scseq1,
                                cons(k, cons(env, cons(rest, nil)))),
                      cons(env, nil)));
-        }));
+        });
 }
 
 std::shared_ptr<any> lambda1(std::shared_ptr<any> args) {
     auto params = list_ref(args, 1);
     auto scanned = list_ref(args, 2);
     auto env = list_ref(args, 3);
-    return std::make_shared<any>(std::make_shared<func>([params, scanned, env]
+    return make_lambda([params, scanned, env]
         (std::shared_ptr<any> args) -> std::shared_ptr<any> {
             return handle_lambda(args, params, scanned, env, extend_env);
-        }));
+        });
 }
 
 std::shared_ptr<any> lambda0(std::shared_ptr<any> args) {
     auto params = list_ref(args, 1);
     auto scanned = list_ref(args, 2);
-    return std::make_shared<any>(std::make_shared<func>([params, scanned]
+    return make_lambda([params, scanned]
         (std::shared_ptr<any> args) -> std::shared_ptr<any> {
             auto k = list_ref(args, 0);
             auto env = list_ref(args, 1);
             return send(k,
                         make_form(forms::lambda1,
                                   cons(params, cons(scanned, cons(env, nil)))));
-        }));
+        });
 }
 
 std::shared_ptr<any> improper_lambda1(std::shared_ptr<any> args) {
     auto params = list_ref(args, 1);
     auto scanned = list_ref(args, 2);
     auto env = list_ref(args, 3);
-    return std::make_shared<any>(std::make_shared<func>([params, scanned, env]
+    return make_lambda([params, scanned, env]
         (std::shared_ptr<any> args) -> std::shared_ptr<any> {
             return handle_lambda(args,
                                  params,
                                  scanned,
                                  env,
                                  improper_extend_env);
-        }));
+        });
 }
 
 std::shared_ptr<any> improper_lambda0(std::shared_ptr<any> args) {
     auto params = list_ref(args, 1);
     auto scanned = list_ref(args, 2);
-    return std::make_shared<any>(std::make_shared<func>([params, scanned]
+    return make_lambda([params, scanned]
         (std::shared_ptr<any> args) -> std::shared_ptr<any> {
             auto k = list_ref(args, 0);
             auto env = list_ref(args, 1);
             return send(k,
                         make_form(forms::improper_lambda1,
                                   cons(params, cons(scanned, cons(env, nil)))));
-        }));
+        });
 }
 
 std::shared_ptr<any> letcc1(std::shared_ptr<any> args) {
     auto k = list_ref(args, 1);
-    return std::make_shared<any>(std::make_shared<func>([k]
+    return make_lambda([k]
         (std::shared_ptr<any> args) -> std::shared_ptr<any> {
             return handle_contn_lambda(args, k); 
-        }));
+        });
 }
 
 std::shared_ptr<any> letcc0(std::shared_ptr<any> args) {
     auto name = list_ref(args, 1);
     auto scanned = list_ref(args, 2);
-    return std::make_shared<any>(std::make_shared<func>([name, scanned]
+    return make_lambda([name, scanned]
         (std::shared_ptr<any> args) -> std::shared_ptr<any> {
             auto k = list_ref(args, 0);
             auto env = list_ref(args, 1);
@@ -1296,7 +1376,7 @@ std::shared_ptr<any> letcc0(std::shared_ptr<any> args) {
                                                     cons(k, nil)),
                                           nil)),
                           nil)));
-        }));
+        });
 }
 
 std::shared_ptr<any> define1(std::shared_ptr<any> args) {
@@ -1304,18 +1384,18 @@ std::shared_ptr<any> define1(std::shared_ptr<any> args) {
     auto env = list_ref(args, 2);
     auto name = list_ref(args, 3);
     auto i = list_ref(args, 4);
-    return std::make_shared<any>(std::make_shared<func>([k, env, name, i]
+    return make_lambda([k, env, name, i]
         (std::shared_ptr<any> args) -> std::shared_ptr<any> {
             auto v = list_ref(args, 0);
             return send(k, ctenv_setvar(name, i, v, env));
-        }));
+        });
 }
 
 std::shared_ptr<any> define0(std::shared_ptr<any> args) {
     auto name = list_ref(args, 1);
     auto i = list_ref(args, 2);
     auto scanned = list_ref(args, 3);
-    return std::make_shared<any>(std::make_shared<func>([name, i, scanned]
+    return make_lambda([name, i, scanned]
         (std::shared_ptr<any> args) -> std::shared_ptr<any> {
             auto k = list_ref(args, 0);
             auto env = list_ref(args, 1);
@@ -1323,24 +1403,24 @@ std::shared_ptr<any> define0(std::shared_ptr<any> args) {
                 cons(make_form(forms::define1,
                                cons(k, cons(env, cons(name, cons(i, nil))))),
                      cons(env, nil)));
-        }));
+        });
 }
 
 std::shared_ptr<any> set1(std::shared_ptr<any> args) {
     auto k = list_ref(args, 1);
     auto env = list_ref(args, 2);
     auto name = list_ref(args, 3);
-    return std::make_shared<any>(std::make_shared<func>([k, env, name]
+    return make_lambda([k, env, name]
         (std::shared_ptr<any> args) -> std::shared_ptr<any> {
             auto v = list_ref(args, 0);
             return send(k, setvar(name, v, env));
-        }));
+        });
 }
 
 std::shared_ptr<any> set0(std::shared_ptr<any> args) {
     auto name = list_ref(args, 1);
     auto scanned = list_ref(args, 2);
-    return std::make_shared<any>(std::make_shared<func>([name, scanned]
+    return make_lambda([name, scanned]
         (std::shared_ptr<any> args) -> std::shared_ptr<any> {
             auto k = list_ref(args, 0);
             auto env = list_ref(args, 1);
@@ -1348,29 +1428,29 @@ std::shared_ptr<any> set0(std::shared_ptr<any> args) {
                 cons(make_form(forms::set1,
                                cons(k, cons(env, cons(name, nil)))),
                      cons(env, nil)));
-        }));
+        });
 }
 
 std::shared_ptr<any> application1(std::shared_ptr<any> args) {
     auto k = list_ref(args, 1);
     auto env = list_ref(args, 2);
-    return std::make_shared<any>(std::make_shared<func>([k, env]
+    return make_lambda([k, env]
         (std::shared_ptr<any> args) -> std::shared_ptr<any> {
             auto v = list_ref(args, 0);
             return applyx(k, env, list_ref(v, 0), list_rest(v, 0));
-        }));
+        });
 }
 
 std::shared_ptr<any> application0(std::shared_ptr<any> args) {
     auto scanned = list_ref(args, 1);
-    return std::make_shared<any>(std::make_shared<func>([scanned]
+    return make_lambda([scanned]
         (std::shared_ptr<any> args) -> std::shared_ptr<any> {
             auto k = list_ref(args, 0);
             auto env = list_ref(args, 1);
             return (*any_cast<lambda>(*scanned))(
                 cons(make_form(forms::application1, cons(k, cons(env, nil))),
                      cons(env, nil)));
-        }));
+        });
 }
 
 bool is_unmemoized(std::shared_ptr<vector> v) {
@@ -1403,16 +1483,16 @@ std::shared_ptr<any> memoize_aux(std::shared_ptr<any> exp,
             auto r = make_symbol("unspecified");
             auto f = make_symbol("unspecified");
             auto entry = table_set(tab, exp, memoize_lambda(
-                std::make_shared<func>([f]
+                make_lambda2([f]
                     (std::shared_ptr<any> args) -> std::shared_ptr<any> {
                         return (*any_cast<lambda>(*f))(args);
                     }),
-                std::make_shared<any>(std::make_shared<func>([r]
+                make_lambda([r]
                     (std::shared_ptr<any> args) -> std::shared_ptr<any> {
                         return r;
-                    }))));
+                    })));
             *r = *fn(repexp);
-            *f = std::make_shared<func>([r, f]
+            *f = make_lambda2([r, f]
                 (std::shared_ptr<any> args) -> std::shared_ptr<any> {
                     *f = *make_form(r);
                     return (*any_cast<lambda>(*f))(args);
@@ -1456,8 +1536,7 @@ std::shared_ptr<any> unmemoize_aux(std::shared_ptr<any> exp,
             return ref->second;
         }
 
-        auto entry = table_set(tab, exp,
-            std::make_shared<any>(std::make_shared<vector>()));
+        auto entry = table_set(tab, exp, make_vector());
         auto v = any_cast<std::shared_ptr<vector>>(*entry);
 
         v->push_back(make_symbol("MCE-UNMEMOIZED"));
@@ -1478,7 +1557,7 @@ std::shared_ptr<any> unmemoize(std::shared_ptr<any> exp) {
 }
 
 std::shared_ptr<any> make_serialized(size_t n) {
-    auto a = std::make_shared<any>(std::make_shared<vector>());
+    auto a = make_vector();
     auto v = any_cast<std::shared_ptr<vector>>(*a);
 
     v->push_back(make_symbol("MCE-SERIALIZED"));
