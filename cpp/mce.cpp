@@ -5,11 +5,13 @@
 #include <unordered_map>
 #include <unordered_set>
 #include <boost/any.hpp>
+#include <boost/program_options.hpp>
 #include "json.hpp"
 
 using nlohmann::json;
 using boost::any;
 using boost::any_cast;
+using namespace boost::program_options;
 
 const char null_code    = 'a';
 const char boolean_code = 'b';
@@ -120,11 +122,12 @@ std::unordered_map<func*, std::weak_ptr<func>> allocated_functions;
 std::string mce_save(std::shared_ptr<any> exp);
 std::shared_ptr<any> mce_restore(const std::string& s);
 
+size_t gc_threshold;
+
 std::shared_ptr<any> maybe_gc(std::shared_ptr<any> state) {
-    // TODO: allow threshold to be configured
-    if ((allocated_pairs.size() > 10000) ||
-        (allocated_vectors.size() > 10000) ||
-        (allocated_functions.size() > 10000)) {
+    if ((allocated_pairs.size() > gc_threshold) ||
+        (allocated_vectors.size() > gc_threshold) ||
+        (allocated_functions.size() > gc_threshold)) {
         auto saved = mce_save(state);
 
         std::unordered_set<std::shared_ptr<pair>> ps;
@@ -1728,6 +1731,20 @@ std::shared_ptr<any> mce_restore(const std::string& s) {
 }
 
 int main(int argc, char *argv[]) {
+    options_description desc("Options");
+    desc.add_options()
+        ("help", "help")
+        ("gc-threshold",
+         value<size_t>()->default_value(100000),
+         "gc when object table exceeds this number");
+    variables_map vm;
+    store(parse_command_line(argc, argv, desc), vm);
+    if (vm.count("help")) {
+        std::cout << desc << std::endl;
+        return 0;
+    }
+    gc_threshold = vm["gc-threshold"].as<size_t>();
+
     json s;
     std::cin >> s;
     auto r = mce_restore(s.get<std::string>());
