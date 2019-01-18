@@ -3,3 +3,4 @@ mce.o
 expand
 expand.o
 scan
+node_modules
