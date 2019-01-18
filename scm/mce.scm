@@ -538,8 +538,7 @@
    (let ((ref (table-ref tab l)))
        (if ref
            (ref-value ref)
-           (let ((entry (cons '() '())))
-               (set-entry! tab l entry)
+           (let ((entry (set-entry! tab l (cons '() '()))))
                (set-car! entry (f (car l)))
                (set-cdr! entry (f (cdr l)))
                entry))))
@@ -549,8 +548,7 @@
         (if ref
             (ref-value ref)
             (let* ((len (vector-length vec))
-                   (entry (make-vector len)))
-                (set-entry! tab vec entry)
+                   (entry (set-entry! tab vec (make-vector len))))
                 (let loop ((i 0))
                     (if (= i len)
                         entry
@@ -631,7 +629,8 @@
              (set-entry!
               (lambda (tab v entry)
                   (table-set! tab v (make-serialized counter))
-                  (set! counter (+ counter 1))))
+                  (set! counter (+ counter 1))
+                  entry))
              (fn (lambda (x) (serialize-aux x tab fn set-entry!))))
         (fn exp)))
 
@@ -649,7 +648,8 @@
              (set-entry!
               (lambda (tab v entry)
                   (table-set! tab counter entry)
-                  (set! counter (+ counter 1))))
+                  (set! counter (+ counter 1))
+                  entry))
              (fn (lambda (x) (deserialize-aux x tab fn set-entry!))))
         (fn exp)))
 

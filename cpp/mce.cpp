@@ -257,9 +257,7 @@ std::shared_ptr<any> cmap(map_fn f,
         return ref->second;
     }
 
-    auto entry = cons(nil, nil);
-    set_entry(tab, l, entry);
-
+    auto entry = set_entry(tab, l, cons(nil, nil));
     auto ep = any_cast<std::shared_ptr<pair>>(*entry);
     auto lp = any_cast<std::shared_ptr<pair>>(*l);
     ep->first = f(lp->first);
@@ -277,9 +275,7 @@ std::shared_ptr<any> vector_cmap(map_fn f,
         return ref->second;
     }
 
-    auto entry = make_vector();
-    set_entry(tab, v, entry);
-
+    auto entry = set_entry(tab, v, make_vector());
     auto ev = any_cast<std::shared_ptr<vector>>(*entry);
     auto vv = any_cast<std::shared_ptr<vector>>(*v);
 
@@ -1606,7 +1602,8 @@ std::shared_ptr<any> serialize(std::shared_ptr<any> exp) {
     set_entry_fn set_entry = [&counter](cmap_table& tab,
                                         std::shared_ptr<any> v,
                                         std::shared_ptr<any> entry) {
-        return table_set(tab, v, make_serialized(counter++));
+        table_set(tab, v, make_serialized(counter++));
+        return entry;
     };
     map_fn fn = [&tab, &fn, &set_entry]
         (std::shared_ptr<any> x) -> std::shared_ptr<any> {
