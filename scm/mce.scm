@@ -545,11 +545,11 @@
                entry))))
 
 (define (vector-cmap f vec tab set-entry!)
-    (let ((len (vector-length vec))
-          (ref (table-ref tab vec)))
+    (let ((ref (table-ref tab vec)))
         (if ref
             (ref-value ref)
-            (let ((entry (make-vector len)))
+            (let* ((len (vector-length vec))
+                   (entry (make-vector len)))
                 (set-entry! tab vec entry)
                 (let loop ((i 0))
                     (if (= i len)
