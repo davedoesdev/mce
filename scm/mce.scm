@@ -626,12 +626,12 @@
           (else exp)))
 
 (define (serialize exp)
-    (letrec ((counter (list 0))
+    (letrec ((counter 0)
              (tab (make-eq-table))
              (set-entry!
               (lambda (tab v entry)
-                  (table-set! tab v (make-serialized (car counter)))
-                  (set-car! counter (+ (car counter) 1))))
+                  (table-set! tab v (make-serialized counter))
+                  (set! counter (+ counter 1))))
              (fn (lambda (x) (serialize-aux x tab fn set-entry!))))
         (fn exp)))
 
@@ -644,12 +644,12 @@
           (else exp)))
 
 (define (deserialize exp)
-    (letrec ((counter (list 0))
+    (letrec ((counter 0)
              (tab (make-eq-table))
              (set-entry!
               (lambda (tab v entry)
-                  (table-set! tab (car counter) entry)
-                  (set-car! counter (+ (car counter) 1))))
+                  (table-set! tab counter entry)
+                  (set! counter (+ counter 1))))
              (fn (lambda (x) (deserialize-aux x tab fn set-entry!))))
         (fn exp)))
 
