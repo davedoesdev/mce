@@ -269,15 +269,58 @@ function plus(args) {
     return r;
 }
 
+function multiply(args) {
+    let r = 1;
+    while (args) {
+        r *= args.car;
+        args = args.cdr;
+    }
+    return r;
+}
+
 function less_than(args) {
     return list_ref(args, 0) < list_ref(args, 1);
+}
+
+function greater_than(args) {
+    return list_ref(args, 0) > list_ref(args, 1);
+}
+
+function is_null(args) {
+    return list_ref(args, 0) === null;
+}
+
+function car(args) {
+    return list_ref(list_ref(args, 0), 0);
+}
+
+function cdr(args) {
+    return list_rest(list_ref(args, 0), 0);
+}
+
+function is_eq(args) {
+    const x = list_ref(args, 0);
+    const y = list_ref(args, 1);
+
+    if (((x instanceof Char) && (y instanceof Char)) ||
+        ((x instanceof String) && (y instanceof String))) {
+        return x.toString() === y.toString();
+    }
+
+    return x === y;
 }
 
 const global_table = new Map([
     ['result', result],
     ['+', plus],
+    ['*', multiply],
     ['<', less_than],
-    ['print', print]
+    ['>', greater_than],
+    ['print', print],
+    ['null?', is_null],
+    ['car', car],
+    ['cdr', cdr],
+    ['eq?', is_eq]
 ]);
 
 const kenvfn_set = new Set();

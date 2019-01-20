@@ -7,6 +7,11 @@
                  ((b) 'b)))
 
        (print (case (car '(c d))
+                 ((a) 'a)
+                 ((b) 'b)
+                 ((c) 'c)))
+
+       (print (case (car '(c d))
                  ((a e i o u) 'vowel)
                  ((w y) 'semivowel)
                  (else 'consonant))))
