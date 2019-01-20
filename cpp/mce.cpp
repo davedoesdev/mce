@@ -883,7 +883,7 @@ std::unordered_map<std::string, function*> global_table {
     { "cons", gcons }
 };
 
-std::unordered_set<function*> kenvfn_table {
+std::unordered_set<function*> kenvfn_set {
     gapplyx,
     transfer
 };
@@ -955,7 +955,7 @@ std::shared_ptr<any> wrap_global_lambda(std::shared_ptr<any> fn,
     const lambda l = any_cast<lambda>(*fn);
     auto p = l->target<function*>();
 
-    if (p && (kenvfn_table.find(*p) != kenvfn_table.end())) {
+    if (p && (kenvfn_set.find(*p) != kenvfn_set.end())) {
         return make_lambda(
             [fn](std::shared_ptr<any> args) -> std::shared_ptr<any> {
                 return handle_global_lambda_kenv(args, fn);
