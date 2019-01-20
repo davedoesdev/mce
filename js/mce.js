@@ -1,4 +1,5 @@
 import fs from 'fs';
+import { EOL } from 'os';
 const { readFile, open } = fs.promises;
 
 class Char extends String {}
@@ -69,6 +70,10 @@ function is_yield_defn(args) {
            (args.car.toString() === 'MCE-YIELD-DEFINITION');
 }
 
+function get_procedure_defn(proc) {
+    return proc(cons(new Symbol('MCE-YIELD-DEFINITION'), null));
+}
+
 function memoize_lambda(proc, defn) {
     return args => {
         if (is_yield_defn(args)) {
@@ -82,7 +87,7 @@ function memoize_lambda(proc, defn) {
 }
 
 function ctenv_lookup(i, env) {
-    return list_ref(env, i.car)[i.cdr];
+    return list_ref(env, i.car).cdr[i.cdr];
 }
 
 function ctenv_setvar(name, i, val, env) {
@@ -140,22 +145,148 @@ function setvar(sym, value, env) {
     throw new SymbolNotFoundError("setvar", sym);
 }
 
-class SymbolNotFoundError {
+class SymbolNotFoundError extends Error {
     constructor(proc, sym) {
-        this.proc = proc;
-        this.sym = sym;
-    }
-
-    toString() {
-        return `${this.proc}: symbol not found: ${this.sym}`;
+        super(`${proc}: symbol not found: ${sym}`);
+        this.name = this.constructor.name;
     }
 }
+
+class UnknownDisplayExpression extends Error {
+    constructor(exp) {
+        super(`unknown display expression: ${exp}`);
+        this.name = this.constructor.name;
+    }
+}
+
+function xdisplay(args, out, is_write) {
+    const exp = list_ref(args, 0);
+    if (exp === null) {
+        out.write('()');
+    } else if (typeof exp === 'boolean') {
+        out.write(exp ? '#t' : '#f');
+    } else if (typeof exp === 'number') {
+        out.write(exp.toString());
+    } else if (exp instanceof Char) {
+        if (is_write) {
+            out.write('#\\x');
+            out.write(exp.toString().charCodeAt(0).toString(16));
+        } else {
+            out.write(exp.toString());
+        }
+    } else if (typeof exp === 'string') {
+        if (is_write) {
+            out.write(JSON.stringify(exp));
+        } else {
+            out.write(exp);
+        }
+    } else if (exp instanceof Symbol) {
+        out.write(exp.toString());
+    } else if (exp instanceof Pair) {
+        let first = true;
+        out.write('(');
+        while (exp instanceof Pair) {
+            if (!first) {
+                out.write(' ');
+            }
+            first = false;
+            xdisplay(cons(exp.car, null), out, is_write);
+            exp = exp.cdr;
+        }
+        if (exp !== null) {
+            out.write(' . ');
+            xdisplay(cons(exp, null), out, is_write);
+        }
+        out.write(')');
+    } else if (Array.isArray(exp)) {
+        let first = true;
+        out.write('#(');
+        for (let v of exp) {
+            if (!first) {
+                out.write(' ');
+            }
+            first = false;
+            xdisplay(cons(v, null), out, is_write);
+        }
+        out.write(')');
+    } else if (typeof exp === 'function') {
+        out.write('#<procedure>');
+    } else {
+        throw new UnknowDisplayExpression(exp);
+    }
+
+    return exp;
+}
+
+function newline(out) {
+    out.write(EOL);
+    return null;
+}
+
+function xprint(args, out) {
+    let r = null;
+    while (args) {
+        r = args.car;
+        xdisplay(cons(r, null), out, false);
+        args = args.cdr;
+    }
+    newline(out);
+    return r;
+}
+
+function print(args) {
+    return xprint(args, process.stdout);
+}
+
+function eprint(args) {
+    return xprint(args, process.stderr);
+}
+
+function xwrite(args, out) {
+    let r = null;
+    while (args) {
+        r = args.car;
+        xdisplay(cons(r, null), out, true);
+        args = args.cdr;
+    }
+    return r;
+}
+
+function write(args) {
+    return xwrite(args, process.stdout);
+}
+
+function ewrite(args) {
+    return xwrite(args, process.stderr);
+}
+
+function plus(args) {
+    let r = 0;
+    while (args) {
+        r += args.car;
+        args = args.cdr;
+    }
+    return r;
+}
+
+function less_than(args) {
+    return list_ref(args, 0) < list_ref(args, 1);
+}
+
+const global_table = new Map([
+    ['result', result],
+    ['+', plus],
+    ['<', less_than],
+    ['print', print]
+]);
+
+const kenvfn_set = new Set();
 
 function find_global(sym) {
     const s = sym.toString();
     const r = global_table.get(s);
     if (r === undefined) {
-        throw new SymbolNotFoundError("lookup", sym);
+        throw new SymbolNotFoundError('find_global', sym);
     }
     return r;
 }
@@ -224,7 +355,7 @@ function globalize(x, args, cf) {
         return x;
     }
 
-    const defn = cons(constructed_function, cons(args, cons(cf, nil)));
+    const defn = cons(constructed_function, cons(args, cons(cf, null)));
     const f2 = memoize_lambda(args => f(args), defn);
     const f = memoize_lambda(wrap_global_lambda(x, f2), defn);
     return f;
@@ -238,11 +369,11 @@ function handle_global_lambda(args, fn, cf) {
             return fn(make_step_contn(sck, transfer_args(sca)));
         }
         const eaa = env_args_args(sca);
-        return send(sck, globalize(f(eaa), eaa, cf));
+        return send(sck, globalize(fn(eaa), eaa, cf));
     }
 
     const eaa = env_args_args(args);
-    return globalize(f(eaa), eaa, cf);
+    return globalize(fn(eaa), eaa, cf);
 }
 
 function handle_global_lambda_kenv(args, fn) {
@@ -602,8 +733,8 @@ const application0 = define_form(args => {
     return args => {
         const k = list_ref(args, 0);
         const env = list_ref(args, 1);
-        return scanned(make_form(application1, cons(k, cons(env, null))),
-                       cons(env, null));
+        return scanned(cons(make_form(application1, cons(k, cons(env, null))),
+                            cons(env, null)));
     };
 });
 
@@ -612,7 +743,7 @@ const application1 = define_form(args => {
     const env = list_ref(args, 2);
     return args => {
         const v = list_ref(args, 0);
-        return applx(k, env, list_ref(v, 0), list_rest(v, 0));
+        return applyx(k, env, list_ref(v, 0), list_rest(v, 0));
     };
 });
 
@@ -625,7 +756,8 @@ const evalx_initial = define_form(args => {
     };
 });
 
-function make_form(defn) {
+function make_form(n, args) {
+    const defn = cons(n, args);
     const f2 = memoize_lambda(args => f(args), defn);
     const f = memoize_lambda(forms[defn.car](cons(f2, defn.cdr)), defn);
     return f;
@@ -661,7 +793,7 @@ function memoize_aux(exp, tab, fn) {
                 memoize_lambda(args => f(args), () => r));
             const r = fn(repexp);
             let f = args => {
-                f = make_form(r);
+                f = make_form(r.car, r.cdr);
                 return f(args);
             };
             return entry;
@@ -678,7 +810,7 @@ function memoize(exp) {
 }
 
 function make_serialized(n) {
-    return ['MCE-SERIALIZED', n];
+    return [new Symbol('MCE-SERIALIZED'), n];
 }
 
 function is_serialized(v) {
@@ -714,14 +846,14 @@ function deserialize(exp) {
     return fn(exp);
 }
 
-const null_code    = "a";
-const boolean_code = "b";
-const number_code  = "c";
-const char_code    = "d";
-const string_code  = "e";
-const symbol_code  = "f";
-const pair_code    = "g";
-const vector_code  = "h";
+const null_code    = 'a';
+const boolean_code = 'b';
+const number_code  = 'c';
+const char_code    = 'd';
+const string_code  = 'e';
+const symbol_code  = 'f';
+const pair_code    = 'g';
+const vector_code  = 'h';
 
 function unpickle_aux(exp) {
     switch (exp[0]) {
@@ -753,7 +885,7 @@ function mce_restore(s) {
 }
 
 function result(exp) {
-    return ['MCE-RESULT', exp];
+    return [new Symbol('MCE-RESULT'), exp];
 }
 
 function is_result(exp) {
@@ -764,7 +896,7 @@ function is_result(exp) {
 }
 
 function result_val(exp) {
-    return v[1];
+    return exp[1];
 }
 
 function step(state) {
@@ -784,7 +916,7 @@ function run(state) {
     const s = JSON.parse(await stdin.readFile());
     const r = mce_restore(s);
     if (typeof r === 'function') {
-        r(cons(nil, nil));
+        r(cons(null, null));
     } else {
         run(r);
     }

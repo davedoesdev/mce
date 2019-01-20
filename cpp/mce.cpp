@@ -326,7 +326,7 @@ std::shared_ptr<any> xdisplay(std::shared_ptr<any> args,
             if (is_write) {
                 out << "#\\x" << std::hex << static_cast<int>(c);
             } else {
-                out <<c;
+                out << c;
             }
         } else if (type == typeid(std::shared_ptr<std::string>)) {
             auto& s = *any_cast<std::shared_ptr<std::string>>(*exp);
@@ -386,8 +386,8 @@ std::shared_ptr<any> xprint(std::shared_ptr<any> args,
     auto r = nil;
     while (!args->empty()) {
         auto p = any_cast<std::shared_ptr<pair>>(*args);
-        xdisplay(cons(p->first, nil), out, false);
         r = p->first;
+        xdisplay(cons(r, nil), out, false);
         args = p->second;
     }
     newline(out);
@@ -407,8 +407,8 @@ std::shared_ptr<any> xwrite(std::shared_ptr<any> args,
     auto r = nil;
     while (!args->empty()) {
         auto p = any_cast<std::shared_ptr<pair>>(*args);
-        xdisplay(cons(p->first, nil), out, true);
         r = p->first;
+        xdisplay(cons(r, nil), out, true);
         args = p->second;
     }
     return r;
