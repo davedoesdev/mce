@@ -85,6 +85,61 @@ function ctenv_lookup(i, env) {
     return list_ref(env, i.car)[i.cdr];
 }
 
+function ctenv_setvar(name, i, val, env) {
+    const first = i.car;
+    let second = i.cdr;
+    const bindings = list_ref(env, first);
+    const v = bindings.cdr;
+
+    const len = v.length;
+    if (second >= len) {
+        v.length = second + 1;
+        v.fill(null, len);
+    }
+    v[second] = val;
+
+    if (!bindings.car) {
+        bindings.car = cons(null, null);
+    }
+
+    let p = bindings.car;
+    while (second > 0) {
+        if (!p.cdr) {
+            p.cdr = cons(null, null);
+        }
+        p = p.cdr;
+        --second;
+    }
+    p.car = name;
+
+    return val;
+}
+
+function setvar(sym, value, env) {
+    const name = sym.toString();
+
+    while (env) {
+        const bindings = env.car;
+        const values = bindings.cdr;
+        let syms = bindings.car;
+        let i = 0;
+
+        while (syms && (i < values.length)) {
+            if (syms.car.toString() === name) {
+                values[i] = value;
+                return value;
+            }
+
+            syms = syms.cdr;
+            ++i;
+        }
+
+        env = env.cdr;
+    }
+
+    throw new SymbolNotFoundError("setvar", sym);
+}
+
 class SymbolNotFoundError {
     constructor(proc, sym) {
         this.proc = proc;
@@ -285,6 +340,14 @@ function handle_lambda(args, params, fn, env, extend_env) {
                             null))));
 }
 
+function handle_contn_lambda(args, k) {
+    if (is_step_contn(args)) {
+        return k(env_args_args(step_contn_args(args)));
+    }
+
+    return run(k(env_args_args(args)));
+}
+
 const forms = []
 
 function define_form(f) {
@@ -460,6 +523,75 @@ const improper_lambda1 = define_form(args => {
     };
 });
 
+const letcc0 = define_form(args => {
+    const name = list_ref(args, 1);
+    const scanned = list_ref(args, 2);
+    return args => {
+        const k = list_ref(args, 0);
+        const env = list_ref(args, 1);
+        return scanned(cons(k,
+                            cons(extend_env(env,
+                                            cons(name, null),
+                                            cons(make_form(letcc1,
+                                                           cons(k, null)),
+                                                 null)),
+                                 null)));
+    };
+});
+
+const letcc1 = define_form(args => {
+    const k = list_ref(args, 1);
+    return args => {
+        return handle_contn_lambda(args, k);
+    };
+});
+
+const define0 = define_form(args => {
+    const name = list_ref(args, 1);
+    const i = list_ref(args, 2);
+    const scanned = list_ref(args, 3);
+    return args => {
+        const k = list_ref(args, 0);
+        const env = list_ref(args, 1);
+        return scanned(
+            cons(make_form(define1,
+                           cons(k, cons(env, cons(name, cons(i, null))))),
+                 cons(env, null)));
+    };
+});
+
+const define1 = define_form(args => {
+    const k = list_ref(args, 1);
+    const env = list_ref(args, 2);
+    const name = list_ref(args, 3);
+    const i = list_ref(args, 4);
+    return args => {
+        const v = list_ref(args, 0);
+        return send(k, ctenv_setvar(name, i, v, env));
+    };
+});
+
+const set0 = define_form(args => {
+    const name = list_ref(args, 1);
+    const scanned = list_ref(args, 2);
+    return args => {
+        const k = list_ref(args, 0);
+        const env = list_ref(args, 1);
+        return scanned(cons(make_form(set1,
+                                      cons(k, cons(env, cons(name, null)))),
+                            const(env, null)));
+    };
+});
+
+const set1 = define_form(args => {
+    const k = list_ref(args, 1);
+    const env = list_ref(args, 2);
+    const name = list_ref(args, 3);
+    return args => {
+        const v = list_ref(args, 0);
+        return send(k, setvar(name, v, env));
+    };
+});
 
 function make_form(defn) {
     const f2 = memoize_lambda(args => f(args), defn);
