@@ -217,6 +217,7 @@ function transfer(args) {
     const fn = list_ref(args, 2);
     return fn(make_step_contn(k,
         cons(new Symbol('MCE-TRANSFER'), list_rest(args, 2))));
+}
 
 function globalize(x, args, cf) {
     if (typeof x !== 'function') {
@@ -348,6 +349,10 @@ function handle_contn_lambda(args, k) {
     return run(k(env_args_args(args)));
 }
 
+function applyx(k, env, fn, args) {
+    return fn(make_step_contn(k, make_env_args(env, args)));
+}
+
 const forms = []
 
 function define_form(f) {
@@ -456,19 +461,18 @@ const sclis2 = define_form(args => {
     return args => {
         const w = list_ref(args, 0);
         return send(k, cons(v, w));
+    };
 });
 
 const scseq0 = define_form(args => {
     const first = list_ref(args, 1);
     const rest = list_ref(args, 2);
     return args => {
-        return args = {
-            const k = list_ref(args, 0);
-            const env = list_ref(args, 1);
-            return first(cons(make_form(scseq1,
-                                        cons(k, cons(env, cons(rest, null)))),
-                         cons(env, null)));
-        };
+        const k = list_ref(args, 0);
+        const env = list_ref(args, 1);
+        return first(cons(make_form(scseq1,
+                                    cons(k, cons(env, cons(rest, null)))),
+                     cons(env, null)));
     };
 });
 
@@ -579,7 +583,7 @@ const set0 = define_form(args => {
         const env = list_ref(args, 1);
         return scanned(cons(make_form(set1,
                                       cons(k, cons(env, cons(name, null)))),
-                            const(env, null)));
+                            cons(env, null)));
     };
 });
 
@@ -590,6 +594,34 @@ const set1 = define_form(args => {
     return args => {
         const v = list_ref(args, 0);
         return send(k, setvar(name, v, env));
+    };
+});
+
+const application0 = define_form(args => {
+    const scanned = list_ref(args, 1);
+    return args => {
+        const k = list_ref(args, 0);
+        const env = list_ref(args, 1);
+        return scanned(make_form(application1, cons(k, cons(env, null))),
+                       cons(env, null));
+    };
+});
+
+const application1 = define_form(args => {
+    const k = list_ref(args, 1);
+    const env = list_ref(args, 2);
+    return args => {
+        const v = list_ref(args, 0);
+        return applx(k, env, list_ref(v, 0), list_rest(v, 0));
+    };
+});
+
+const evalx_initial = define_form(args => {
+    const k = list_ref(args, 1);
+    const env = list_ref(args, 2);
+    const scanned = list_ref(args, 3);
+    return args => {
+        return scanned(cons(k, cons(env, null)));
     };
 });
 
