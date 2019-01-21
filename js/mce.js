@@ -41,6 +41,14 @@ function list_to_vector(l) {
     return v;
 }
 
+function vector_to_list(v) {
+    let l = null;
+    for (let i = v.length - 1; i >= 0; --i) {
+        l = cons(v[i], l);
+    }
+    return l;
+}
+
 function cmap(f, l, tab, set_entry) {
     const ref = tab.get(l);
     if (ref !== undefined) {
@@ -148,19 +156,29 @@ function setvar(sym, value, env) {
 class SymbolNotFoundError extends Error {
     constructor(proc, sym) {
         super(`${proc}: symbol not found: ${sym}`);
-        this.name = this.constructor.name;
     }
 }
 
-class UnknownDisplayExpression extends Error {
+class UnknownDisplayExpressionError extends Error {
     constructor(exp) {
         super(`unknown display expression: ${exp}`);
-        this.name = this.constructor.name;
+    }
+}
+
+class UnknownPickleExpressionError extends Error {
+    constructor(exp) {
+        super(`unknown pickle expression: ${exp}`);
+    }
+}
+
+class UnexpectedType extends Error {
+    constructor(type, exp) {
+        super(`not a ${type}: ${exp}`);
     }
 }
 
 function xdisplay(args, out, is_write) {
-    const exp = list_ref(args, 0);
+    let exp = list_ref(args, 0);
     if (exp === null) {
         out.write('()');
     } else if (typeof exp === 'boolean') {
@@ -212,7 +230,7 @@ function xdisplay(args, out, is_write) {
     } else if (typeof exp === 'function') {
         out.write('#<procedure>');
     } else {
-        throw new UnknowDisplayExpression(exp);
+        throw new UnknownDisplayExpressionError(exp);
     }
 
     return exp;
@@ -290,6 +308,30 @@ function is_null(args) {
     return list_ref(args, 0) === null;
 }
 
+function is_string(args) {
+    return typeof list_ref(args, 0) === 'string';
+}
+
+function is_pair(args) {
+    return list_ref(args, 0) instanceof Pair;
+}
+
+function is_vector(args) {
+    return Array.isArray(list_ref(args, 0));
+}
+
+function is_procedure(args) {
+    return typeof list_ref(args, 0) === 'function';
+}
+
+function vector_length(args) {
+    return list_ref(args, 0).length;
+}
+
+function vector_ref(args) {
+    return list_ref(args, 0)[list_ref(args, 1)];
+}
+
 function car(args) {
     return list_ref(list_ref(args, 0), 0);
 }
@@ -303,11 +345,84 @@ function is_eq(args) {
     const y = list_ref(args, 1);
 
     if (((x instanceof Char) && (y instanceof Char)) ||
-        ((x instanceof String) && (y instanceof String))) {
+        ((x instanceof Symbol) && (y instanceof Symbol))) {
         return x.toString() === y.toString();
     }
 
     return x === y;
+}
+
+function is_number_equal(args) {
+    const x = list_ref(args, 0);
+    const y = list_ref(args, 1);
+
+    if (typeof x !== 'number') {
+        throw new UnexpectedType('number', x);
+    }
+
+    if (typeof y !== 'number') {
+        throw new UnexpectedType('number', y);
+    }
+
+    return x === y;
+}
+
+function is_string_equal(args) {
+    const x = list_ref(args, 0);
+    const y = list_ref(args, 1);
+
+    if (typeof x !== 'string') {
+        throw new UnexpectedType('string', x);
+    }
+
+    if (typeof y !== 'string') {
+        throw new UnexpectedType('string', y);
+    }
+
+    return x === y;
+}
+
+function gunmemoize(args) {
+    return unmemoize(list_ref(args, 0));
+}
+
+function gserialize(args) {
+    return serialize(list_ref(args, 0));
+}
+
+function gcons(args) {
+    return cons(list_ref(args, 0), list_ref(args, 1));
+}
+
+function set_car(args) {
+    const p = list_ref(args, 0);
+    p.car = list_ref(args, 1);
+    return p;
+}
+
+function set_cdr(args) {
+    const p = list_ref(args, 0);
+    p.cdr = list_ref(args, 1);
+    return p;
+}
+
+function gapplyx(args) {
+    return applyx(list_ref(args, 0),
+                  list_ref(args, 1),
+                  list_ref(args, 2),
+                  list_ref(args, 3));
+}
+
+function save(args) {
+    return mce_save(list_ref(args, 0));
+}
+
+function restore(args) {
+    return mce_restore(list_ref(args, 0));
+}
+
+function getpid(args) {
+    return process.pid;
 }
 
 const global_table = new Map([
@@ -317,13 +432,37 @@ const global_table = new Map([
     ['<', less_than],
     ['>', greater_than],
     ['print', print],
+    ['eprint', eprint],
+    ['write', write],
+    ['ewrite', ewrite],
     ['null?', is_null],
+    ['string?', is_string],
+    ['pair?', is_pair],
+    ['vector?', is_vector],
+    ['procedure?', is_procedure],
+    ['vector-length', vector_length],
+    ['vector-ref', vector_ref],
+    ['string=?', is_string_equal],
     ['car', car],
     ['cdr', cdr],
-    ['eq?', is_eq]
+    ['set-car!', set_car],
+    ['set-cdr!', set_cdr],
+    ['cons', gcons],
+    ['eq?', is_eq],
+    ['=', is_number_equal],
+    ['unmemoize', gunmemoize],
+    ['serialize', gserialize],
+    ['apply', gapplyx],
+    ['save', save],
+    ['restore', restore],
+    ['transfer', transfer],
+    ['getpid', getpid]
 ]);
 
-const kenvfn_set = new Set();
+const kenvfn_set = new Set([
+    gapplyx,
+    transfer
+]);
 
 function find_global(sym) {
     const s = sym.toString();
@@ -422,14 +561,14 @@ function handle_global_lambda(args, fn, cf) {
 function handle_global_lambda_kenv(args, fn) {
     if (is_step_contn(args)) {
         const sca = step_contn_args(args);
-        return f(cons(step_contn_k(args),
-                      cons(env_args_env(sca),
-                           env_args_args(sca))));
+        return fn(cons(step_contn_k(args),
+                       cons(env_args_env(sca),
+                            env_args_args(sca))));
     }
 
-    return run(f(cons(lookup_global(new Symbol('result')),
-                      cons(env_args_env(args),
-                           env_args_args(args)))));
+    return run(fn(cons(lookup_global(new Symbol('result')),
+                       cons(env_args_env(args),
+                            env_args_args(args)))));
 }
 
 function wrap_global_lambda(fn, cf) {
@@ -452,7 +591,7 @@ function lookup(sym, env) {
     while (env) {
         const bindings = env.car;
         const values = bindings.cdr;
-        const syms = bindings.car;
+        let syms = bindings.car;
         let i = 0;
 
         while (syms && (i < values.length)) {
@@ -852,6 +991,32 @@ function memoize(exp) {
     return fn(exp);
 }
 
+function unmemoize_aux(exp, tab, fn) {
+    if (exp instanceof Pair) {
+        return cmap(fn, exp, tab, table_set);
+    }
+    if (Array.isArray(exp)) {
+        return vector_cmap(fn, exp, tab, table_set);
+    }
+    if (typeof exp === 'function') {
+        const ref = tab.get(exp);
+        if (ref !== undefined) {
+            return ref;
+        }
+        const entry = table_set(tab, exp, []);
+        entry.push(new Symbol('MCE-UNMEMOIZED'));
+        entry.push(fn(get_procedure_defn(exp)));
+        return entry;
+    }
+    return exp;
+}
+
+function unmemoize(exp) {
+    const tab = new Map();
+    const fn = x => unmemoize_aux(x, tab, fn);
+    return fn(exp);
+}
+
 function make_serialized(n) {
     return [new Symbol('MCE-SERIALIZED'), n];
 }
@@ -864,6 +1029,27 @@ function is_serialized(v) {
 
 function serialized_n(v) {
     return v[1];
+}
+
+function serialize_aux(exp, tab, fn, set_entry) {
+    if (exp instanceof Pair) {
+        return cmap(fn, exp, tab, set_entry);
+    }
+    if (Array.isArray(exp)) {
+        return vector_cmap(fn, exp, tab, set_entry);
+    }
+    return exp;
+}
+
+function serialize(exp) {
+    let counter = 0;
+    const tab = new Map();
+    const set_entry = (tab, v, entry) => {
+        table_set(tab, v, make_serialized(counter++));
+        return entry;
+    };
+    const fn = x => serialize_aux(x, tab, fn, set_entry);
+    return fn(exp);
 }
 
 function deserialize_aux(exp, tab, fn, set_entry) {
@@ -898,6 +1084,42 @@ const symbol_code  = 'f';
 const pair_code    = 'g';
 const vector_code  = 'h';
 
+function pickle_aux(exp) {
+    const j = [];
+    if (exp === null) {
+        j.push(null_code);
+    } else if (typeof exp === 'boolean') {
+        j.push(boolean_code);
+        j.push(exp ? 't' : 'f');
+    } else if (typeof exp === 'number') {
+        j.push(number_code);
+        j.push(exp);
+    } else if (exp instanceof Char) {
+        j.push(char_code);
+        j.push(exp.toString());
+    } else if (typeof exp === 'string') {
+        j.push(string_code);
+        j.push(exp);
+    } else if (exp instanceof Symbol) {
+        j.push(symbol_code);
+        j.push(exp.toString());
+    } else if (exp instanceof Pair) {
+        j.push(pair_code);
+        j.push(pickle_aux(exp.car));
+        j.push(pickle_aux(exp.cdr));
+    } else if (Array.isArray(exp)) {
+        j.push(vector_code);
+        j.push(pickle_aux(vector_to_list(exp)));
+    } else {
+        throw new UnknownPickleExpressionError(exp);
+    }
+    return j;
+}
+
+function pickle(exp) {
+    return JSON.stringify(pickle_aux(exp));
+}
+
 function unpickle_aux(exp) {
     switch (exp[0]) {
     case boolean_code:
@@ -921,6 +1143,10 @@ function unpickle_aux(exp) {
 
 function unpickle(s) {
     return unpickle_aux(JSON.parse(s));
+}
+
+function mce_save(exp) {
+    return pickle(serialize(unmemoize(exp)));
 }
 
 function mce_restore(s) {
@@ -964,3 +1190,7 @@ function run(state) {
         run(r);
     }
 })();
+
+// Remove stuff in env not used, or have a define-global
+// For globals, convert args to array and do apply?
+// Should we even bother with a global table?

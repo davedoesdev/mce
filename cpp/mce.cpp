@@ -830,12 +830,10 @@ std::shared_ptr<any> gapplyx(std::shared_ptr<any> args) {
                   list_ref(args, 3));
 }
 
-std::string mce_save(std::shared_ptr<any> exp);
 std::shared_ptr<any> save(std::shared_ptr<any> args) {
     return make_string(mce_save(list_ref(args, 0)));
 }
 
-std::shared_ptr<any> mce_restore(const std::string& s);
 std::shared_ptr<any> restore(std::shared_ptr<any> args) {
     auto a = list_ref(args, 0);
     return mce_restore(*any_cast<std::shared_ptr<std::string>>(*a));
