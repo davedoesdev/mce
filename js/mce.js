@@ -177,8 +177,7 @@ class UnexpectedType extends Error {
     }
 }
 
-function xdisplay(args, out, is_write) {
-    let exp = list_ref(args, 0);
+function xdisplay(exp, out, is_write) {
     if (exp === null) {
         out.write('()');
     } else if (typeof exp === 'boolean') {
@@ -208,12 +207,12 @@ function xdisplay(args, out, is_write) {
                 out.write(' ');
             }
             first = false;
-            xdisplay(cons(exp.car, null), out, is_write);
+            xdisplay(exp.car, out, is_write);
             exp = exp.cdr;
         }
         if (exp !== null) {
             out.write(' . ');
-            xdisplay(cons(exp, null), out, is_write);
+            xdisplay(exp, out, is_write);
         }
         out.write(')');
     } else if (Array.isArray(exp)) {
@@ -224,7 +223,7 @@ function xdisplay(args, out, is_write) {
                 out.write(' ');
             }
             first = false;
-            xdisplay(cons(v, null), out, is_write);
+            xdisplay(v, out, is_write);
         }
         out.write(')');
     } else if (typeof exp === 'function') {
@@ -243,107 +242,100 @@ function newline(out) {
 
 function xprint(args, out) {
     let r = null;
-    while (args) {
-        r = args.car;
-        xdisplay(cons(r, null), out, false);
-        args = args.cdr;
+    for (let arg of args) {
+        r = arg;
+        xdisplay(arg, out, false);
     }
     newline(out);
     return r;
 }
 
-function print(args) {
+function print(...args) {
     return xprint(args, process.stdout);
 }
 
-function eprint(args) {
+function eprint(...args) {
     return xprint(args, process.stderr);
 }
 
 function xwrite(args, out) {
     let r = null;
-    while (args) {
-        r = args.car;
-        xdisplay(cons(r, null), out, true);
-        args = args.cdr;
+    for (let arg of args) {
+        r = arg;
+        xdisplay(arg, out, true);
     }
     return r;
 }
 
-function write(args) {
+function write(...args) {
     return xwrite(args, process.stdout);
 }
 
-function ewrite(args) {
+function ewrite(...args) {
     return xwrite(args, process.stderr);
 }
 
-function plus(args) {
+function plus(...args) {
     let r = 0;
-    while (args) {
-        r += args.car;
-        args = args.cdr;
+    for (let arg of args) {
+        r += arg;
     }
     return r;
 }
 
-function multiply(args) {
+function multiply(...args) {
     let r = 1;
-    while (args) {
-        r *= args.car;
-        args = args.cdr;
+    for (let arg of args) {
+        r *= arg;
     }
     return r;
 }
 
-function less_than(args) {
-    return list_ref(args, 0) < list_ref(args, 1);
+function less_than(x, y) {
+    return x < y;
 }
 
-function greater_than(args) {
-    return list_ref(args, 0) > list_ref(args, 1);
+function greater_than(x, y) {
+    return x > y;
 }
 
-function is_null(args) {
-    return list_ref(args, 0) === null;
+function is_null(exp) {
+    return exp === null;
 }
 
-function is_string(args) {
-    return typeof list_ref(args, 0) === 'string';
+function is_string(exp) {
+    return typeof exp === 'string';
 }
 
-function is_pair(args) {
-    return list_ref(args, 0) instanceof Pair;
+function is_pair(exp) {
+    return exp instanceof Pair;
 }
 
-function is_vector(args) {
-    return Array.isArray(list_ref(args, 0));
+function is_vector(exp) {
+    return Array.isArray(exp);
 }
 
-function is_procedure(args) {
-    return typeof list_ref(args, 0) === 'function';
+function is_procedure(exp) {
+    return typeof exp === 'function';
 }
 
-function vector_length(args) {
-    return list_ref(args, 0).length;
+function vector_length(v) {
+    return v.length;
 }
 
-function vector_ref(args) {
-    return list_ref(args, 0)[list_ref(args, 1)];
+function vector_ref(v, i) {
+    return v[i];
 }
 
-function car(args) {
-    return list_ref(list_ref(args, 0), 0);
+function car(p) {
+    return p.car;
 }
 
-function cdr(args) {
-    return list_rest(list_ref(args, 0), 0);
+function cdr(p) {
+    return p.cdr;
 }
 
-function is_eq(args) {
-    const x = list_ref(args, 0);
-    const y = list_ref(args, 1);
-
+function is_eq(x, y) {
     if (((x instanceof Char) && (y instanceof Char)) ||
         ((x instanceof Symbol) && (y instanceof Symbol))) {
         return x.toString() === y.toString();
@@ -352,10 +344,7 @@ function is_eq(args) {
     return x === y;
 }
 
-function is_number_equal(args) {
-    const x = list_ref(args, 0);
-    const y = list_ref(args, 1);
-
+function is_number_equal(x, y) {
     if (typeof x !== 'number') {
         throw new UnexpectedType('number', x);
     }
@@ -367,10 +356,7 @@ function is_number_equal(args) {
     return x === y;
 }
 
-function is_string_equal(args) {
-    const x = list_ref(args, 0);
-    const y = list_ref(args, 1);
-
+function is_string_equal(x, y) {
     if (typeof x !== 'string') {
         throw new UnexpectedType('string', x);
     }
@@ -382,46 +368,17 @@ function is_string_equal(args) {
     return x === y;
 }
 
-function gunmemoize(args) {
-    return unmemoize(list_ref(args, 0));
-}
-
-function gserialize(args) {
-    return serialize(list_ref(args, 0));
-}
-
-function gcons(args) {
-    return cons(list_ref(args, 0), list_ref(args, 1));
-}
-
-function set_car(args) {
-    const p = list_ref(args, 0);
-    p.car = list_ref(args, 1);
+function set_car(p, exp) {
+    p.car = exp;
     return p;
 }
 
-function set_cdr(args) {
-    const p = list_ref(args, 0);
-    p.cdr = list_ref(args, 1);
+function set_cdr(p, exp) {
+    p.cdr = exp;
     return p;
 }
 
-function gapplyx(args) {
-    return applyx(list_ref(args, 0),
-                  list_ref(args, 1),
-                  list_ref(args, 2),
-                  list_ref(args, 3));
-}
-
-function save(args) {
-    return mce_save(list_ref(args, 0));
-}
-
-function restore(args) {
-    return mce_restore(list_ref(args, 0));
-}
-
-function getpid(args) {
+function getpid() {
     return process.pid;
 }
 
@@ -447,20 +404,20 @@ const global_table = new Map([
     ['cdr', cdr],
     ['set-car!', set_car],
     ['set-cdr!', set_cdr],
-    ['cons', gcons],
+    ['cons', cons],
     ['eq?', is_eq],
     ['=', is_number_equal],
-    ['unmemoize', gunmemoize],
-    ['serialize', gserialize],
-    ['apply', gapplyx],
-    ['save', save],
-    ['restore', restore],
+    ['unmemoize', unmemoize],
+    ['serialize', serialize],
+    ['apply', applyx],
+    ['save', mce_save],
+    ['restore', mce_restore],
     ['transfer', transfer],
     ['getpid', getpid]
 ]);
 
 const kenvfn_set = new Set([
-    gapplyx,
+    applyx,
     transfer
 ]);
 
@@ -525,11 +482,9 @@ function transfer_args(args) {
     return list_rest(args, 0);
 }
 
-function transfer(args) {
-    const k = list_ref(args, 0);
-    const fn = list_ref(args, 2);
+function transfer(k, env, fn, ...args) {
     return fn(make_step_contn(k,
-        cons(new Symbol('MCE-TRANSFER'), list_rest(args, 2))));
+        cons(new Symbol('MCE-TRANSFER'), vector_to_list(args))));
 }
 
 function globalize(x, args, cf) {
@@ -543,6 +498,10 @@ function globalize(x, args, cf) {
     return f;
 }
 
+function call_global(f, args) {
+    return f(...list_to_vector(args));
+}
+
 function handle_global_lambda(args, fn, cf) {
     if (is_step_contn(args)) {
         const sck = step_contn_k(args);
@@ -551,24 +510,24 @@ function handle_global_lambda(args, fn, cf) {
             return fn(make_step_contn(sck, transfer_args(sca)));
         }
         const eaa = env_args_args(sca);
-        return send(sck, globalize(fn(eaa), eaa, cf));
+        return send(sck, globalize(call_global(fn, eaa), eaa, cf));
     }
 
     const eaa = env_args_args(args);
-    return globalize(fn(eaa), eaa, cf);
+    return globalize(call_global(fn, eaa), eaa, cf);
 }
 
 function handle_global_lambda_kenv(args, fn) {
     if (is_step_contn(args)) {
         const sca = step_contn_args(args);
-        return fn(cons(step_contn_k(args),
-                       cons(env_args_env(sca),
-                            env_args_args(sca))));
+        return call_global(fn, cons(step_contn_k(args),
+                                    cons(env_args_env(sca),
+                                         env_args_args(sca))));
     }
 
-    return run(fn(cons(lookup_global(new Symbol('result')),
-                       cons(env_args_env(args),
-                            env_args_args(args)))));
+    return run(call_global(fn, cons(lookup_global(new Symbol('result')),
+                                    cons(env_args_env(args),
+                                         env_args_args(args)))));
 }
 
 function wrap_global_lambda(fn, cf) {
@@ -1191,6 +1150,5 @@ function run(state) {
     }
 })();
 
+// Can forms take params too?
 // Remove stuff in env not used, or have a define-global
-// For globals, convert args to array and do apply?
-// Should we even bother with a global table?
