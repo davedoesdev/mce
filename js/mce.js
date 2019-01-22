@@ -635,272 +635,158 @@ function define_form(f) {
 
 const send = cons;
 
-const symbol_lookup = define_form(args => {
-    const i = list_ref(args, 1);
-    return args => {
-        const k = list_ref(args, 0);
-        const env = list_ref(args, 1);
+const symbol_lookup = define_form((self, i) =>
+    args => {
+        const [k, env] = list_to_vector(args);
         return send(k, ctenv_lookup(i, env));
-    };
-});
+    });
 
-const send_value = define_form(args => {
-    const exp = list_ref(args, 1);
-    return args => {
-        const k = list_ref(args, 0);
+const send_value = define_form((self, exp) =>
+    args => {
+        const [k] = list_to_vector(args);
         return send(k, exp);
-    };
-});
+    });
 
-const runtime_lookup = define_form(args => {
-    const name = list_ref(args, 1);
-    return args => {
-        const k = list_ref(args, 0);
-        const env = list_ref(args, 1);
+const runtime_lookup = define_form((self, name) =>
+    args => {
+        const [k, env] = list_to_vector(args);
         return send(k, lookup(name, env));
-    };
-});
+    });
 
-const constructed_function = define_form(args => {
-    const self = list_ref(args, 0);
-    const args2 = list_ref(args, 1);
-    const cf = list_ref(args, 2);
-    const r = cf(args2);
+const constructed_function = define_form((self, args, cf) => {
+    const r = cf(args);
     if (typeof r === 'function') {
         return wrap_global_lambda(r, self);
     }
     return r;
 });
 
-const global_lambda = define_form(args => {
-    const self = list_ref(args, 0);
-    const defn = list_ref(args, 1);
-    return wrap_global_lambda(find_global(defn), self);
-});
+const global_lambda = define_form((self, defn) =>
+    wrap_global_lambda(find_global(defn), self));
 
-const if0 = define_form(args => {
-    const scan0 = list_ref(args, 1);
-    const scan1 = list_ref(args, 2);
-    const scan2 = list_ref(args, 3);
-    return args => {
-        const k = list_ref(args, 0);
-        const env = list_ref(args, 1);
-        return scan0(cons(make_form(if1,
-                                    cons(k, cons(env, cons(scan1, cons(scan2,
-                                         null))))),
-                     cons(env, null)));
-    };
-});
+const if0 = define_form((self, scan0, scan1, scan2) =>
+    args => {
+        const [k, env] = list_to_vector(args);
+        return scan0(cons(make_form(if1, k, env, scan1, scan2),
+                          cons(env, null)));
+    });
 
-const if1 = define_form(args => {
-    const k = list_ref(args, 1);
-    const env = list_ref(args, 2);
-    const scan1 = list_ref(args, 3);
-    const scan2 = list_ref(args, 4);
-    return args => {
-        const v = list_ref(args, 0);
+const if1 = define_form((self, k, env, scan1, scan2) =>
+    args => {
+        const [v] = list_to_vector(args);
         const f = v ? scan1 : scan2;
         return f(cons(k, cons(env, null)));
-    };
-});
+    });
 
-const sclis0 = define_form(args => {
-    const first = list_ref(args, 1);
-    const rest = list_ref(args, 2);
-    return args => {
-        const k = list_ref(args, 0);
-        const env = list_ref(args, 1);
-        return first(cons(make_form(sclis1,
-                                    cons(k, cons(env, cons(rest, null)))),
+const sclis0 = define_form((self, first, rest) =>
+    args => {
+        const [k, env] = list_to_vector(args);
+        return first(cons(make_form(sclis1, k, env, rest),
                           cons(env, null)));
-    };
-});
+    });
 
-const sclis1 = define_form(args => {
-    const k = list_ref(args, 1);
-    const env = list_ref(args, 2);
-    const rest = list_ref(args, 3);
-    return args => {
-        const v = list_ref(args, 0);
-        return rest(cons(make_form(sclis2, cons(k, cons(v, null))),
+const sclis1 = define_form((self, k, env, rest) =>
+    args => {
+        const [v] = list_to_vector(args);
+        return rest(cons(make_form(sclis2, k, v),
                          cons(env, null)));
-    };
-});
+    });
 
-const sclis2 = define_form(args => {
-    const k = list_ref(args, 1);
-    const v = list_ref(args, 2);
-    return args => {
-        const w = list_ref(args, 0);
+const sclis2 = define_form((self, k, v) =>
+    args => {
+        const [w] = list_to_vector(args);
         return send(k, cons(v, w));
-    };
-});
+    });
 
-const scseq0 = define_form(args => {
-    const first = list_ref(args, 1);
-    const rest = list_ref(args, 2);
-    return args => {
-        const k = list_ref(args, 0);
-        const env = list_ref(args, 1);
-        return first(cons(make_form(scseq1,
-                                    cons(k, cons(env, cons(rest, null)))),
-                     cons(env, null)));
-    };
-});
+const scseq0 = define_form((self, first, rest) =>
+    args => {
+        const [k, env] = list_to_vector(args);
+        return first(cons(make_form(scseq1, k, env, rest),
+                          cons(env, null)));
+    });
 
-const scseq1 = define_form(args => {
-    const k = list_ref(args, 1);
-    const env = list_ref(args, 2);
-    const rest = list_ref(args, 3);
-    return args => {
-        return rest(cons(k, cons(env, null)));
-    };
-});
+const scseq1 = define_form((self, k, env, rest) =>
+    () => rest(cons(k, cons(env, null))));
 
-const lambda0 = define_form(args => {
-    const params = list_ref(args, 1);
-    const scanned = list_ref(args, 2);
-    return args => {
-        const k = list_ref(args, 0);
-        const env = list_ref(args, 1);
-        return send(k,
-                    make_form(lambda1,
-                              cons(params, cons(scanned, cons(env, null)))));
-    };
-});
+const lambda0 = define_form((self, params, scanned) =>
+    args => {
+        const [k, env] = list_to_vector(args);
+        return send(k, make_form(lambda1, params, scanned, env));
+    });
 
-const lambda1 = define_form(args => {
-    const params = list_ref(args, 1);
-    const scanned = list_ref(args, 2);
-    const env = list_ref(args, 3);
-    return args => {
-        return handle_lambda(args, params, scanned, env, extend_env);
-    };
-});
+const lambda1 = define_form((self, params, scanned, env) =>
+    args => handle_lambda(args, params, scanned, env, extend_env));
 
-const improper_lambda0 = define_form(args => {
-    const params = list_ref(args, 1);
-    const scanned = list_ref(args, 2);
-    return args => {
-        const k = list_ref(args, 0);
-        const env = list_ref(args, 1);
-        return send(k,
-                    make_form(improper_lambda1,
-                              cons(params, cons(scanned, cons(env, null)))));
-    };
-});
+const improper_lambda0 = define_form((self, params, scanned) =>
+    args => {
+        const [k, env] = list_to_vector(args);
+        return send(k, make_form(improper_lambda1, params, scanned, env));
+    });
 
-const improper_lambda1 = define_form(args => {
-    const params = list_ref(args, 1);
-    const scanned = list_ref(args, 2);
-    const env = list_ref(args, 3);
-    return args => {
-        return handle_lambda(args, params, scanned, env, improper_extend_env);
-    };
-});
+const improper_lambda1 = define_form((self, params, scanned, env) =>
+    args => handle_lambda(args, params, scanned, env, improper_extend_env));
 
-const letcc0 = define_form(args => {
-    const name = list_ref(args, 1);
-    const scanned = list_ref(args, 2);
-    return args => {
-        const k = list_ref(args, 0);
-        const env = list_ref(args, 1);
+const letcc0 = define_form((self, name, scanned) =>
+    args => {
+        const [k, env] = list_to_vector(args);
         return scanned(cons(k,
                             cons(extend_env(env,
                                             cons(name, null),
-                                            cons(make_form(letcc1,
-                                                           cons(k, null)),
-                                                 null)),
+                                            cons(make_form(letcc1, k), null)),
                                  null)));
-    };
-});
+    });
 
-const letcc1 = define_form(args => {
-    const k = list_ref(args, 1);
-    return args => {
-        return handle_contn_lambda(args, k);
-    };
-});
+const letcc1 = define_form((self, k) =>
+    args => handle_contn_lambda(args, k));
 
-const define0 = define_form(args => {
-    const name = list_ref(args, 1);
-    const i = list_ref(args, 2);
-    const scanned = list_ref(args, 3);
-    return args => {
-        const k = list_ref(args, 0);
-        const env = list_ref(args, 1);
+const define0 = define_form((self, name, i, scanned) =>
+    args => {
+        const [k, env] = list_to_vector(args);
         return scanned(
-            cons(make_form(define1,
-                           cons(k, cons(env, cons(name, cons(i, null))))),
+            cons(make_form(define1, k, env, name, i),
                  cons(env, null)));
-    };
-});
+    });
 
-const define1 = define_form(args => {
-    const k = list_ref(args, 1);
-    const env = list_ref(args, 2);
-    const name = list_ref(args, 3);
-    const i = list_ref(args, 4);
-    return args => {
-        const v = list_ref(args, 0);
+const define1 = define_form((self, k, env, name, i) =>
+    args => {
+        const [v] = list_to_vector(args);
         return send(k, ctenv_setvar(name, i, v, env));
-    };
-});
+    });
 
-const set0 = define_form(args => {
-    const name = list_ref(args, 1);
-    const scanned = list_ref(args, 2);
-    return args => {
-        const k = list_ref(args, 0);
-        const env = list_ref(args, 1);
-        return scanned(cons(make_form(set1,
-                                      cons(k, cons(env, cons(name, null)))),
+const set0 = define_form((self, name, scanned) =>
+    args => {
+        const [k, env] = list_to_vector(args);
+        return scanned(cons(make_form(set1, k, env, name),
                             cons(env, null)));
-    };
-});
+    });
 
-const set1 = define_form(args => {
-    const k = list_ref(args, 1);
-    const env = list_ref(args, 2);
-    const name = list_ref(args, 3);
-    return args => {
-        const v = list_ref(args, 0);
+const set1 = define_form((self, k, env, name) =>
+    args => {
+        const [v] = list_to_vector(args);
         return send(k, setvar(name, v, env));
-    };
-});
+    });
 
-const application0 = define_form(args => {
-    const scanned = list_ref(args, 1);
-    return args => {
-        const k = list_ref(args, 0);
-        const env = list_ref(args, 1);
-        return scanned(cons(make_form(application1, cons(k, cons(env, null))),
+const application0 = define_form((self, scanned) =>
+    args => {
+        const [k, env] = list_to_vector(args);
+        return scanned(cons(make_form(application1, k, env),
                             cons(env, null)));
-    };
-});
+    });
 
-const application1 = define_form(args => {
-    const k = list_ref(args, 1);
-    const env = list_ref(args, 2);
-    return args => {
-        const v = list_ref(args, 0);
+const application1 = define_form((self, k, env) =>
+    args => {
+        const [v] = list_to_vector(args);
         return applyx(k, env, list_ref(v, 0), list_rest(v, 0));
-    };
-});
+    });
 
-const evalx_initial = define_form(args => {
-    const k = list_ref(args, 1);
-    const env = list_ref(args, 2);
-    const scanned = list_ref(args, 3);
-    return args => {
-        return scanned(cons(k, cons(env, null)));
-    };
-});
+const evalx_initial = define_form((self, k, env, scanned) =>
+    () => scanned(cons(k, cons(env, null))));
 
-function make_form(n, args) {
-    const defn = cons(n, args);
+function make_form(n, ...args) {
+    const defn = cons(n, vector_to_list(args));
     const f2 = memoize_lambda(args => f(args), defn);
-    const f = memoize_lambda(forms[defn.car](cons(f2, defn.cdr)), defn);
+    args.unshift(f2);
+    const f = memoize_lambda(forms[defn.car](...args), defn);
     return f;
 }
 
@@ -934,7 +820,7 @@ function memoize_aux(exp, tab, fn) {
                 memoize_lambda(args => f(args), () => r));
             const r = fn(repexp);
             let f = args => {
-                f = make_form(r.car, r.cdr);
+                f = make_form(r.car, ...list_to_vector(r.cdr));
                 return f(args);
             };
             return entry;
@@ -1150,5 +1036,4 @@ function run(state) {
     }
 })();
 
-// Can forms take params too?
 // Remove stuff in env not used, or have a define-global
