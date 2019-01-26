@@ -970,5 +970,3 @@ function run(state) {
         run(r);
     }
 })();
-
-// Silence bigloo expansion warnings

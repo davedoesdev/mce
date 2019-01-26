@@ -1,6 +1,8 @@
 (module expand (main main))
 
 (define (main argv)
+    (bigloo-warning-set! 0)
+
     (write (cdr (expand `((
 
 (define-syntax define
