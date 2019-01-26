@@ -95,7 +95,8 @@ function memoize_lambda(proc, defn) {
 }
 
 function ctenv_lookup(i, env) {
-    return list_ref(env, i.car).cdr[i.cdr];
+    const r = list_ref(env, i.car).cdr[i.cdr];
+    return r === undefined ? null : r;
 }
 
 function ctenv_setvar(name, i, val, env) {
@@ -126,31 +127,6 @@ function ctenv_setvar(name, i, val, env) {
     p.car = name;
 
     return val;
-}
-
-function setvar(sym, value, env) {
-    const name = sym.toString();
-
-    while (env) {
-        const bindings = env.car;
-        const values = bindings.cdr;
-        let syms = bindings.car;
-        let i = 0;
-
-        while (syms && (i < values.length)) {
-            if (syms.car.toString() === name) {
-                values[i] = value;
-                return value;
-            }
-
-            syms = syms.cdr;
-            ++i;
-        }
-
-        env = env.cdr;
-    }
-
-    throw new SymbolNotFoundError("setvar", sym);
 }
 
 class SymbolNotFoundError extends Error {
@@ -545,28 +521,6 @@ function lookup_global(sym) {
     return f;
 }
 
-function lookup(sym, env) {
-    const s = sym.toString();
-    while (env) {
-        const bindings = env.car;
-        const values = bindings.cdr;
-        let syms = bindings.car;
-        let i = 0;
-
-        while (syms && (i < values.length)) {
-            if (syms.car.toString() === s) {
-                return values[i];
-            }
-            syms = syms.cdr;
-            ++i;
-        }
-
-        env = env.cdr;
-    }
-
-    return lookup_global(sym);
-}
-
 function extend_env(env, syms, values) {
     return cons(cons(syms, list_to_vector(values)), env);
 }
@@ -645,12 +599,6 @@ const send_value = define_form((self, exp) =>
     args => {
         const [k] = list_to_vector(args);
         return send(k, exp);
-    });
-
-const runtime_lookup = define_form((self, name) =>
-    args => {
-        const [k, env] = list_to_vector(args);
-        return send(k, lookup(name, env));
     });
 
 const constructed_function = define_form((self, args, cf) => {
@@ -751,19 +699,6 @@ const define1 = define_form((self, k, env, name, i) =>
     args => {
         const [v] = list_to_vector(args);
         return send(k, ctenv_setvar(name, i, v, env));
-    });
-
-const set0 = define_form((self, name, scanned) =>
-    args => {
-        const [k, env] = list_to_vector(args);
-        return scanned(cons(make_form(set1, k, env, name),
-                            cons(env, null)));
-    });
-
-const set1 = define_form((self, k, env, name) =>
-    args => {
-        const [v] = list_to_vector(args);
-        return send(k, setvar(name, v, env));
     });
 
 const application0 = define_form((self, scanned) =>
@@ -1036,4 +971,4 @@ function run(state) {
     }
 })();
 
-// Remove stuff in env not used, or have a define-global
+// Silence bigloo expansion warnings

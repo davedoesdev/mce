@@ -1,7 +1,7 @@
 (module expand (main main))
 
 (define (main argv)
-    (write (expand `(let ()
+    (write (cdr (expand `((
 
 (define-syntax define
   (syntax-rules ()
@@ -250,16 +250,27 @@
        (let*-values (binding2 ...)
          body1 body2 ...)))))
 
-(define (list . args) args)
+(define-syntax toplevel
+  (syntax-rules ()
+    ((toplevel (f params ...) body ...)
+     (f (lambda (params ...) body ...)))
+    ((toplevel (f params . rest) body ...)
+     (f (lambda (params . rest) body ...)))
+    ((toplevel (f . args) body ...)
+     (f (lambda args body ...)))
+    ((toplevel var val ...)
+     (var (begin val ...)))))
+) (
+(toplevel (list . args) args)
 
-(define (cons* . args)
+(toplevel (cons* . args)
     (if (null? (cdr args))
         (car args)
         (cons (car args) (apply cons* (cdr args)))))
 
-(define eqv? eq?)
+(toplevel eqv? eq?)
 
-(define (equal? x y)
+(toplevel (equal? x y)
     (cond ((eqv? x y) #t)
           ((and (string? x) (string? y)) (string=? x y))
           ((and (pair? x) (pair? y))
@@ -275,9 +286,9 @@
                    #f)))
           (else #f)))
 
-(define (memv o l)
+(toplevel (memv o l)
     (cond ((null? l) #f)
           ((eqv? (car l) o) #t)
           (else (memv o (cdr l)))))
-
-,(read)))))
+) 
+,(read))))))

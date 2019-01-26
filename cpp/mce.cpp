@@ -455,7 +455,10 @@ std::shared_ptr<any> ctenv_lookup(std::shared_ptr<any> i,
     auto second = any_cast<double>(*ip->second);
     auto bindings = any_cast<std::shared_ptr<pair>>(*list_ref(env, first));
     auto v = any_cast<std::shared_ptr<vector>>(*bindings->second);
-    return (*v)[second];
+    if (second < v->size()) {
+        return (*v)[second];
+    }
+    return nil;
 }
 
 std::shared_ptr<any> ctenv_setvar(std::shared_ptr<any> name,
@@ -487,34 +490,6 @@ std::shared_ptr<any> ctenv_setvar(std::shared_ptr<any> name,
     p->first = name;
 
     return val;
-}
-
-std::shared_ptr<any> setvar(std::shared_ptr<any> sym,
-                            std::shared_ptr<any> value,
-                            std::shared_ptr<any> env) {
-    auto name = any_cast<std::shared_ptr<symbol>>(*sym);
-
-    while (!env->empty()) {
-        auto ep = any_cast<std::shared_ptr<pair>>(*env);
-        auto bindings = any_cast<std::shared_ptr<pair>>(*ep->first);
-        auto values = any_cast<std::shared_ptr<vector>>(*bindings->second);
-        auto syms = bindings->first;
-        size_t i = 0;
-
-        while (!syms->empty() && (i < values->size())) {
-            auto sp = any_cast<std::shared_ptr<pair>>(*syms);
-            if (*any_cast<std::shared_ptr<symbol>>(*sp->first) == *name) {
-                (*values)[i] = value;
-                return value;
-            }
-            syms = sp->second;
-            ++i;
-        }
-
-        env = ep->second;
-    }
-
-    throw std::range_error(*name);
 }
 
 std::shared_ptr<any> symbol_lookup(std::shared_ptr<any> args) {
@@ -1034,39 +1009,6 @@ std::shared_ptr<any> handle_contn_lambda(std::shared_ptr<any> args,
     return run((*f)(env_args_args(args)));
 }
 
-std::shared_ptr<any> lookup(symbol& sym, std::shared_ptr<any> env) {
-    while (!env->empty()) {
-        auto ep = any_cast<std::shared_ptr<pair>>(*env);
-        auto bindings = any_cast<std::shared_ptr<pair>>(*ep->first);
-        auto values = any_cast<std::shared_ptr<vector>>(*bindings->second);
-        auto syms = bindings->first;
-        size_t i = 0;
-
-        while (!syms->empty() && (i < values->size())) {
-            auto sp = any_cast<std::shared_ptr<pair>>(*syms);
-            if (*any_cast<std::shared_ptr<symbol>>(*sp->first) == sym) {
-                return (*values)[i];
-            }
-            syms = sp->second;
-            ++i;
-        }
-
-        env = ep->second;
-    }
-
-    return lookup_global(sym);
-}
-
-std::shared_ptr<any> runtime_lookup(std::shared_ptr<any> args) {
-    auto name = any_cast<std::shared_ptr<symbol>>(*list_ref(args, 1));
-    return make_lambda(
-        [name](std::shared_ptr<any> args) -> std::shared_ptr<any> {
-            auto k = list_ref(args, 0);
-            auto env = list_ref(args, 1);
-            return send(k, lookup(*name, env));
-        });
-}
-
 std::shared_ptr<any> constructed_function(std::shared_ptr<any> args) {
     auto self = list_ref(args, 0);
     auto args2 = list_ref(args, 1);
@@ -1109,8 +1051,6 @@ std::shared_ptr<any> letcc0(std::shared_ptr<any> args);
 std::shared_ptr<any> letcc1(std::shared_ptr<any> args);
 std::shared_ptr<any> define0(std::shared_ptr<any> args);
 std::shared_ptr<any> define1(std::shared_ptr<any> args);
-std::shared_ptr<any> set0(std::shared_ptr<any> args);
-std::shared_ptr<any> set1(std::shared_ptr<any> args);
 std::shared_ptr<any> application0(std::shared_ptr<any> args);
 std::shared_ptr<any> application1(std::shared_ptr<any> args);
 
@@ -1125,7 +1065,6 @@ enum class forms { \
 define_forms(
     symbol_lookup,
     send_value,
-    runtime_lookup,
     constructed_function,
     global_lambda,
     if0,
@@ -1143,8 +1082,6 @@ define_forms(
     letcc1,
     define0,
     define1,
-    set0,
-    set1,
     application0,
     application1,
     evalx_initial
@@ -1403,31 +1340,6 @@ std::shared_ptr<any> define0(std::shared_ptr<any> args) {
         });
 }
 
-std::shared_ptr<any> set1(std::shared_ptr<any> args) {
-    auto k = list_ref(args, 1);
-    auto env = list_ref(args, 2);
-    auto name = list_ref(args, 3);
-    return make_lambda([k, env, name]
-        (std::shared_ptr<any> args) -> std::shared_ptr<any> {
-            auto v = list_ref(args, 0);
-            return send(k, setvar(name, v, env));
-        });
-}
-
-std::shared_ptr<any> set0(std::shared_ptr<any> args) {
-    auto name = list_ref(args, 1);
-    auto scanned = list_ref(args, 2);
-    return make_lambda([name, scanned]
-        (std::shared_ptr<any> args) -> std::shared_ptr<any> {
-            auto k = list_ref(args, 0);
-            auto env = list_ref(args, 1);
-            return (*any_cast<lambda>(*scanned))(
-                cons(make_form(forms::set1,
-                               cons(k, cons(env, cons(name, nil)))),
-                     cons(env, nil)));
-        });
-}
-
 std::shared_ptr<any> application1(std::shared_ptr<any> args) {
     auto k = list_ref(args, 1);
     auto env = list_ref(args, 2);
@@ -1477,8 +1389,8 @@ std::shared_ptr<any> memoize_aux(std::shared_ptr<any> exp,
         auto v = any_cast<std::shared_ptr<vector>>(*exp);
         if (is_unmemoized(v)) {
             auto repexp = unmemoized_repexp(v);
-            auto r = make_symbol("unspecified");
-            auto f = make_symbol("unspecified");
+            auto r = std::make_shared<any>();
+            auto f = std::make_shared<any>();
             auto entry = table_set(tab, exp, memoize_lambda(
                 make_lambda2([f]
                     (std::shared_ptr<any> args) -> std::shared_ptr<any> {
