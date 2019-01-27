@@ -17,8 +17,8 @@ inline T box_cast(const boxed& a) {
     return boost::any_cast<T>(*a);
 }
 
-inline bool is_empty(const boxed& a) {
-    return a->empty();
+inline bool box_contains_lambda(const boxed& a) {
+    return a->type() == typeid(lambda);
 }
 
 boxed cons(boxed car, boxed cdr);
