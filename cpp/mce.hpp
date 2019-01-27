@@ -13,8 +13,8 @@ extern size_t gc_threshold;
 extern const boxed nil;
 
 template<typename T>
-inline T box_cast(boost::any& a) {
-    return boost::any_cast<T>(a);
+inline T box_cast(const boxed& a) {
+    return boost::any_cast<T>(*a);
 }
 
 inline bool is_empty(const boxed& a) {
