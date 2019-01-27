@@ -1,7 +1,10 @@
 all: mce
 
-%: %.cpp
-	$(CXX) -g -o $@ $^ -lboost_program_options
+SOURCES = main.cpp mce.cpp
+HEADERS = mce.hpp
+
+mce: $(SOURCES) $(HEADERS)
+	$(CXX) -g -Wall -Wextra -o $@ $(SOURCES) -lboost_program_options
 
 clean:
 	rm -f mce

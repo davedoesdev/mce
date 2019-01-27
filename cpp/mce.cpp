@@ -1,17 +1,12 @@
 #include <iostream>
-#include <memory>
 #include <utility>
 #include <vector>
 #include <unordered_map>
 #include <unordered_set>
-#include <boost/any.hpp>
-#include <boost/program_options.hpp>
 #include "json.hpp"
+#include "mce.hpp"
 
 using nlohmann::json;
-using boost::any;
-using boost::any_cast;
-using namespace boost::program_options;
 
 const char null_code    = 'a';
 const char boolean_code = 'b';
@@ -22,11 +17,8 @@ const char symbol_code  = 'f';
 const char pair_code    = 'g';
 const char vector_code  = 'h';
 
-typedef std::pair<std::shared_ptr<any>, std::shared_ptr<any>> pair;
-typedef std::vector<std::shared_ptr<any>> vector;
-typedef std::shared_ptr<any> function(std::shared_ptr<any>);
-typedef std::function<function> func;
-typedef std::shared_ptr<func> lambda;
+typedef std::pair<boxed, boxed> pair;
+typedef std::vector<boxed> vector;
 
 class symbol : public std::string {
 public:
@@ -34,97 +26,87 @@ public:
 };
 
 struct CMapHash {
-    std::size_t operator()(const std::shared_ptr<any>& a) const noexcept {
-        if (a && !a->empty()) {
+    std::size_t operator()(const boxed& a) const noexcept {
+        if (!is_empty(a)) {
             auto& type = a->type();
 
             if (type == typeid(std::shared_ptr<pair>)) {
                 return std::hash<std::shared_ptr<pair>>{}(
-                    any_cast<std::shared_ptr<pair>>(*a));
+                    box_cast<std::shared_ptr<pair>>(*a));
             }
 
             if (type == typeid(std::shared_ptr<vector>)) {
                 return std::hash<std::shared_ptr<vector>>{}(
-                    any_cast<std::shared_ptr<vector>>(*a));
+                    box_cast<std::shared_ptr<vector>>(*a));
             }
 
             if (type == typeid(lambda)) {
-                return std::hash<lambda>{}(any_cast<lambda>(*a));
+                return std::hash<lambda>{}(box_cast<lambda>(*a));
             }
 
             if (type == typeid(double)) {
-                return std::hash<double>{}(any_cast<double>(*a));
+                return std::hash<double>{}(box_cast<double>(*a));
             }
         }
 
-        return std::hash<std::shared_ptr<any>>{}(a);
+        return std::hash<boxed>{}(a);
     }
 };
 
 struct CMapEqual {
-    bool operator()(const std::shared_ptr<any>& x,
-                    const std::shared_ptr<any>& y) const noexcept {
-        if (x && y) {
-            if (x->empty()) {
-                return y->empty();
-            }
+    bool operator()(const boxed& x, const boxed& y) const noexcept {
+        if (is_empty(x)) {
+            return is_empty(y);
+        }
 
-            if (y->empty()) {
-                return false;
-            }
+        if (is_empty(y)) {
+            return false;
+        }
 
-            auto& type = x->type();
-            if (y->type() != type) {
-                return false;
-            }
+        auto& type = x->type();
+        if (y->type() != type) {
+            return false;
+        }
 
-            if (type == typeid(std::shared_ptr<pair>)) {
-                return any_cast<std::shared_ptr<pair>>(*x) ==
-                       any_cast<std::shared_ptr<pair>>(*y);
-            }
+        if (type == typeid(std::shared_ptr<pair>)) {
+            return box_cast<std::shared_ptr<pair>>(*x) ==
+                   box_cast<std::shared_ptr<pair>>(*y);
+        }
 
-            if (type == typeid(std::shared_ptr<vector>)) {
-                return any_cast<std::shared_ptr<vector>>(*x) ==
-                       any_cast<std::shared_ptr<vector>>(*y);
-            }
+        if (type == typeid(std::shared_ptr<vector>)) {
+            return box_cast<std::shared_ptr<vector>>(*x) ==
+                   box_cast<std::shared_ptr<vector>>(*y);
+        }
 
-            if (type == typeid(lambda)) {
-                return any_cast<lambda>(*x) == any_cast<lambda>(*y);
-            }
+        if (type == typeid(lambda)) {
+            return box_cast<lambda>(*x) == box_cast<lambda>(*y);
+        }
 
-            if (type == typeid(double)) {
-                return any_cast<double>(*x) == any_cast<double>(*y);
-            }
+        if (type == typeid(double)) {
+            return box_cast<double>(*x) == box_cast<double>(*y);
         }
 
         return x == y;
     }
 };
 
-typedef std::unordered_map<std::shared_ptr<any>,
-                           std::shared_ptr<any>,
-                           CMapHash,
-                           CMapEqual> cmap_table;
-typedef std::function<std::shared_ptr<any>(std::shared_ptr<any>)> map_fn;
-typedef std::function<std::shared_ptr<any>(cmap_table&,
-                                           std::shared_ptr<any>,
-                                           std::shared_ptr<any>)> set_entry_fn;
-typedef std::shared_ptr<any> extend_env_fn(std::shared_ptr<any> env,
-                                           std::shared_ptr<any> syms,
-                                           std::shared_ptr<any> values);
+typedef std::unordered_map<boxed, boxed, CMapHash, CMapEqual> cmap_table;
+typedef std::function<boxed(boxed)> map_fn;
+typedef std::function<boxed(cmap_table&, boxed, boxed)> set_entry_fn;
+typedef boxed extend_env_fn(boxed env, boxed syms, boxed values);
 
-const auto nil = std::make_shared<any>();
+const boxed nil = std::make_shared<box>();
 
 std::unordered_map<pair*, std::weak_ptr<pair>> allocated_pairs;
 std::unordered_map<vector*, std::weak_ptr<vector>> allocated_vectors;
 std::unordered_map<func*, std::weak_ptr<func>> allocated_functions;
 
-std::string mce_save(std::shared_ptr<any> exp);
-std::shared_ptr<any> mce_restore(const std::string& s);
+std::string mce_save(boxed exp);
+boxed mce_restore(const std::string& s);
 
 size_t gc_threshold;
 
-std::shared_ptr<any> maybe_gc(std::shared_ptr<any> state) {
+boxed maybe_gc(boxed state) {
     if ((allocated_pairs.size() > gc_threshold) ||
         (allocated_vectors.size() > gc_threshold) ||
         (allocated_functions.size() > gc_threshold)) {
@@ -169,22 +151,22 @@ std::shared_ptr<any> maybe_gc(std::shared_ptr<any> state) {
     return state;
 }
 
-std::shared_ptr<any> cons(std::shared_ptr<any> car, std::shared_ptr<any> cdr) {
+boxed cons(boxed car, boxed cdr) {
     auto p = std::shared_ptr<pair>(new pair(car, cdr), [](auto pptr) {
         allocated_pairs.erase(pptr);
         delete pptr;
     });
     allocated_pairs[p.get()] = p;
-    return std::make_shared<any>(p);
+    return std::make_shared<box>(p);
 }
 
-std::shared_ptr<any> make_vector() {
+boxed make_vector() {
     auto v = std::shared_ptr<vector>(new vector(), [](auto vptr) {
         allocated_vectors.erase(vptr);
         delete vptr;
     });
     allocated_vectors[v.get()] = v;
-    return std::make_shared<any>(v);
+    return std::make_shared<box>(v);
 }
 
 std::shared_ptr<func> make_lambda2(func fn) {
@@ -196,42 +178,42 @@ std::shared_ptr<func> make_lambda2(func fn) {
     return f;
 }
 
-std::shared_ptr<any> make_lambda(func fn) {
-    return std::make_shared<any>(make_lambda2(fn));
+boxed make_lambda(func fn) {
+    return std::make_shared<box>(make_lambda2(fn));
 }
 
-std::shared_ptr<any> make_symbol(const std::string& s) {
-    return std::make_shared<any>(std::make_shared<symbol>(s));
+boxed make_symbol(const std::string& s) {
+    return std::make_shared<box>(std::make_shared<symbol>(s));
 }
 
-std::shared_ptr<any> make_string(const std::string& s) {
-    return std::make_shared<any>(std::make_shared<std::string>(s));
+boxed make_string(const std::string& s) {
+    return std::make_shared<box>(std::make_shared<std::string>(s));
 }
 
-std::shared_ptr<any> list_ref(std::shared_ptr<any> l, size_t i) {
+boxed list_ref(boxed l, size_t i) {
     while (i > 0) {
-        l = any_cast<std::shared_ptr<pair>>(*l)->second;
+        l = box_cast<std::shared_ptr<pair>>(*l)->second;
         --i;
     }
 
-    return any_cast<std::shared_ptr<pair>>(*l)->first;
+    return box_cast<std::shared_ptr<pair>>(*l)->first;
 }
 
-std::shared_ptr<any> list_rest(std::shared_ptr<any> l, size_t i) {
+boxed list_rest(boxed l, size_t i) {
     while (i > 0) {
-        l = any_cast<std::shared_ptr<pair>>(*l)->second;
+        l = box_cast<std::shared_ptr<pair>>(*l)->second;
         --i;
     }
 
-    return any_cast<std::shared_ptr<pair>>(*l)->second;
+    return box_cast<std::shared_ptr<pair>>(*l)->second;
 }
 
-std::shared_ptr<any> list_to_vector(std::shared_ptr<any> l) {
+boxed list_to_vector(boxed l) {
     auto a = make_vector();
-    auto v = any_cast<std::shared_ptr<vector>>(*a);
+    auto v = box_cast<std::shared_ptr<vector>>(*a);
 
-    while (!l->empty()) {
-        auto p = any_cast<std::shared_ptr<pair>>(*l);
+    while (!is_empty(l)) {
+        auto p = box_cast<std::shared_ptr<pair>>(*l);
         v->push_back(p->first);
         l = p->second;
     }
@@ -239,8 +221,8 @@ std::shared_ptr<any> list_to_vector(std::shared_ptr<any> l) {
     return a;
 }
 
-std::shared_ptr<any> vector_to_list(std::shared_ptr<any> vec) {
-    auto v = any_cast<std::shared_ptr<vector>>(*vec);
+boxed vector_to_list(boxed vec) {
+    auto v = box_cast<std::shared_ptr<vector>>(*vec);
     auto l = nil;
     for (auto it = v->rbegin(); it != v->rend(); ++it) {
         l = cons(*it, l);
@@ -248,36 +230,30 @@ std::shared_ptr<any> vector_to_list(std::shared_ptr<any> vec) {
     return l;
 }
 
-std::shared_ptr<any> cmap(map_fn f,
-                          std::shared_ptr<any> l,
-                          cmap_table& tab,
-                          set_entry_fn set_entry) {
+boxed cmap(map_fn f, boxed l, cmap_table& tab, set_entry_fn set_entry) {
     auto ref = tab.find(l);
     if (ref != tab.end()) {
         return ref->second;
     }
 
     auto entry = set_entry(tab, l, cons(nil, nil));
-    auto ep = any_cast<std::shared_ptr<pair>>(*entry);
-    auto lp = any_cast<std::shared_ptr<pair>>(*l);
+    auto ep = box_cast<std::shared_ptr<pair>>(*entry);
+    auto lp = box_cast<std::shared_ptr<pair>>(*l);
     ep->first = f(lp->first);
     ep->second = f(lp->second);
 
     return entry;
 }
 
-std::shared_ptr<any> vector_cmap(map_fn f,
-                                 std::shared_ptr<any> v,
-                                 cmap_table& tab,
-                                 set_entry_fn set_entry) {
+boxed vector_cmap(map_fn f, boxed v, cmap_table& tab, set_entry_fn set_entry) {
     auto ref = tab.find(v);
     if (ref != tab.end()) {
         return ref->second;
     }
 
     auto entry = set_entry(tab, v, make_vector());
-    auto ev = any_cast<std::shared_ptr<vector>>(*entry);
-    auto vv = any_cast<std::shared_ptr<vector>>(*v);
+    auto ev = box_cast<std::shared_ptr<vector>>(*entry);
+    auto vv = box_cast<std::shared_ptr<vector>>(*v);
 
     for (auto el : *vv) {
         ev->push_back(f(el));
@@ -286,50 +262,45 @@ std::shared_ptr<any> vector_cmap(map_fn f,
     return entry;
 }
 
-std::shared_ptr<any> table_set(cmap_table& tab,
-                               std::shared_ptr<any> v,
-                               std::shared_ptr<any> entry)
-{
+boxed table_set(cmap_table& tab, boxed v, boxed entry) {
     tab[v] = entry;
     return entry;
 }
 
-bool is_yield_defn(std::shared_ptr<any> args) {
+bool is_yield_defn(boxed args) {
     if (args->type() != typeid(std::shared_ptr<pair>)) {
         return false;
     }
     auto first = list_ref(args, 0);
     return (first->type() == typeid(std::shared_ptr<symbol>)) &&
-           (*any_cast<std::shared_ptr<symbol>>(*first) ==
+           (*box_cast<std::shared_ptr<symbol>>(*first) ==
             "MCE-YIELD-DEFINITION");
 }
 
-std::shared_ptr<any> get_procedure_defn(std::shared_ptr<any> proc) {
-    return (*any_cast<lambda>(*proc))(
+boxed get_procedure_defn(boxed proc) {
+    return (*box_cast<lambda>(*proc))(
         cons(make_symbol("MCE-YIELD-DEFINITION"), nil));
 }
 
-std::shared_ptr<any> xdisplay(std::shared_ptr<any> args,
-                              std::ostream& out,
-                              bool is_write) {
+boxed xdisplay(boxed args, std::ostream& out, bool is_write) {
     auto exp = list_ref(args, 0);
-    if (exp->empty()) {
+    if (is_empty(exp)) {
         out << "()";
     } else {
         auto& type = exp->type();
         if (type == typeid(bool)) {
-            out << (any_cast<bool>(*exp) ? "#t" : "#f");
+            out << (box_cast<bool>(*exp) ? "#t" : "#f");
         } else if (type == typeid(double)) {
-            out << any_cast<double>(*exp);
+            out << box_cast<double>(*exp);
         } else if (type == typeid(char)) {
-            auto c = any_cast<char>(*exp);
+            auto c = box_cast<char>(*exp);
             if (is_write) {
                 out << "#\\x" << std::hex << static_cast<int>(c);
             } else {
                 out << c;
             }
         } else if (type == typeid(std::shared_ptr<std::string>)) {
-            auto& s = *any_cast<std::shared_ptr<std::string>>(*exp);
+            auto& s = *box_cast<std::shared_ptr<std::string>>(*exp);
             if (is_write) {
                 json j = s;
                 out << j.dump();
@@ -337,20 +308,20 @@ std::shared_ptr<any> xdisplay(std::shared_ptr<any> args,
                 out << s;
             }
         } else if (type == typeid(std::shared_ptr<symbol>)) {
-            out << *any_cast<std::shared_ptr<symbol>>(*exp);
+            out << *box_cast<std::shared_ptr<symbol>>(*exp);
         } else if (type == typeid(std::shared_ptr<pair>)) {
             bool first = true;
-            std:: cout << "(";
+            std::cout << "(";
             while (exp->type() == typeid(std::shared_ptr<pair>)) {
                 if (!first) {
                     out << " ";
                 }
                 first = false;
-                auto p = any_cast<std::shared_ptr<pair>>(*exp);
+                auto p = box_cast<std::shared_ptr<pair>>(*exp);
                 xdisplay(cons(p->first, nil), out, is_write);
                 exp = p->second;
             }
-            if (!exp->empty()) {
+            if (!is_empty(exp)) {
                 out << " . ";
                 xdisplay(cons(exp, nil), out, is_write);
             }
@@ -358,7 +329,7 @@ std::shared_ptr<any> xdisplay(std::shared_ptr<any> args,
         } else if (type == typeid(std::shared_ptr<vector>)) {
             bool first = true;
             out << "#(";
-            auto vec = any_cast<std::shared_ptr<vector>>(*exp);
+            auto vec = box_cast<std::shared_ptr<vector>>(*exp);
             for (auto v : *vec) {
                 if (!first) {
                     out << " ";
@@ -376,16 +347,15 @@ std::shared_ptr<any> xdisplay(std::shared_ptr<any> args,
     return exp;
 }
 
-std::shared_ptr<any> newline(std::ostream& out) {
+boxed newline(std::ostream& out) {
     out << std::endl;
     return nil;
 }
 
-std::shared_ptr<any> xprint(std::shared_ptr<any> args,
-                            std::ostream& out) {
+boxed xprint(boxed args, std::ostream& out) {
     auto r = nil;
-    while (!args->empty()) {
-        auto p = any_cast<std::shared_ptr<pair>>(*args);
+    while (!is_empty(args)) {
+        auto p = box_cast<std::shared_ptr<pair>>(*args);
         r = p->first;
         xdisplay(cons(r, nil), out, false);
         args = p->second;
@@ -394,19 +364,18 @@ std::shared_ptr<any> xprint(std::shared_ptr<any> args,
     return r;
 }
 
-std::shared_ptr<any> print(std::shared_ptr<any> args) {
+boxed print(boxed args) {
     return xprint(args, std::cout);
 }
 
-std::shared_ptr<any> eprint(std::shared_ptr<any> args) {
+boxed eprint(boxed args) {
     return xprint(args, std::cerr);
 }
 
-std::shared_ptr<any> xwrite(std::shared_ptr<any> args,
-                            std::ostream& out) {
+boxed xwrite(boxed args, std::ostream& out) {
     auto r = nil;
-    while (!args->empty()) {
-        auto p = any_cast<std::shared_ptr<pair>>(*args);
+    while (!is_empty(args)) {
+        auto p = box_cast<std::shared_ptr<pair>>(*args);
         r = p->first;
         xdisplay(cons(r, nil), out, true);
         args = p->second;
@@ -414,77 +383,71 @@ std::shared_ptr<any> xwrite(std::shared_ptr<any> args,
     return r;
 }
 
-std::shared_ptr<any> write(std::shared_ptr<any> args) {
+boxed write(boxed args) {
     return xwrite(args, std::cout);
 }
 
-std::shared_ptr<any> ewrite(std::shared_ptr<any> args) {
+boxed ewrite(boxed args) {
     return xwrite(args, std::cerr);
 }
 
-std::shared_ptr<any> unmemoize(std::shared_ptr<any> exp);
-std::shared_ptr<any> serialize(std::shared_ptr<any> exp);
+boxed unmemoize(boxed exp);
+boxed serialize(boxed exp);
 
-std::shared_ptr<any> memoize_lambda(lambda proc, std::shared_ptr<any> defn) {
-    return make_lambda(
-        [proc, defn](std::shared_ptr<any> args) -> std::shared_ptr<any> {
-            if (is_yield_defn(args)) {
-                if (defn->type() == typeid(lambda)) {
-                    return (*any_cast<lambda>(*defn))(nil);
-                }
-                return defn;
+boxed memoize_lambda(lambda proc, boxed defn) {
+    return make_lambda([proc, defn](boxed args) -> boxed {
+        if (is_yield_defn(args)) {
+            if (defn->type() == typeid(lambda)) {
+                return (*box_cast<lambda>(*defn))(nil);
             }
-            //print(cons(serialize(unmemoize(defn)), nil));
-            return (*proc)(args);
-        });
+            return defn;
+        }
+        //print(cons(serialize(unmemoize(defn)), nil));
+        return (*proc)(args);
+    });
 }
 
-std::shared_ptr<any> memoize_lambda(std::shared_ptr<any> proc,
-                                    std::shared_ptr<any> defn) {
-    return memoize_lambda(any_cast<lambda>(*proc), defn);
+boxed memoize_lambda(boxed proc, boxed defn) {
+    return memoize_lambda(box_cast<lambda>(*proc), defn);
 }
 
-std::shared_ptr<any> send(std::shared_ptr<any> k, std::shared_ptr<any> v) {
+boxed send(boxed k, boxed v) {
     return cons(k, v);
 }
 
-std::shared_ptr<any> ctenv_lookup(std::shared_ptr<any> i,
-                                  std::shared_ptr<any> env) {
-    auto ip = any_cast<std::shared_ptr<pair>>(*i);
-    auto first = any_cast<double>(*ip->first);
-    auto second = any_cast<double>(*ip->second);
-    auto bindings = any_cast<std::shared_ptr<pair>>(*list_ref(env, first));
-    auto v = any_cast<std::shared_ptr<vector>>(*bindings->second);
+boxed ctenv_lookup(boxed i, boxed env) {
+    auto ip = box_cast<std::shared_ptr<pair>>(*i);
+    auto first = box_cast<double>(*ip->first);
+    auto second = box_cast<double>(*ip->second);
+    auto bindings = box_cast<std::shared_ptr<pair>>(*list_ref(env, first));
+    auto v = box_cast<std::shared_ptr<vector>>(*bindings->second);
     if (second < v->size()) {
         return (*v)[second];
     }
     return nil;
 }
 
-std::shared_ptr<any> ctenv_setvar(std::shared_ptr<any> name,
-                                  std::shared_ptr<any> i,
-                                  std::shared_ptr<any> val,
-                                  std::shared_ptr<any> env) {
-    auto ip = any_cast<std::shared_ptr<pair>>(*i);
-    auto first = any_cast<double>(*ip->first);
-    auto second = any_cast<double>(*ip->second);
-    auto bindings = any_cast<std::shared_ptr<pair>>(*list_ref(env, first));
-    auto v = any_cast<std::shared_ptr<vector>>(*bindings->second);
+boxed ctenv_setvar(boxed name, boxed i, boxed val, boxed env) {
+    auto ip = box_cast<std::shared_ptr<pair>>(*i);
+    auto first = box_cast<double>(*ip->first);
+    auto second = box_cast<double>(*ip->second);
+    auto bindings = box_cast<std::shared_ptr<pair>>(*list_ref(env, first));
+    auto v = box_cast<std::shared_ptr<vector>>(*bindings->second);
 
     if (second >= v->size()) {
         v->resize(second + 1, nil);
     }
     (*v)[second] = val;
 
-    if (bindings->first->empty()) {
+    if (is_empty(bindings->first)) {
         bindings->first = cons(nil, nil);
     }
-    auto p = any_cast<std::shared_ptr<pair>>(*bindings->first);
+    auto p = box_cast<std::shared_ptr<pair>>(*bindings->first);
     while (second > 0) {
-        if (p->second->empty()) {
+        if (is_empty(p->second)) {
             p->second = cons(nil, nil);
         }
-        p = any_cast<std::shared_ptr<pair>>(*p->second);
+        p = box_cast<std::shared_ptr<pair>>(*p->second);
         --second;
     }
     p->first = name;
@@ -492,333 +455,326 @@ std::shared_ptr<any> ctenv_setvar(std::shared_ptr<any> name,
     return val;
 }
 
-std::shared_ptr<any> symbol_lookup(std::shared_ptr<any> args) {
+boxed symbol_lookup(boxed args) {
     auto i = list_ref(args, 1);
-    return make_lambda(
-        [i](std::shared_ptr<any> args) -> std::shared_ptr<any> {
-            auto k = list_ref(args, 0);
-            auto env = list_ref(args, 1);
-            return send(k, ctenv_lookup(i, env));
-        });
+    return make_lambda([i](boxed args) -> boxed {
+        auto k = list_ref(args, 0);
+        auto env = list_ref(args, 1);
+        return send(k, ctenv_lookup(i, env));
+    });
 }
 
-std::shared_ptr<any> send_value(std::shared_ptr<any> args) {
+boxed send_value(boxed args) {
     auto exp = list_ref(args, 1);
-    return make_lambda(
-        [exp](std::shared_ptr<any> args) -> std::shared_ptr<any> {
-            auto k = list_ref(args, 0);
-            return send(k, exp);
-        });
+    return make_lambda([exp](boxed args) -> boxed {
+        auto k = list_ref(args, 0);
+        return send(k, exp);
+    });
 }
 
-std::shared_ptr<any> make_step_contn(std::shared_ptr<any> k,
-                                     std::shared_ptr<any> args) {
+boxed make_step_contn(boxed k, boxed args) {
     return cons(make_symbol("MCE-STEP-CONTN"), cons(k, args));
 }
 
-bool is_step_contn(std::shared_ptr<any> args) {
+bool is_step_contn(boxed args) {
     if (args->type() != typeid(std::shared_ptr<pair>)) {
         return false;
     }
     auto first = list_ref(args, 0);
     return (first->type() == typeid(std::shared_ptr<symbol>)) &&
-           (*any_cast<std::shared_ptr<symbol>>(*first) ==
+           (*box_cast<std::shared_ptr<symbol>>(*first) ==
             "MCE-STEP-CONTN");
 }
 
-std::shared_ptr<any> step_contn_k(std::shared_ptr<any> args) {
+boxed step_contn_k(boxed args) {
     return list_ref(args, 1);
 }
 
-std::shared_ptr<any> step_contn_args(std::shared_ptr<any> args) {
+boxed step_contn_args(boxed args) {
     return list_rest(args, 1);
 }
 
-bool is_transfer(std::shared_ptr<any> args) {
+bool is_transfer(boxed args) {
     if (args->type() != typeid(std::shared_ptr<pair>)) {
         return false;
     }
     auto first = list_ref(args, 0);
     return (first->type() == typeid(std::shared_ptr<symbol>)) &&
-           (*any_cast<std::shared_ptr<symbol>>(*first) ==
+           (*box_cast<std::shared_ptr<symbol>>(*first) ==
             "MCE-TRANSFER");
 }
 
-std::shared_ptr<any> transfer_args(std::shared_ptr<any> args) {
+boxed transfer_args(boxed args) {
     return list_rest(args, 0);
 }
 
-std::shared_ptr<any> transfer(std::shared_ptr<any> args) {
+boxed transfer(boxed args) {
     auto k = list_ref(args, 0);
     auto fn = list_ref(args, 2);
-    return (*any_cast<lambda>(*fn))(make_step_contn(k,
+    return (*box_cast<lambda>(*fn))(make_step_contn(k,
         cons(make_symbol("MCE-TRANSFER"), list_rest(args, 2))));
 }
 
-std::shared_ptr<any> make_global_env() {
+boxed make_global_env() {
     auto values = make_vector();
     auto bindings = cons(nil, values);
     return cons(bindings, nil);
 }
 
-std::shared_ptr<any> make_env_args(std::shared_ptr<any> env,
-                                   std::shared_ptr<any> args) {
+boxed make_env_args(boxed env, boxed args) {
     return cons(make_symbol("MCE-ENV-ARGS"), cons(env, args));
 }
 
-bool is_env_args(std::shared_ptr<any> args) {
+bool is_env_args(boxed args) {
     if (args->type() != typeid(std::shared_ptr<pair>)) {
         return false;
     }
     auto first = list_ref(args, 0);
     return (first->type() == typeid(std::shared_ptr<symbol>)) &&
-           (*any_cast<std::shared_ptr<symbol>>(*first) ==
+           (*box_cast<std::shared_ptr<symbol>>(*first) ==
             "MCE-ENV-ARGS");
 }
 
-std::shared_ptr<any> env_args_env(std::shared_ptr<any> args) {
+boxed env_args_env(boxed args) {
     return is_env_args(args) ? list_ref(args, 1) : make_global_env();
 }
 
-std::shared_ptr<any> env_args_args(std::shared_ptr<any> args) {
+boxed env_args_args(boxed args) {
     return is_env_args(args) ? list_rest(args, 1) : args;
 }
 
-std::shared_ptr<any> applyx(std::shared_ptr<any> k,
-                            std::shared_ptr<any> env,
-                            std::shared_ptr<any> fn,
-                            std::shared_ptr<any> args) {
-    return (*any_cast<lambda>(*fn))(
+boxed applyx(boxed k, boxed env, boxed fn, boxed args) {
+    return (*box_cast<lambda>(*fn))(
         make_step_contn(k, make_env_args(env, args)));
 }
 
-std::shared_ptr<any> result(std::shared_ptr<any> exp) {
+boxed result(boxed exp) {
     auto a = make_vector();
-    auto v = any_cast<std::shared_ptr<vector>>(*a);
+    auto v = box_cast<std::shared_ptr<vector>>(*a);
     v->push_back(make_symbol("MCE-RESULT"));
     v->push_back(exp);
     return a;
 }
 
-bool is_result(std::shared_ptr<any> exp) {
+bool is_result(boxed exp) {
     if (exp->type() != typeid(std::shared_ptr<vector>)) {
         return false;
     }
-    auto v = any_cast<std::shared_ptr<vector>>(*exp);
+    auto v = box_cast<std::shared_ptr<vector>>(*exp);
     return (v->size() == 2) &&
            ((*v)[0]->type() == typeid(std::shared_ptr<symbol>)) &&
-           (*any_cast<std::shared_ptr<symbol>>(*(*v)[0]) == "MCE-RESULT");
+           (*box_cast<std::shared_ptr<symbol>>(*(*v)[0]) == "MCE-RESULT");
 }
 
-std::shared_ptr<any> result_val(std::shared_ptr<any> exp) {
-    return (*any_cast<std::shared_ptr<vector>>(*exp))[1];
+boxed result_val(boxed exp) {
+    return (*box_cast<std::shared_ptr<vector>>(*exp))[1];
 }
 
-std::shared_ptr<any> less_than(std::shared_ptr<any> args) {
-    bool r = any_cast<double>(*list_ref(args, 0)) <
-             any_cast<double>(*list_ref(args, 1));
-    return std::make_shared<any>(r);
+boxed less_than(boxed args) {
+    bool r = box_cast<double>(*list_ref(args, 0)) <
+             box_cast<double>(*list_ref(args, 1));
+    return std::make_shared<box>(r);
 }
 
-std::shared_ptr<any> greater_than(std::shared_ptr<any> args) {
-    bool r = any_cast<double>(*list_ref(args, 0)) >
-             any_cast<double>(*list_ref(args, 1));
-    return std::make_shared<any>(r);
+boxed greater_than(boxed args) {
+    bool r = box_cast<double>(*list_ref(args, 0)) >
+             box_cast<double>(*list_ref(args, 1));
+    return std::make_shared<box>(r);
 }
 
-std::shared_ptr<any> plus(std::shared_ptr<any> args) {
+boxed plus(boxed args) {
     double r = 0;
-    while (!args->empty()) {
-        auto p = any_cast<std::shared_ptr<pair>>(*args);
-        r += any_cast<double>(*p->first);
+    while (!is_empty(args)) {
+        auto p = box_cast<std::shared_ptr<pair>>(*args);
+        r += box_cast<double>(*p->first);
         args = p->second;
     }
-    return std::make_shared<any>(r);
+    return std::make_shared<box>(r);
 }
 
-std::shared_ptr<any> multiply(std::shared_ptr<any> args) {
+boxed multiply(boxed args) {
     double r = 1;
-    while (!args->empty()) {
-        auto p = any_cast<std::shared_ptr<pair>>(*args);
-        r *= any_cast<double>(*p->first);
+    while (!is_empty(args)) {
+        auto p = box_cast<std::shared_ptr<pair>>(*args);
+        r *= box_cast<double>(*p->first);
         args = p->second;
     }
-    return std::make_shared<any>(r);
+    return std::make_shared<box>(r);
 }
 
-std::shared_ptr<any> is_null(std::shared_ptr<any> args) {
-    return std::make_shared<any>(list_ref(args, 0)->empty());
+boxed is_null(boxed args) {
+    return std::make_shared<box>(is_empty(list_ref(args, 0)));
 }
 
-std::shared_ptr<any> is_string(std::shared_ptr<any> args) {
+boxed is_string(boxed args) {
     auto a = list_ref(args, 0);
-    return std::make_shared<any>(
-        !a->empty() &&
+    return std::make_shared<box>(
+        !is_empty(a) &&
         (a->type() == typeid(std::shared_ptr<std::string>)));
 }
 
-std::shared_ptr<any> is_pair(std::shared_ptr<any> args) {
+boxed is_pair(boxed args) {
     auto a = list_ref(args, 0);
-    return std::make_shared<any>(
-        !a->empty() &&
+    return std::make_shared<box>(
+        !is_empty(a) &&
         (a->type() == typeid(std::shared_ptr<pair>)));
 }
 
-std::shared_ptr<any> is_procedure(std::shared_ptr<any> args) {
+boxed is_procedure(boxed args) {
     auto a = list_ref(args, 0);
-    return std::make_shared<any>(
-        !a->empty() &&
+    return std::make_shared<box>(
+        !is_empty(a) &&
         (a->type() == typeid(lambda)));
 }
 
-std::shared_ptr<any> is_vector(std::shared_ptr<any> args) {
+boxed is_vector(boxed args) {
     auto a = list_ref(args, 0);
-    return std::make_shared<any>(
-        !a->empty() &&
+    return std::make_shared<box>(
+        !is_empty(a) &&
         (a->type() == typeid(std::shared_ptr<vector>)));
 }
 
-std::shared_ptr<any> vector_length(std::shared_ptr<any> args) {
+boxed vector_length(boxed args) {
     auto a = list_ref(args, 0);
-    return std::make_shared<any>(
-        static_cast<double>(any_cast<std::shared_ptr<vector>>(*a)->size()));
+    return std::make_shared<box>(
+        static_cast<double>(box_cast<std::shared_ptr<vector>>(*a)->size()));
 }
 
-std::shared_ptr<any> vector_ref(std::shared_ptr<any> args) {
+boxed vector_ref(boxed args) {
     auto a = list_ref(args, 0);
     auto i = list_ref(args, 1);
-    return any_cast<std::shared_ptr<vector>>(*a)->at(any_cast<double>(*i));
+    return box_cast<std::shared_ptr<vector>>(*a)->at(box_cast<double>(*i));
 }
 
-std::shared_ptr<any> is_string_equal(std::shared_ptr<any> args) {
+boxed is_string_equal(boxed args) {
     auto x = list_ref(args, 0);
     auto y = list_ref(args, 1);
-    return std::make_shared<any>(
-        *any_cast<std::shared_ptr<std::string>>(*x) ==
-        *any_cast<std::shared_ptr<std::string>>(*y));
+    return std::make_shared<box>(
+        *box_cast<std::shared_ptr<std::string>>(*x) ==
+        *box_cast<std::shared_ptr<std::string>>(*y));
 }
 
-std::shared_ptr<any> is_number_equal(std::shared_ptr<any> args) {
+boxed is_number_equal(boxed args) {
     auto x = list_ref(args, 0);
     auto y = list_ref(args, 1);
-    return std::make_shared<any>(
-        any_cast<double>(*x) ==
-        any_cast<double>(*y));
+    return std::make_shared<box>(
+        box_cast<double>(*x) ==
+        box_cast<double>(*y));
 }
 
-std::shared_ptr<any> car(std::shared_ptr<any> args) {
+boxed car(boxed args) {
     return list_ref(list_ref(args, 0), 0);
 }
 
-std::shared_ptr<any> cdr(std::shared_ptr<any> args) {
+boxed cdr(boxed args) {
     return list_rest(list_ref(args, 0), 0);
 }
 
-std::shared_ptr<any> set_car(std::shared_ptr<any> args) {
+boxed set_car(boxed args) {
     auto p = list_ref(args, 0);
     auto v = list_ref(args, 1);
-    any_cast<std::shared_ptr<pair>>(*p)->first = v;
+    box_cast<std::shared_ptr<pair>>(*p)->first = v;
     return p;
 }
 
-std::shared_ptr<any> set_cdr(std::shared_ptr<any> args) {
+boxed set_cdr(boxed args) {
     auto p = list_ref(args, 0);
     auto v = list_ref(args, 1);
-    any_cast<std::shared_ptr<pair>>(*p)->second = v;
+    box_cast<std::shared_ptr<pair>>(*p)->second = v;
     return p;
 }
 
-std::shared_ptr<any> is_eq(std::shared_ptr<any> args) {
+boxed is_eq(boxed args) {
     auto x = list_ref(args, 0);
     auto y = list_ref(args, 1);
 
-    if (x->empty()) {
-        return std::make_shared<any>(y->empty());
+    if (is_empty(x)) {
+        return std::make_shared<box>(is_empty(y));
     }
 
-    if (y->empty()) {
-        return std::make_shared<any>(false);
+    if (is_empty(y)) {
+        return std::make_shared<box>(false);
     }
 
     auto& type = x->type();
     if (y->type() != type) {
-        return std::make_shared<any>(false);
+        return std::make_shared<box>(false);
     }
 
     if (type == typeid(bool)) {
-        return std::make_shared<any>(any_cast<bool>(*x) == any_cast<bool>(*y));
+        return std::make_shared<box>(box_cast<bool>(*x) == box_cast<bool>(*y));
     }
 
     if (type == typeid(char)) {
-        return std::make_shared<any>(any_cast<char>(*x) == any_cast<char>(*y));
+        return std::make_shared<box>(box_cast<char>(*x) == box_cast<char>(*y));
     }
 
     if (type == typeid(double)) {
-        return std::make_shared<any>(
-            any_cast<double>(*x) == any_cast<double>(*y));
+        return std::make_shared<box>(
+            box_cast<double>(*x) == box_cast<double>(*y));
     }
 
     if (type == typeid(std::shared_ptr<std::string>)) {
-        return std::make_shared<any>(
-            any_cast<std::shared_ptr<std::string>>(*x) ==
-            any_cast<std::shared_ptr<std::string>>(*y));
+        return std::make_shared<box>(
+            box_cast<std::shared_ptr<std::string>>(*x) ==
+            box_cast<std::shared_ptr<std::string>>(*y));
     }
 
     if (type == typeid(std::shared_ptr<symbol>)) {
-        return std::make_shared<any>(
-            *any_cast<std::shared_ptr<symbol>>(*x) ==
-            *any_cast<std::shared_ptr<symbol>>(*y));
+        return std::make_shared<box>(
+            *box_cast<std::shared_ptr<symbol>>(*x) ==
+            *box_cast<std::shared_ptr<symbol>>(*y));
     }
 
     if (type == typeid(std::shared_ptr<pair>)) {
-        return std::make_shared<any>(
-            any_cast<std::shared_ptr<pair>>(*x) ==
-            any_cast<std::shared_ptr<pair>>(*y));
+        return std::make_shared<box>(
+            box_cast<std::shared_ptr<pair>>(*x) ==
+            box_cast<std::shared_ptr<pair>>(*y));
     }
 
     if (type == typeid(std::shared_ptr<vector>)) {
-        return std::make_shared<any>(
-            any_cast<std::shared_ptr<vector>>(*x) ==
-            any_cast<std::shared_ptr<vector>>(*y));
+        return std::make_shared<box>(
+            box_cast<std::shared_ptr<vector>>(*x) ==
+            box_cast<std::shared_ptr<vector>>(*y));
     }
 
     if (type == typeid(lambda)) {
-        return std::make_shared<any>(
-            any_cast<lambda>(*x) == any_cast<lambda>(*y));
+        return std::make_shared<box>(
+            box_cast<lambda>(*x) == box_cast<lambda>(*y));
     }
 
-    return std::make_shared<any>(false);
+    return std::make_shared<box>(false);
 }
 
-std::shared_ptr<any> gunmemoize(std::shared_ptr<any> args) {
+boxed gunmemoize(boxed args) {
     return unmemoize(list_ref(args, 0));
 }
 
-std::shared_ptr<any> gserialize(std::shared_ptr<any> args) {
+boxed gserialize(boxed args) {
     return serialize(list_ref(args, 0));
 }
 
-std::shared_ptr<any> gapplyx(std::shared_ptr<any> args) {
+boxed gapplyx(boxed args) {
     return applyx(list_ref(args, 0),
                   list_ref(args, 1),
                   list_ref(args, 2),
                   list_ref(args, 3));
 }
 
-std::shared_ptr<any> save(std::shared_ptr<any> args) {
+boxed save(boxed args) {
     return make_string(mce_save(list_ref(args, 0)));
 }
 
-std::shared_ptr<any> restore(std::shared_ptr<any> args) {
+boxed restore(boxed args) {
     auto a = list_ref(args, 0);
-    return mce_restore(*any_cast<std::shared_ptr<std::string>>(*a));
+    return mce_restore(*box_cast<std::shared_ptr<std::string>>(*a));
 }
 
-std::shared_ptr<any> getpid(std::shared_ptr<any> args) {
-    return std::make_shared<any>(static_cast<double>(getpid()));
+boxed getpid(boxed) {
+    return std::make_shared<box>(static_cast<double>(getpid()));
 }
 
-std::shared_ptr<any> gcons(std::shared_ptr<any> args) {
+boxed gcons(boxed args) {
     return cons(list_ref(args, 0), list_ref(args, 1));
 }
 
@@ -861,7 +817,7 @@ std::unordered_set<function*> kenvfn_set {
     transfer
 };
 
-std::shared_ptr<any> find_global(const symbol& sym) {
+boxed find_global(const symbol& sym) {
     auto it = global_table.find(sym);
     if (it == global_table.end()) {
         throw std::range_error(sym);
@@ -869,12 +825,12 @@ std::shared_ptr<any> find_global(const symbol& sym) {
     return make_lambda(it->second);
 }
 
-std::shared_ptr<any> step(std::shared_ptr<any> state) {
-    return (*any_cast<lambda>(*list_ref(state, 0)))(
+boxed step(boxed state) {
+    return (*box_cast<lambda>(*list_ref(state, 0)))(
         cons(list_rest(state, 0), nil));
 }
 
-std::shared_ptr<any> run(std::shared_ptr<any> state) {
+boxed run(boxed state) {
     while (!is_result(state)) {
         state = maybe_gc(step(state));
     }
@@ -882,14 +838,10 @@ std::shared_ptr<any> run(std::shared_ptr<any> state) {
     return result_val(state);
 }
 
-std::shared_ptr<any> globalize(std::shared_ptr<any> x,
-                               std::shared_ptr<any> args,
-                               std::shared_ptr<any> cf);
+boxed globalize(boxed x, boxed args, boxed cf);
 
-std::shared_ptr<any> handle_global_lambda(std::shared_ptr<any> args,
-                                          std::shared_ptr<any> fn,
-                                          std::shared_ptr<any> cf) {
-    auto f = any_cast<lambda>(*fn);
+boxed handle_global_lambda(boxed args, boxed fn, boxed cf) {
+    auto f = box_cast<lambda>(*fn);
 
     if (is_step_contn(args)) {
         auto sck = step_contn_k(args);
@@ -905,11 +857,10 @@ std::shared_ptr<any> handle_global_lambda(std::shared_ptr<any> args,
     return globalize((*f)(eaa), eaa, cf);
 }
 
-std::shared_ptr<any> lookup_global(const symbol& sym);
+boxed lookup_global(const symbol& sym);
 
-std::shared_ptr<any> handle_global_lambda_kenv(std::shared_ptr<any> args,
-                                               std::shared_ptr<any> fn) {
-    auto f = any_cast<lambda>(*fn);
+boxed handle_global_lambda_kenv(boxed args, boxed fn) {
+    auto f = box_cast<lambda>(*fn);
 
     if (is_step_contn(args)) {
         auto sca = step_contn_args(args);
@@ -923,44 +874,37 @@ std::shared_ptr<any> handle_global_lambda_kenv(std::shared_ptr<any> args,
                               env_args_args(args)))));
 }
 
-std::shared_ptr<any> wrap_global_lambda(std::shared_ptr<any> fn,
-                                        std::shared_ptr<any> cf) {
-    const lambda l = any_cast<lambda>(*fn);
+boxed wrap_global_lambda(boxed fn, boxed cf) {
+    const lambda l = box_cast<lambda>(*fn);
     auto p = l->target<function*>();
 
     if (p && (kenvfn_set.find(*p) != kenvfn_set.end())) {
-        return make_lambda(
-            [fn](std::shared_ptr<any> args) -> std::shared_ptr<any> {
-                return handle_global_lambda_kenv(args, fn);
-            });
+        return make_lambda( [fn](boxed args) -> boxed {
+            return handle_global_lambda_kenv(args, fn);
+        });
     }
 
-    return make_lambda(
-        [fn, cf](std::shared_ptr<any> args) -> std::shared_ptr<any> {
-            return handle_global_lambda(args, fn, cf);
-        });
+    return make_lambda( [fn, cf](boxed args) -> boxed {
+        return handle_global_lambda(args, fn, cf);
+    });
 }
 
-std::shared_ptr<any> extend_env(std::shared_ptr<any> env,
-                                std::shared_ptr<any> syms,
-                                std::shared_ptr<any> values) {
+boxed extend_env(boxed env, boxed syms, boxed values) {
     return cons(cons(syms, list_to_vector(values)), env);
 }
 
-std::shared_ptr<any> improper_extend_env(std::shared_ptr<any> env,
-                                         std::shared_ptr<any> syms,
-                                         std::shared_ptr<any> values) {
+boxed improper_extend_env(boxed env, boxed syms, boxed values) {
     vector s;
     auto av = make_vector();
-    auto v = any_cast<std::shared_ptr<vector>>(*av);
+    auto v = box_cast<std::shared_ptr<vector>>(*av);
 
-    while (!syms->empty()) {
+    while (!is_empty(syms)) {
         if (syms->type() == typeid(std::shared_ptr<symbol>)) {
             s.push_back(syms);
             v->push_back(values);
             break;
         }
-        if (values->empty()) {
+        if (is_empty(values)) {
             break;
         }
 
@@ -979,12 +923,12 @@ std::shared_ptr<any> improper_extend_env(std::shared_ptr<any> env,
     return cons(cons(as, av), env);
 }
 
-std::shared_ptr<any> handle_lambda(std::shared_ptr<any> args,
-                                   std::shared_ptr<any> params,
-                                   std::shared_ptr<any> fn,
-                                   std::shared_ptr<any> env,
-                                   extend_env_fn extend_env) {
-    auto f = any_cast<lambda>(*fn);
+boxed handle_lambda(boxed args,
+                    boxed params,
+                    boxed fn,
+                    boxed env,
+                    extend_env_fn extend_env) {
+    auto f = box_cast<lambda>(*fn);
 
     if (is_step_contn(args)) {
         auto sca = step_contn_args(args);
@@ -998,9 +942,8 @@ std::shared_ptr<any> handle_lambda(std::shared_ptr<any> args,
                               nil))));
 }
 
-std::shared_ptr<any> handle_contn_lambda(std::shared_ptr<any> args,
-                                         std::shared_ptr<any> k) {
-    auto f = any_cast<lambda>(*k);
+boxed handle_contn_lambda(boxed args, boxed k) {
+    auto f = box_cast<lambda>(*k);
 
     if (is_step_contn(args)) {
         return (*f)(env_args_args(step_contn_args(args)));
@@ -1009,50 +952,49 @@ std::shared_ptr<any> handle_contn_lambda(std::shared_ptr<any> args,
     return run((*f)(env_args_args(args)));
 }
 
-std::shared_ptr<any> constructed_function(std::shared_ptr<any> args) {
+boxed constructed_function(boxed args) {
     auto self = list_ref(args, 0);
     auto args2 = list_ref(args, 1);
     auto cf = list_ref(args, 2);
-    auto r = (*any_cast<lambda>(*cf))(args2);
+    auto r = (*box_cast<lambda>(*cf))(args2);
     if (r->type() == typeid(lambda)) {
         return wrap_global_lambda(r, self);
     }
     return r;
 }
 
-std::shared_ptr<any> global_lambda(std::shared_ptr<any> args) {
+boxed global_lambda(boxed args) {
     auto self = list_ref(args, 0);
-    auto defn = any_cast<std::shared_ptr<symbol>>(*list_ref(args, 1));
+    auto defn = box_cast<std::shared_ptr<symbol>>(*list_ref(args, 1));
     return wrap_global_lambda(find_global(*defn), self);
 }
 
-std::shared_ptr<any> evalx_initial(std::shared_ptr<any> args) {
+boxed evalx_initial(boxed args) {
     auto k = list_ref(args, 1);
     auto env = list_ref(args, 2);
     auto scanned = list_ref(args, 3);
-    return make_lambda([k, env, scanned]
-        (std::shared_ptr<any> args) -> std::shared_ptr<any> {
-            return (*any_cast<lambda>(*scanned))(cons(k, cons(env, nil)));
-        });
+    return make_lambda([k, env, scanned] (boxed) -> boxed {
+        return (*box_cast<lambda>(*scanned))(cons(k, cons(env, nil)));
+    });
 }
 
-std::shared_ptr<any> if0(std::shared_ptr<any> args);
-std::shared_ptr<any> if1(std::shared_ptr<any> args);
-std::shared_ptr<any> sclis0(std::shared_ptr<any> args);
-std::shared_ptr<any> sclis1(std::shared_ptr<any> args);
-std::shared_ptr<any> sclis2(std::shared_ptr<any> args);
-std::shared_ptr<any> scseq0(std::shared_ptr<any> args);
-std::shared_ptr<any> scseq1(std::shared_ptr<any> args);
-std::shared_ptr<any> lambda0(std::shared_ptr<any> args);
-std::shared_ptr<any> lambda1(std::shared_ptr<any> args);
-std::shared_ptr<any> improper_lambda0(std::shared_ptr<any> args);
-std::shared_ptr<any> improper_lambda1(std::shared_ptr<any> args);
-std::shared_ptr<any> letcc0(std::shared_ptr<any> args);
-std::shared_ptr<any> letcc1(std::shared_ptr<any> args);
-std::shared_ptr<any> define0(std::shared_ptr<any> args);
-std::shared_ptr<any> define1(std::shared_ptr<any> args);
-std::shared_ptr<any> application0(std::shared_ptr<any> args);
-std::shared_ptr<any> application1(std::shared_ptr<any> args);
+boxed if0(boxed args);
+boxed if1(boxed args);
+boxed sclis0(boxed args);
+boxed sclis1(boxed args);
+boxed sclis2(boxed args);
+boxed scseq0(boxed args);
+boxed scseq1(boxed args);
+boxed lambda0(boxed args);
+boxed lambda1(boxed args);
+boxed improper_lambda0(boxed args);
+boxed improper_lambda1(boxed args);
+boxed letcc0(boxed args);
+boxed letcc1(boxed args);
+boxed define0(boxed args);
+boxed define1(boxed args);
+boxed application0(boxed args);
+boxed application1(boxed args);
 
 #define define_forms(...) \
 std::vector<function*> forms { \
@@ -1087,295 +1029,261 @@ define_forms(
     evalx_initial
 )
 
-std::shared_ptr<any> make_form(std::shared_ptr<any> n,
-                               std::shared_ptr<any> args) {
+boxed make_form(boxed n, boxed args) {
     auto defn = cons(n, args);
 
-    auto f = std::make_shared<any>();
-    auto f2 = memoize_lambda(make_lambda2(
-        [f](std::shared_ptr<any> args) -> std::shared_ptr<any> {
-            return (*any_cast<lambda>(*f))(args);
-        }),
-        defn);
-    *f = *memoize_lambda(forms[any_cast<double>(*n)](cons(f2, args)), defn);
+    auto f = std::make_shared<box>();
+    auto f2 = memoize_lambda(make_lambda2([f](boxed args) -> boxed {
+        return (*box_cast<lambda>(*f))(args);
+    }), defn);
+    *f = *memoize_lambda(forms[box_cast<double>(*n)](cons(f2, args)), defn);
 
     return f;
 }
 
-std::shared_ptr<any> make_form(enum forms n, std::shared_ptr<any> args) {
-    return make_form(std::make_shared<any>(static_cast<double>(n)), args);
+boxed make_form(enum forms n, boxed args) {
+    return make_form(std::make_shared<box>(static_cast<double>(n)), args);
 }
 
-std::shared_ptr<any> make_form(std::shared_ptr<any> args) {
-    auto p = any_cast<std::shared_ptr<pair>>(*args);
+boxed make_form(boxed args) {
+    auto p = box_cast<std::shared_ptr<pair>>(*args);
     return make_form(p->first, p->second);
 }
 
-std::shared_ptr<any> aform(enum forms n) {
-    return std::make_shared<any>(static_cast<double>(n));
+boxed aform(enum forms n) {
+    return std::make_shared<box>(static_cast<double>(n));
 }
 
-std::shared_ptr<any> lookup_global(const symbol& sym) {
+boxed lookup_global(const symbol& sym) {
     auto r = find_global(sym);
     auto defn = cons(aform(forms::global_lambda), cons(make_symbol(sym), nil));
-    auto f = std::make_shared<any>();
-    auto f2 = memoize_lambda(make_lambda2(
-        [f](std::shared_ptr<any> args) -> std::shared_ptr<any> {
-            return (*any_cast<lambda>(*f))(args);
-        }),
-        defn);
+    auto f = std::make_shared<box>();
+    auto f2 = memoize_lambda(make_lambda2([f](boxed args) -> boxed {
+        return (*box_cast<lambda>(*f))(args);
+    }), defn);
     *f = *memoize_lambda(wrap_global_lambda(r, f2), defn);
     return f;
 }
 
-std::shared_ptr<any> globalize(std::shared_ptr<any> x,
-                               std::shared_ptr<any> args,
-                               std::shared_ptr<any> cf) {
+boxed globalize(boxed x, boxed args, boxed cf) {
     if (x->type() != typeid(lambda)) {
         return x;
     }
 
     auto defn = cons(aform(forms::constructed_function),
                      cons(args, cons(cf, nil)));
-    auto f = std::make_shared<any>();
-    auto f2 = memoize_lambda(make_lambda2(
-        [f](std::shared_ptr<any> args) -> std::shared_ptr<any> {
-            return (*any_cast<lambda>(*f))(args);
-        }),
-        defn);
+    auto f = std::make_shared<box>();
+    auto f2 = memoize_lambda(make_lambda2([f](boxed args) -> boxed {
+        return (*box_cast<lambda>(*f))(args);
+    }), defn);
     *f = *memoize_lambda(wrap_global_lambda(x, f2), defn);
     return f;
 }
 
-std::shared_ptr<any> if1(std::shared_ptr<any> args) {
+boxed if1(boxed args) {
     auto k = list_ref(args, 1);
     auto env = list_ref(args, 2);
     auto scan1 = list_ref(args, 3);
     auto scan2 = list_ref(args, 4);
-    return make_lambda([k, env, scan1, scan2]
-        (std::shared_ptr<any> args) -> std::shared_ptr<any> {
-            auto v = any_cast<bool>(*list_ref(args, 0));
-            auto f = any_cast<lambda>(v ? *scan1 : *scan2);
-            return (*f)(cons(k, cons(env, nil)));
-        });
+    return make_lambda([k, env, scan1, scan2](boxed args) -> boxed {
+        auto v = box_cast<bool>(*list_ref(args, 0));
+        auto f = box_cast<lambda>(v ? *scan1 : *scan2);
+        return (*f)(cons(k, cons(env, nil)));
+    });
 }
 
-std::shared_ptr<any> if0(std::shared_ptr<any> args) {
+boxed if0(boxed args) {
     auto scan0 = list_ref(args, 1);
     auto scan1 = list_ref(args, 2);
     auto scan2 = list_ref(args, 3);
-    return make_lambda([scan0, scan1, scan2]
-        (std::shared_ptr<any> args) -> std::shared_ptr<any> {
-            auto k = list_ref(args, 0);
-            auto env = list_ref(args, 1);
-            return (*any_cast<lambda>(*scan0))(
-                cons(make_form(forms::if1,
-                               cons(k, cons(env, cons(scan1, cons(scan2,
-                                    nil))))),
-                     cons(env, nil)));
-        });
+    return make_lambda([scan0, scan1, scan2](boxed args) -> boxed {
+        auto k = list_ref(args, 0);
+        auto env = list_ref(args, 1);
+        return (*box_cast<lambda>(*scan0))(
+            cons(make_form(forms::if1,
+                           cons(k, cons(env, cons(scan1, cons(scan2, nil))))),
+                 cons(env, nil)));
+    });
 }
 
-std::shared_ptr<any> sclis2(std::shared_ptr<any> args) {
+boxed sclis2(boxed args) {
     auto k = list_ref(args, 1);
     auto v = list_ref(args, 2);
-    return make_lambda([k, v]
-        (std::shared_ptr<any> args) -> std::shared_ptr<any> {
-            auto w = list_ref(args, 0);
-            return send(k, cons(v, w));
-        });
+    return make_lambda([k, v](boxed args) -> boxed {
+        auto w = list_ref(args, 0);
+        return send(k, cons(v, w));
+    });
 }
 
-std::shared_ptr<any> sclis1(std::shared_ptr<any> args) {
+boxed sclis1(boxed args) {
     auto k = list_ref(args, 1);
     auto env = list_ref(args, 2);
     auto rest = list_ref(args, 3);
-    return make_lambda([k, env, rest]
-        (std::shared_ptr<any> args) -> std::shared_ptr<any> {
-            auto v = list_ref(args, 0);
-            return (*any_cast<lambda>(*rest))(
-                cons(make_form(forms::sclis2, cons(k, cons(v, nil))),
-                     cons(env, nil)));
-        });
+    return make_lambda([k, env, rest](boxed args) -> boxed {
+        auto v = list_ref(args, 0);
+        return (*box_cast<lambda>(*rest))(
+            cons(make_form(forms::sclis2, cons(k, cons(v, nil))),
+                 cons(env, nil)));
+    });
 }
 
-std::shared_ptr<any> sclis0(std::shared_ptr<any> args) {
+boxed sclis0(boxed args) {
     auto first = list_ref(args, 1);
     auto rest = list_ref(args, 2);
-    return make_lambda([first, rest]
-        (std::shared_ptr<any> args) -> std::shared_ptr<any> {
-            auto k = list_ref(args, 0);
-            auto env = list_ref(args, 1);
-            return (*any_cast<lambda>(*first))(
-                cons(make_form(forms::sclis1,
-                               cons(k, cons(env, cons(rest, nil)))),
-                     cons(env, nil)));
-        });
+    return make_lambda([first, rest](boxed args) -> boxed {
+        auto k = list_ref(args, 0);
+        auto env = list_ref(args, 1);
+        return (*box_cast<lambda>(*first))(
+            cons(make_form(forms::sclis1,
+                           cons(k, cons(env, cons(rest, nil)))),
+                 cons(env, nil)));
+    });
 }
 
-std::shared_ptr<any> scseq1(std::shared_ptr<any> args) {
+boxed scseq1(boxed args) {
     auto k = list_ref(args, 1);
     auto env = list_ref(args, 2);
     auto rest = list_ref(args, 3);
-    return make_lambda([k, env, rest]
-        (std::shared_ptr<any> args) -> std::shared_ptr<any> {
-            return (*any_cast<lambda>(*rest))(cons(k, cons(env, nil)));
-        });
+    return make_lambda([k, env, rest](boxed) -> boxed {
+        return (*box_cast<lambda>(*rest))(cons(k, cons(env, nil)));
+    });
 }
 
-std::shared_ptr<any> scseq0(std::shared_ptr<any> args) {
+boxed scseq0(boxed args) {
     auto first = list_ref(args, 1);
     auto rest = list_ref(args, 2);
-    return make_lambda([first, rest]
-        (std::shared_ptr<any> args) -> std::shared_ptr<any> {
-            auto k = list_ref(args, 0);
-            auto env = list_ref(args, 1);
-            return (*any_cast<lambda>(*first))(
-                cons(make_form(forms::scseq1,
-                               cons(k, cons(env, cons(rest, nil)))),
-                     cons(env, nil)));
-        });
+    return make_lambda([first, rest](boxed args) -> boxed {
+        auto k = list_ref(args, 0);
+        auto env = list_ref(args, 1);
+        return (*box_cast<lambda>(*first))(
+            cons(make_form(forms::scseq1,
+                           cons(k, cons(env, cons(rest, nil)))),
+                 cons(env, nil)));
+    });
 }
 
-std::shared_ptr<any> lambda1(std::shared_ptr<any> args) {
+boxed lambda1(boxed args) {
     auto params = list_ref(args, 1);
     auto scanned = list_ref(args, 2);
     auto env = list_ref(args, 3);
-    return make_lambda([params, scanned, env]
-        (std::shared_ptr<any> args) -> std::shared_ptr<any> {
-            return handle_lambda(args, params, scanned, env, extend_env);
-        });
+    return make_lambda([params, scanned, env](boxed args) -> boxed {
+        return handle_lambda(args, params, scanned, env, extend_env);
+    });
 }
 
-std::shared_ptr<any> lambda0(std::shared_ptr<any> args) {
+boxed lambda0(boxed args) {
     auto params = list_ref(args, 1);
     auto scanned = list_ref(args, 2);
-    return make_lambda([params, scanned]
-        (std::shared_ptr<any> args) -> std::shared_ptr<any> {
-            auto k = list_ref(args, 0);
-            auto env = list_ref(args, 1);
-            return send(k,
-                        make_form(forms::lambda1,
-                                  cons(params, cons(scanned, cons(env, nil)))));
-        });
+    return make_lambda([params, scanned](boxed args) -> boxed {
+        auto k = list_ref(args, 0);
+        auto env = list_ref(args, 1);
+        return send(k,
+                    make_form(forms::lambda1,
+                              cons(params, cons(scanned, cons(env, nil)))));
+    });
 }
 
-std::shared_ptr<any> improper_lambda1(std::shared_ptr<any> args) {
+boxed improper_lambda1(boxed args) {
     auto params = list_ref(args, 1);
     auto scanned = list_ref(args, 2);
     auto env = list_ref(args, 3);
-    return make_lambda([params, scanned, env]
-        (std::shared_ptr<any> args) -> std::shared_ptr<any> {
-            return handle_lambda(args,
-                                 params,
-                                 scanned,
-                                 env,
-                                 improper_extend_env);
-        });
+    return make_lambda([params, scanned, env](boxed args) -> boxed {
+        return handle_lambda(args, params, scanned, env, improper_extend_env);
+    });
 }
 
-std::shared_ptr<any> improper_lambda0(std::shared_ptr<any> args) {
+boxed improper_lambda0(boxed args) {
     auto params = list_ref(args, 1);
     auto scanned = list_ref(args, 2);
-    return make_lambda([params, scanned]
-        (std::shared_ptr<any> args) -> std::shared_ptr<any> {
-            auto k = list_ref(args, 0);
-            auto env = list_ref(args, 1);
-            return send(k,
-                        make_form(forms::improper_lambda1,
-                                  cons(params, cons(scanned, cons(env, nil)))));
-        });
+    return make_lambda([params, scanned](boxed args) -> boxed {
+        auto k = list_ref(args, 0);
+        auto env = list_ref(args, 1);
+        return send(k,
+                    make_form(forms::improper_lambda1,
+                              cons(params, cons(scanned, cons(env, nil)))));
+    });
 }
 
-std::shared_ptr<any> letcc1(std::shared_ptr<any> args) {
+boxed letcc1(boxed args) {
     auto k = list_ref(args, 1);
-    return make_lambda([k]
-        (std::shared_ptr<any> args) -> std::shared_ptr<any> {
-            return handle_contn_lambda(args, k); 
-        });
+    return make_lambda([k](boxed args) -> boxed {
+        return handle_contn_lambda(args, k); 
+    });
 }
 
-std::shared_ptr<any> letcc0(std::shared_ptr<any> args) {
+boxed letcc0(boxed args) {
     auto name = list_ref(args, 1);
     auto scanned = list_ref(args, 2);
-    return make_lambda([name, scanned]
-        (std::shared_ptr<any> args) -> std::shared_ptr<any> {
-            auto k = list_ref(args, 0);
-            auto env = list_ref(args, 1);
-            return (*any_cast<lambda>(*scanned))(
-                cons(k,
-                     cons(extend_env(env,
-                                     cons(name, nil),
-                                     cons(make_form(forms::letcc1,
-                                                    cons(k, nil)),
-                                          nil)),
-                          nil)));
-        });
+    return make_lambda([name, scanned](boxed args) -> boxed {
+        auto k = list_ref(args, 0);
+        auto env = list_ref(args, 1);
+        return (*box_cast<lambda>(*scanned))(
+            cons(k,
+                 cons(extend_env(env,
+                                 cons(name, nil),
+                                 cons(make_form(forms::letcc1, cons(k, nil)),
+                                      nil)),
+                      nil)));
+    });
 }
 
-std::shared_ptr<any> define1(std::shared_ptr<any> args) {
+boxed define1(boxed args) {
     auto k = list_ref(args, 1);
     auto env = list_ref(args, 2);
     auto name = list_ref(args, 3);
     auto i = list_ref(args, 4);
-    return make_lambda([k, env, name, i]
-        (std::shared_ptr<any> args) -> std::shared_ptr<any> {
-            auto v = list_ref(args, 0);
-            return send(k, ctenv_setvar(name, i, v, env));
-        });
+    return make_lambda([k, env, name, i](boxed args) -> boxed {
+        auto v = list_ref(args, 0);
+        return send(k, ctenv_setvar(name, i, v, env));
+    });
 }
 
-std::shared_ptr<any> define0(std::shared_ptr<any> args) {
+boxed define0(boxed args) {
     auto name = list_ref(args, 1);
     auto i = list_ref(args, 2);
     auto scanned = list_ref(args, 3);
-    return make_lambda([name, i, scanned]
-        (std::shared_ptr<any> args) -> std::shared_ptr<any> {
-            auto k = list_ref(args, 0);
-            auto env = list_ref(args, 1);
-            return (*any_cast<lambda>(*scanned))(
-                cons(make_form(forms::define1,
-                               cons(k, cons(env, cons(name, cons(i, nil))))),
-                     cons(env, nil)));
-        });
+    return make_lambda([name, i, scanned](boxed args) -> boxed {
+        auto k = list_ref(args, 0);
+        auto env = list_ref(args, 1);
+        return (*box_cast<lambda>(*scanned))(
+            cons(make_form(forms::define1,
+                           cons(k, cons(env, cons(name, cons(i, nil))))),
+                 cons(env, nil)));
+    });
 }
 
-std::shared_ptr<any> application1(std::shared_ptr<any> args) {
+boxed application1(boxed args) {
     auto k = list_ref(args, 1);
     auto env = list_ref(args, 2);
-    return make_lambda([k, env]
-        (std::shared_ptr<any> args) -> std::shared_ptr<any> {
-            auto v = list_ref(args, 0);
-            return applyx(k, env, list_ref(v, 0), list_rest(v, 0));
-        });
+    return make_lambda([k, env](boxed args) -> boxed {
+        auto v = list_ref(args, 0);
+        return applyx(k, env, list_ref(v, 0), list_rest(v, 0));
+    });
 }
 
-std::shared_ptr<any> application0(std::shared_ptr<any> args) {
+boxed application0(boxed args) {
     auto scanned = list_ref(args, 1);
-    return make_lambda([scanned]
-        (std::shared_ptr<any> args) -> std::shared_ptr<any> {
-            auto k = list_ref(args, 0);
-            auto env = list_ref(args, 1);
-            return (*any_cast<lambda>(*scanned))(
-                cons(make_form(forms::application1, cons(k, cons(env, nil))),
-                     cons(env, nil)));
-        });
+    return make_lambda([scanned](boxed args) -> boxed {
+        auto k = list_ref(args, 0);
+        auto env = list_ref(args, 1);
+        return (*box_cast<lambda>(*scanned))(
+            cons(make_form(forms::application1, cons(k, cons(env, nil))),
+                 cons(env, nil)));
+    });
 }
 
 bool is_unmemoized(std::shared_ptr<vector> v) {
     return (v->size() == 2) &&
            ((*v)[0]->type() == typeid(std::shared_ptr<symbol>)) &&
-           (*any_cast<std::shared_ptr<symbol>>(*(*v)[0]) == "MCE-UNMEMOIZED");
+           (*box_cast<std::shared_ptr<symbol>>(*(*v)[0]) == "MCE-UNMEMOIZED");
 }
 
-std::shared_ptr<any> unmemoized_repexp(std::shared_ptr<vector> v) {
+boxed unmemoized_repexp(std::shared_ptr<vector> v) {
     return (*v)[1];
 }
 
-std::shared_ptr<any> memoize_aux(std::shared_ptr<any> exp,
-                                 cmap_table& tab,
-                                 map_fn fn) {
-    if (exp->empty()) {
+boxed memoize_aux(boxed exp, cmap_table& tab, map_fn fn) {
+    if (is_empty(exp)) {
         return exp;
     }
 
@@ -1386,25 +1294,22 @@ std::shared_ptr<any> memoize_aux(std::shared_ptr<any> exp,
     }
 
     if (type == typeid(std::shared_ptr<vector>)) {
-        auto v = any_cast<std::shared_ptr<vector>>(*exp);
+        auto v = box_cast<std::shared_ptr<vector>>(*exp);
         if (is_unmemoized(v)) {
             auto repexp = unmemoized_repexp(v);
-            auto r = std::make_shared<any>();
-            auto f = std::make_shared<any>();
+            auto r = std::make_shared<box>();
+            auto f = std::make_shared<box>();
             auto entry = table_set(tab, exp, memoize_lambda(
-                make_lambda2([f]
-                    (std::shared_ptr<any> args) -> std::shared_ptr<any> {
-                        return (*any_cast<lambda>(*f))(args);
-                    }),
-                make_lambda([r]
-                    (std::shared_ptr<any> args) -> std::shared_ptr<any> {
-                        return r;
-                    })));
+                make_lambda2([f](boxed args) -> boxed {
+                    return (*box_cast<lambda>(*f))(args);
+                }),
+                make_lambda([r] (boxed) -> boxed {
+                    return r;
+                })));
             *r = *fn(repexp);
-            *f = make_lambda2([r, f]
-                (std::shared_ptr<any> args) -> std::shared_ptr<any> {
+            *f = make_lambda2([r, f](boxed args) -> boxed {
                     *f = *make_form(r);
-                    return (*any_cast<lambda>(*f))(args);
+                    return (*box_cast<lambda>(*f))(args);
                 });
             return entry;
         }
@@ -1414,18 +1319,16 @@ std::shared_ptr<any> memoize_aux(std::shared_ptr<any> exp,
     return exp;
 }
 
-std::shared_ptr<any> memoize(std::shared_ptr<any> exp) {
+boxed memoize(boxed exp) {
     cmap_table tab;
-    map_fn fn = [&tab, &fn](std::shared_ptr<any> x) -> std::shared_ptr<any> {
+    map_fn fn = [&tab, &fn](boxed x) -> boxed {
         return memoize_aux(x, tab, fn);
     };
     return fn(exp);
 }
 
-std::shared_ptr<any> unmemoize_aux(std::shared_ptr<any> exp,
-                                   cmap_table& tab,
-                                   map_fn fn) {
-    if (exp->empty()) {
+boxed unmemoize_aux(boxed exp, cmap_table& tab, map_fn fn) {
+    if (is_empty(exp)) {
         return exp;
     }
 
@@ -1446,7 +1349,7 @@ std::shared_ptr<any> unmemoize_aux(std::shared_ptr<any> exp,
         }
 
         auto entry = table_set(tab, exp, make_vector());
-        auto v = any_cast<std::shared_ptr<vector>>(*entry);
+        auto v = box_cast<std::shared_ptr<vector>>(*entry);
 
         v->push_back(make_symbol("MCE-UNMEMOIZED"));
         v->push_back(fn(get_procedure_defn(exp)));
@@ -1457,20 +1360,20 @@ std::shared_ptr<any> unmemoize_aux(std::shared_ptr<any> exp,
     return exp;
 }
 
-std::shared_ptr<any> unmemoize(std::shared_ptr<any> exp) {
+boxed unmemoize(boxed exp) {
     cmap_table tab;
-    map_fn fn = [&tab, &fn](std::shared_ptr<any> x) -> std::shared_ptr<any> {
+    map_fn fn = [&tab, &fn](boxed x) -> boxed {
         return unmemoize_aux(x, tab, fn);
     };
     return fn(exp);
 }
 
-std::shared_ptr<any> make_serialized(size_t n) {
+boxed make_serialized(size_t n) {
     auto a = make_vector();
-    auto v = any_cast<std::shared_ptr<vector>>(*a);
+    auto v = box_cast<std::shared_ptr<vector>>(*a);
 
     v->push_back(make_symbol("MCE-SERIALIZED"));
-    v->push_back(std::make_shared<any>(static_cast<double>(n)));
+    v->push_back(std::make_shared<box>(static_cast<double>(n)));
 
     return a;
 }
@@ -1478,18 +1381,18 @@ std::shared_ptr<any> make_serialized(size_t n) {
 bool is_serialized(std::shared_ptr<vector> v) {
     return (v->size() == 2) &&
            ((*v)[0]->type() == typeid(std::shared_ptr<symbol>)) &&
-           (*any_cast<std::shared_ptr<symbol>>(*(*v)[0]) == "MCE-SERIALIZED");
+           (*box_cast<std::shared_ptr<symbol>>(*(*v)[0]) == "MCE-SERIALIZED");
 }
 
-std::shared_ptr<any> serialized_n(std::shared_ptr<vector> v) {
+boxed serialized_n(std::shared_ptr<vector> v) {
     return (*v)[1];
 }
 
-std::shared_ptr<any> serialize_aux(std::shared_ptr<any> exp,
-                                   cmap_table& tab,
-                                   map_fn fn,
-                                   set_entry_fn set_entry) {
-    if (exp->empty()) {
+boxed serialize_aux(boxed exp,
+                    cmap_table& tab,
+                    map_fn fn,
+                    set_entry_fn set_entry) {
+    if (is_empty(exp)) {
         return exp;
     }
 
@@ -1506,27 +1409,24 @@ std::shared_ptr<any> serialize_aux(std::shared_ptr<any> exp,
     return exp;
 }
 
-std::shared_ptr<any> serialize(std::shared_ptr<any> exp) {
+boxed serialize(boxed exp) {
     size_t counter = 0;
     cmap_table tab;
-    set_entry_fn set_entry = [&counter](cmap_table& tab,
-                                        std::shared_ptr<any> v,
-                                        std::shared_ptr<any> entry) {
+    set_entry_fn set_entry = [&counter](cmap_table& tab, boxed v, boxed entry) {
         table_set(tab, v, make_serialized(counter++));
         return entry;
     };
-    map_fn fn = [&tab, &fn, &set_entry]
-        (std::shared_ptr<any> x) -> std::shared_ptr<any> {
-            return serialize_aux(x, tab, fn, set_entry);
-        };
+    map_fn fn = [&tab, &fn, &set_entry](boxed x) -> boxed {
+        return serialize_aux(x, tab, fn, set_entry);
+    };
     return fn(exp);
 }
 
-std::shared_ptr<any> deserialize_aux(std::shared_ptr<any> exp,
-                                     cmap_table& tab,
-                                     map_fn fn,
-                                     set_entry_fn set_entry) {
-    if (exp->empty()) {
+boxed deserialize_aux(boxed exp,
+                      cmap_table& tab,
+                      map_fn fn,
+                      set_entry_fn set_entry) {
+    if (is_empty(exp)) {
         return exp;
     }
 
@@ -1537,7 +1437,7 @@ std::shared_ptr<any> deserialize_aux(std::shared_ptr<any> exp,
     }
 
     if (type == typeid(std::shared_ptr<vector>)) {
-        auto v = any_cast<std::shared_ptr<vector>>(*exp);
+        auto v = box_cast<std::shared_ptr<vector>>(*exp);
         if (is_serialized(v)) {
             return tab.at(serialized_n(v));
         }
@@ -1547,46 +1447,43 @@ std::shared_ptr<any> deserialize_aux(std::shared_ptr<any> exp,
     return exp;
 }
 
-std::shared_ptr<any> deserialize(std::shared_ptr<any> exp) {
+boxed deserialize(boxed exp) {
     size_t counter = 0;
     cmap_table tab;
-    set_entry_fn set_entry = [&counter](cmap_table& tab,
-                                        std::shared_ptr<any> v,
-                                        std::shared_ptr<any> entry) {
+    set_entry_fn set_entry = [&counter](cmap_table& tab, boxed, boxed entry) {
         return table_set(tab,
-                         std::make_shared<any>(static_cast<double>(counter++)),
+                         std::make_shared<box>(static_cast<double>(counter++)),
                          entry);
     };
-    map_fn fn = [&tab, &fn, &set_entry]
-        (std::shared_ptr<any> x) -> std::shared_ptr<any> {
-            return deserialize_aux(x, tab, fn, set_entry);
-        };
+    map_fn fn = [&tab, &fn, &set_entry](boxed x) -> boxed {
+        return deserialize_aux(x, tab, fn, set_entry);
+    };
     return fn(exp);
 }
 
-json pickle_aux(std::shared_ptr<any> exp) {
+json pickle_aux(boxed exp) {
     json j;
-    if (exp->empty()) {
+    if (is_empty(exp)) {
         j.push_back(std::string(1, null_code));
     } else {
         auto& type = exp->type();
         if (type == typeid(bool)) {
             j.push_back(std::string(1, boolean_code));
-            j.push_back(any_cast<bool>(*exp) ? "t" : "f");
+            j.push_back(box_cast<bool>(*exp) ? "t" : "f");
         } else if (type == typeid(double)) {
             j.push_back(std::string(1, number_code));
-            j.push_back(any_cast<double>(*exp));
+            j.push_back(box_cast<double>(*exp));
         } else if (type == typeid(char)) {
             j.push_back(std::string(1, char_code));
-            j.push_back(std::string(1, any_cast<char>(*exp)));
+            j.push_back(std::string(1, box_cast<char>(*exp)));
         } else if (type == typeid(std::shared_ptr<std::string>)) {
             j.push_back(std::string(1, string_code));
-            j.push_back(*any_cast<std::shared_ptr<std::string>>(*exp));
+            j.push_back(*box_cast<std::shared_ptr<std::string>>(*exp));
         } else if (type == typeid(std::shared_ptr<symbol>)) {
             j.push_back(std::string(1, symbol_code));
-            j.push_back(*any_cast<std::shared_ptr<symbol>>(*exp));
+            j.push_back(*box_cast<std::shared_ptr<symbol>>(*exp));
         } else if (type == typeid(std::shared_ptr<pair>)) {
-            auto p = any_cast<std::shared_ptr<pair>>(*exp);
+            auto p = box_cast<std::shared_ptr<pair>>(*exp);
             j.push_back(std::string(1, pair_code));
             j.push_back(pickle_aux(p->first));
             j.push_back(pickle_aux(p->second));
@@ -1600,18 +1497,18 @@ json pickle_aux(std::shared_ptr<any> exp) {
     return j;
 }
 
-std::string pickle(std::shared_ptr<any> exp) {
+std::string pickle(boxed exp) {
     return pickle_aux(exp).dump();
 }
 
-std::shared_ptr<any> unpickle_aux(const json& j) {
+boxed unpickle_aux(const json& j) {
     switch (j[0].get<std::string>()[0]) {
     case boolean_code:
-        return std::make_shared<any>(j[1].get<std::string>() == "t");
+        return std::make_shared<box>(j[1].get<std::string>() == "t");
     case number_code:
-        return std::make_shared<any>(j[1].get<double>());
+        return std::make_shared<box>(j[1].get<double>());
     case char_code:
-        return std::make_shared<any>(j[1].get<std::string>()[0]);
+        return std::make_shared<box>(j[1].get<std::string>()[0]);
     case string_code:
         return make_string(j[1].get<std::string>());
     case symbol_code:
@@ -1625,40 +1522,14 @@ std::shared_ptr<any> unpickle_aux(const json& j) {
     }
 }
 
-std::shared_ptr<any> unpickle(const std::string& s) {
+boxed unpickle(const std::string& s) {
     return unpickle_aux(json::parse(s));
 }
 
-std::string mce_save(std::shared_ptr<any> exp) {
+std::string mce_save(boxed exp) {
     return pickle(serialize(unmemoize(exp)));
 }
 
-std::shared_ptr<any> mce_restore(const std::string& s) {
+boxed mce_restore(const std::string& s) {
     return memoize(deserialize(unpickle(s)));
-}
-
-int main(int argc, char *argv[]) {
-    options_description desc("Options");
-    desc.add_options()
-        ("help", "help")
-        ("gc-threshold",
-         value<size_t>()->default_value(100000),
-         "gc when object table exceeds this number");
-    variables_map vm;
-    store(parse_command_line(argc, argv, desc), vm);
-    if (vm.count("help")) {
-        std::cout << desc << std::endl;
-        return 0;
-    }
-    gc_threshold = vm["gc-threshold"].as<size_t>();
-
-    json s;
-    std::cin >> s;
-    auto r = mce_restore(s.get<std::string>());
-    if (r->type() == typeid(lambda)) {
-        (*any_cast<lambda>(*r))(cons(nil, nil));
-    } else {
-        run(r);
-    }
-    return 0;
 }
