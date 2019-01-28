@@ -24,8 +24,8 @@ int main(int argc, char *argv[]) {
     json s;
     std::cin >> s;
     auto r = mce_restore(s.get<std::string>());
-    if (box_contains_lambda(r)) {
-        (*box_cast<lambda>(r))(cons(nil, nil));
+    if (box_contains<lambda>(r)) {
+        (*box_cast<lambda>(r))(cons(bnil, bnil));
     } else {
         run(r);
     }

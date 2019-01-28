@@ -10,15 +10,19 @@ typedef std::function<function> func;
 typedef std::shared_ptr<func> lambda;
 
 extern size_t gc_threshold;
-extern const boxed nil;
+extern const boxed bnil;
 
 template<typename T>
-inline T box_cast(const boxed& a) {
-    return boost::any_cast<T>(*a);
+struct cast_return{ typedef T type; };
+
+template<typename T>
+inline typename cast_return<T>::type box_cast(const boxed& a) {
+    return boost::any_cast<typename cast_return<T>::type>(*a);
 }
 
-inline bool box_contains_lambda(const boxed& a) {
-    return a->type() == typeid(lambda);
+template<typename T>
+inline bool box_contains(const boxed& a) {
+    return a->type() == typeid(T);
 }
 
 boxed cons(boxed car, boxed cdr);
