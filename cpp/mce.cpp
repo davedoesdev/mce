@@ -1,3 +1,5 @@
+#include <sys/types.h>
+#include <unistd.h>
 #include <iostream>
 #include <utility>
 #include <vector>
@@ -25,91 +27,58 @@ public:
     symbol(const std::string& s) : std::string(s) {}
 };
 
-inline bool box_is_empty(const boxed& a) {
-    return a->empty();
-}
-
-inline bool boxes_contain_same_type(const boxed& a, const boxed& b) {
-    return a->type() == b->type();
-}
-
-template<>
-struct cast_return<std::string>{ typedef std::shared_ptr<std::string> type; };
-template<>
-inline std::shared_ptr<std::string> box_cast<std::string>(const boxed& a) {
-    return boost::any_cast<std::shared_ptr<std::string>>(*a);
-}
-
-template<>
-struct cast_return<symbol>{ typedef std::shared_ptr<symbol> type; };
-template<>
-inline std::shared_ptr<symbol> box_cast<symbol>(const boxed& a) {
-    return boost::any_cast<std::shared_ptr<symbol>>(*a);
-}
-
-template<>
-struct cast_return<pair>{ typedef std::shared_ptr<pair> type; };
-template<>
-inline std::shared_ptr<pair> box_cast<pair>(const boxed& a) {
-    return boost::any_cast<std::shared_ptr<pair>>(*a);
-}
-
-template<>
-struct cast_return<vector>{ typedef std::shared_ptr<vector> type; };
-template<>
-inline std::shared_ptr<vector> box_cast<vector>(const boxed& a) {
-    return boost::any_cast<std::shared_ptr<vector>>(*a);
-}
-
-template<>
-inline bool box_contains<std::string>(const boxed& a) {
-    return a->type() == typeid(std::shared_ptr<std::string>);
-}
-
-template<>
-inline bool box_contains<symbol>(const boxed& a) {
-    return a->type() == typeid(std::shared_ptr<symbol>);
-}
-
-template<>
-inline bool box_contains<pair>(const boxed& a) {
-    return a->type() == typeid(std::shared_ptr<pair>);
-}
-
-template<>
-inline bool box_contains<vector>(const boxed& a) {
-    return a->type() == typeid(std::shared_ptr<vector>);
-}
-
-boxed boxin() {
-    return std::make_shared<box>();
+inline boxed box() {
+    return std::make_shared<Box>();
 }
 
 template<typename T>
-boxed boxin(const T& a) {
-    return std::make_shared<box>(a);
+struct box_arg { typedef T type; };
+
+template<typename T>
+inline boxed box(const typename box_arg<T>::type& a) {
+    return std::make_shared<Box>(a);
 }
+
+template<>
+inline boxed box<std::string>(const std::string& s) {
+    return box<std::shared_ptr<std::string>>(std::make_shared<std::string>(s));
+}
+
+template<>
+struct box_arg<symbol>{ typedef std::string type; };
+template<>
+inline boxed box<symbol>(const std::string& s) {
+    return box<std::shared_ptr<symbol>>(std::make_shared<symbol>(s));
+}
+
+template<>
+struct box_type<std::string> { typedef std::shared_ptr<std::string> type; };
+
+template<>
+struct box_type<symbol> { typedef std::shared_ptr<symbol> type; };
+
+template<>
+struct box_type<pair> { typedef std::shared_ptr<pair> type; };
+
+template<>
+struct box_type<vector> { typedef std::shared_ptr<vector> type; };
 
 struct CMapHash {
     std::size_t operator()(const boxed& a) const noexcept {
-        if (!box_is_empty(a)) {
-            if (box_contains<pair>(a)) {
-                return std::hash<std::shared_ptr<pair>>{}(
-                    box_cast<pair>(a));
-            }
+        if (a->contains<pair>()) {
+            return std::hash<std::shared_ptr<pair>>{}(a->cast<pair>());
+        }
 
-            if (box_contains<vector>(a)) {
-                return std::hash<std::shared_ptr<vector>>{}(
-                    box_cast<vector>(a));
-            }
+        if (a->contains<vector>()) {
+            return std::hash<std::shared_ptr<vector>>{}(a->cast<vector>());
+        }
 
-            if (box_contains<lambda>(a)) {
-                return std::hash<lambda>{}(box_cast<lambda>(a));
-            }
+        if (a->contains<lambda>()) {
+            return std::hash<lambda>{}(a->cast<lambda>());
+        }
 
-            if (box_contains<double>(a)) {
-                return std::hash<double>{}(box_cast<double>(a));
-            }
+        if (a->contains<double>()) {
+            return std::hash<double>{}(a->cast<double>());
         }
 
         return std::hash<boxed>{}(a);
@@ -118,32 +87,32 @@ struct CMapHash {
 
 struct CMapEqual {
     bool operator()(const boxed& x, const boxed& y) const noexcept {
-        if (box_is_empty(x)) {
-            return box_is_empty(y);
+        if (x->empty()) {
+            return y->empty();
         }
 
-        if (box_is_empty(y)) {
+        if (y->empty()) {
             return false;
         }
 
-        if (!boxes_contain_same_type(x, y)) {
+        if (!x->contains_type_of(*y)) {
             return false;
         }
 
-        if (box_contains<pair>(x)) {
-            return box_cast<pair>(x) == box_cast<pair>(y);
+        if (x->contains<pair>()) {
+            return x->cast<pair>() == y->cast<pair>();
         }
 
-        if (box_contains<vector>(x)) {
-            return box_cast<vector>(x) == box_cast<vector>(y);
+        if (x->contains<vector>()) {
+            return x->cast<vector>() == y->cast<vector>();
         }
 
-        if (box_contains<lambda>(x)) {
-            return box_cast<lambda>(x) == box_cast<lambda>(y);
+        if (x->contains<lambda>()) {
+            return x->cast<lambda>() == y->cast<lambda>();
         }
 
-        if (box_contains<double>(x)) {
-            return box_cast<double>(x) == box_cast<double>(y);
+        if (x->contains<double>()) {
+            return x->cast<double>() == y->cast<double>();
         }
 
         return x == y;
@@ -155,8 +124,8 @@ typedef std::function<boxed(boxed)> map_fn;
 typedef std::function<boxed(cmap_table&, boxed, boxed)> set_entry_fn;
 typedef boxed extend_env_fn(boxed env, boxed syms, boxed values);
 
-const boxed bnil = boxin();
-const boxed bfalse = boxin(false);
+const boxed bnil = box();
+const boxed bfalse = box<bool>(false);
 
 std::unordered_map<pair*, std::weak_ptr<pair>> allocated_pairs;
 std::unordered_map<vector*, std::weak_ptr<vector>> allocated_vectors;
@@ -218,7 +187,7 @@ boxed cons(boxed car, boxed cdr) {
         delete pptr;
     });
     allocated_pairs[p.get()] = p;
-    return boxin(p);
+    return box<std::shared_ptr<pair>>(p);
 }
 
 boxed make_vector() {
@@ -227,10 +196,14 @@ boxed make_vector() {
         delete vptr;
     });
     allocated_vectors[v.get()] = v;
-    return boxin(v);
+    return box<std::shared_ptr<vector>>(v);
 }
 
-std::shared_ptr<func> make_lambda2(func fn) {
+template<typename R>
+R make_lambda(func fn);
+
+template<>
+lambda make_lambda<lambda>(func fn) {
     auto f = std::shared_ptr<func>(new func(fn), [](auto fptr) {
         allocated_functions.erase(fptr);
         delete fptr;
@@ -239,42 +212,35 @@ std::shared_ptr<func> make_lambda2(func fn) {
     return f;
 }
 
-boxed make_lambda(func fn) {
-    return boxin(make_lambda2(fn));
-}
-
-boxed make_symbol(const std::string& s) {
-    return boxin(std::make_shared<symbol>(s));
-}
-
-boxed make_string(const std::string& s) {
-    return boxin(std::make_shared<std::string>(s));
+template<>
+boxed make_lambda<boxed>(func fn) {
+    return box<lambda>(make_lambda<lambda>(fn));
 }
 
 boxed list_ref(boxed l, size_t i) {
     while (i > 0) {
-        l = box_cast<pair>(l)->second;
+        l = l->cast<pair>()->second;
         --i;
     }
 
-    return box_cast<pair>(l)->first;
+    return l->cast<pair>()->first;
 }
 
 boxed list_rest(boxed l, size_t i) {
     while (i > 0) {
-        l = box_cast<pair>(l)->second;
+        l = l->cast<pair>()->second;
         --i;
     }
 
-    return box_cast<pair>(l)->second;
+    return l->cast<pair>()->second;
 }
 
 boxed list_to_vector(boxed l) {
     auto a = make_vector();
-    auto v = box_cast<vector>(a);
+    auto v = a->cast<vector>();
 
-    while (!box_is_empty(l)) {
-        auto p = box_cast<pair>(l);
+    while (l->contains<pair>()) {
+        auto p = l->cast<pair>();
         v->push_back(p->first);
         l = p->second;
     }
@@ -283,7 +249,7 @@ boxed list_to_vector(boxed l) {
 }
 
 boxed vector_to_list(boxed vec) {
-    auto v = box_cast<vector>(vec);
+    auto v = vec->cast<vector>();
     auto l = bnil;
     for (auto it = v->rbegin(); it != v->rend(); ++it) {
         l = cons(*it, l);
@@ -298,8 +264,8 @@ boxed cmap(map_fn f, boxed l, cmap_table& tab, set_entry_fn set_entry) {
     }
 
     auto entry = set_entry(tab, l, cons(bnil, bnil));
-    auto ep = box_cast<pair>(entry);
-    auto lp = box_cast<pair>(l);
+    auto ep = entry->cast<pair>();
+    auto lp = l->cast<pair>();
     ep->first = f(lp->first);
     ep->second = f(lp->second);
 
@@ -313,8 +279,8 @@ boxed vector_cmap(map_fn f, boxed v, cmap_table& tab, set_entry_fn set_entry) {
     }
 
     auto entry = set_entry(tab, v, make_vector());
-    auto ev = box_cast<vector>(entry);
-    auto vv = box_cast<vector>(v);
+    auto ev = entry->cast<vector>();
+    auto vv = v->cast<vector>();
 
     for (auto el : *vv) {
         ev->push_back(f(el));
@@ -329,66 +295,66 @@ boxed table_set(cmap_table& tab, boxed v, boxed entry) {
 }
 
 bool is_yield_defn(boxed args) {
-    if (!box_contains<pair>(args)) {
+    if (!args->contains<pair>()) {
         return false;
     }
     auto first = list_ref(args, 0);
-    return box_contains<symbol>(first) &&
-           (*box_cast<symbol>(first) == "MCE-YIELD-DEFINITION");
+    return first->contains<symbol>() &&
+           (*first->cast<symbol>() == "MCE-YIELD-DEFINITION");
 }
 
 boxed get_procedure_defn(boxed proc) {
-    return (*box_cast<lambda>(proc))(
-        cons(make_symbol("MCE-YIELD-DEFINITION"), bnil));
+    return (*proc->cast<lambda>())(
+        cons(box<symbol>("MCE-YIELD-DEFINITION"), bnil));
 }
 
 boxed xdisplay(boxed args, std::ostream& out, bool is_write) {
     auto exp = list_ref(args, 0);
-    if (box_is_empty(exp)) {
+    if (exp->empty()) {
         out << "()";
     } else {
-        if (box_contains<bool>(exp)) {
-            out << (box_cast<bool>(exp) ? "#t" : "#f");
-        } else if (box_contains<double>(exp)) {
-            out << box_cast<double>(exp);
-        } else if (box_contains<char>(exp)) {
-            auto c = box_cast<char>(exp);
+        if (exp->contains<bool>()) {
+            out << (exp->cast<bool>() ? "#t" : "#f");
+        } else if (exp->contains<double>()) {
+            out << exp->cast<double>();
+        } else if (exp->contains<char>()) {
+            auto c = exp->cast<char>();
             if (is_write) {
                 out << "#\\x" << std::hex << static_cast<int>(c);
             } else {
                 out << c;
             }
-        } else if (box_contains<std::string>(exp)) {
-            auto& s = *box_cast<std::string>(exp);
+        } else if (exp->contains<std::string>()) {
+            auto& s = *exp->cast<std::string>();
             if (is_write) {
                 json j = s;
                 out << j.dump();
             } else {
                 out << s;
             }
-        } else if (box_contains<symbol>(exp)) {
-            out << *box_cast<symbol>(exp);
-        } else if (box_contains<pair>(exp)) {
+        } else if (exp->contains<symbol>()) {
+            out << *exp->cast<symbol>();
+        } else if (exp->contains<pair>()) {
             bool first = true;
             std::cout << "(";
-            while (box_contains<pair>(exp)) {
+            while (exp->contains<pair>()) {
                 if (!first) {
                     out << " ";
                 }
                 first = false;
-                auto p = box_cast<pair>(exp);
+                auto p = exp->cast<pair>();
                 xdisplay(cons(p->first, bnil), out, is_write);
                 exp = p->second;
             }
-            if (!box_is_empty(exp)) {
+            if (!exp->empty()) {
                 out << " . ";
                 xdisplay(cons(exp, bnil), out, is_write);
             }
             out << ")";
-        } else if (box_contains<vector>(exp)) {
+        } else if (exp->contains<vector>()) {
             bool first = true;
             out << "#(";
-            auto vec = box_cast<vector>(exp);
+            auto vec = exp->cast<vector>();
             for (auto v : *vec) {
                 if (!first) {
                     out << " ";
@@ -397,7 +363,7 @@ boxed xdisplay(boxed args, std::ostream& out, bool is_write) {
                 xdisplay(cons(v, bnil), out, is_write);
             }
             out << ")";
-        } else if (box_contains<lambda>(exp)) {
+        } else if (exp->contains<lambda>()) {
             out << "#<procedure>";
         } else {
             throw std::range_error("unknown display expression");
@@ -413,8 +379,8 @@ boxed newline(std::ostream& out) {
 
 boxed xprint(boxed args, std::ostream& out) {
     auto r = bnil;
-    while (!box_is_empty(args)) {
-        auto p = box_cast<pair>(args);
+    while (args->contains<pair>()) {
+        auto p = args->cast<pair>();
         r = p->first;
         xdisplay(cons(r, bnil), out, false);
         args = p->second;
@@ -433,8 +399,8 @@ boxed eprint(boxed args) {
 
 boxed xwrite(boxed args, std::ostream& out) {
     auto r = bnil;
-    while (!box_is_empty(args)) {
-        auto p = box_cast<pair>(args);
+    while (args->contains<pair>()) {
+        auto p = args->cast<pair>();
         r = p->first;
         xdisplay(cons(r, bnil), out, true);
         args = p->second;
@@ -454,10 +420,10 @@ boxed unmemoize(boxed exp);
 boxed serialize(boxed exp);
 
 boxed memoize_lambda(lambda proc, boxed defn) {
-    return make_lambda([proc, defn](boxed args) -> boxed {
+    return make_lambda<boxed>([proc, defn](boxed args) -> boxed {
         if (is_yield_defn(args)) {
-            if (box_contains<lambda>(defn)) {
-                return (*box_cast<lambda>(defn))(bnil);
+            if (defn->contains<lambda>()) {
+                return (*defn->cast<lambda>())(bnil);
             }
             return defn;
         }
@@ -467,7 +433,7 @@ boxed memoize_lambda(lambda proc, boxed defn) {
 }
 
 boxed memoize_lambda(boxed proc, boxed defn) {
-    return memoize_lambda(box_cast<lambda>(proc), defn);
+    return memoize_lambda(proc->cast<lambda>(), defn);
 }
 
 boxed send(boxed k, boxed v) {
@@ -475,11 +441,11 @@ boxed send(boxed k, boxed v) {
 }
 
 boxed ctenv_lookup(boxed i, boxed env) {
-    auto ip = box_cast<pair>(i);
-    auto first = box_cast<double>(ip->first);
-    auto second = box_cast<double>(ip->second);
-    auto bindings = box_cast<pair>(list_ref(env, first));
-    auto v = box_cast<vector>(bindings->second);
+    auto ip = i->cast<pair>();
+    auto first = ip->first->cast<double>();
+    auto second = ip->second->cast<double>();
+    auto bindings = list_ref(env, first)->cast<pair>();
+    auto v = bindings->second->cast<vector>();
     if (second < v->size()) {
         return (*v)[second];
     }
@@ -487,26 +453,26 @@ boxed ctenv_lookup(boxed i, boxed env) {
 }
 
 boxed ctenv_setvar(boxed name, boxed i, boxed val, boxed env) {
-    auto ip = box_cast<pair>(i);
-    auto first = box_cast<double>(ip->first);
-    auto second = box_cast<double>(ip->second);
-    auto bindings = box_cast<pair>(list_ref(env, first));
-    auto v = box_cast<vector>(bindings->second);
+    auto ip = i->cast<pair>();
+    auto first = ip->first->cast<double>();
+    auto second = ip->second->cast<double>();
+    auto bindings = list_ref(env, first)->cast<pair>();
+    auto v = bindings->second->cast<vector>();
 
     if (second >= v->size()) {
         v->resize(second + 1, bnil);
     }
     (*v)[second] = val;
 
-    if (box_is_empty(bindings->first)) {
+    if (bindings->first->empty()) {
         bindings->first = cons(bnil, bnil);
     }
-    auto p = box_cast<pair>(bindings->first);
+    auto p = bindings->first->cast<pair>();
     while (second > 0) {
-        if (box_is_empty(p->second)) {
+        if (p->second->empty()) {
             p->second = cons(bnil, bnil);
         }
-        p = box_cast<pair>(p->second);
+        p = p->second->cast<pair>();
         --second;
     }
     p->first = name;
@@ -516,7 +482,7 @@ boxed ctenv_setvar(boxed name, boxed i, boxed val, boxed env) {
 
 boxed symbol_lookup(boxed args) {
     auto i = list_ref(args, 1);
-    return make_lambda([i](boxed args) -> boxed {
+    return make_lambda<boxed>([i](boxed args) -> boxed {
         auto k = list_ref(args, 0);
         auto env = list_ref(args, 1);
         return send(k, ctenv_lookup(i, env));
@@ -525,23 +491,23 @@ boxed symbol_lookup(boxed args) {
 
 boxed send_value(boxed args) {
     auto exp = list_ref(args, 1);
-    return make_lambda([exp](boxed args) -> boxed {
+    return make_lambda<boxed>([exp](boxed args) -> boxed {
         auto k = list_ref(args, 0);
         return send(k, exp);
     });
 }
 
 boxed make_step_contn(boxed k, boxed args) {
-    return cons(make_symbol("MCE-STEP-CONTN"), cons(k, args));
+    return cons(box<symbol>("MCE-STEP-CONTN"), cons(k, args));
 }
 
 bool is_step_contn(boxed args) {
-    if (!box_contains<pair>(args)) {
+    if (!args->contains<pair>()) {
         return false;
     }
     auto first = list_ref(args, 0);
-    return box_contains<symbol>(first) &&
-           (*box_cast<symbol>(first) == "MCE-STEP-CONTN");
+    return first->contains<symbol>() &&
+           (*first->cast<symbol>() == "MCE-STEP-CONTN");
 }
 
 boxed step_contn_k(boxed args) {
@@ -553,12 +519,12 @@ boxed step_contn_args(boxed args) {
 }
 
 bool is_transfer(boxed args) {
-    if (!box_contains<pair>(args)) {
+    if (!args->contains<pair>()) {
         return false;
     }
     auto first = list_ref(args, 0);
-    return box_contains<symbol>(first) &&
-           (*box_cast<symbol>(first) == "MCE-TRANSFER");
+    return first->contains<symbol>() &&
+           (*first->cast<symbol>() == "MCE-TRANSFER");
 }
 
 boxed transfer_args(boxed args) {
@@ -568,8 +534,8 @@ boxed transfer_args(boxed args) {
 boxed transfer(boxed args) {
     auto k = list_ref(args, 0);
     auto fn = list_ref(args, 2);
-    return (*box_cast<lambda>(fn))(make_step_contn(k,
-        cons(make_symbol("MCE-TRANSFER"), list_rest(args, 2))));
+    return (*fn->cast<lambda>())(make_step_contn(k,
+        cons(box<symbol>("MCE-TRANSFER"), list_rest(args, 2))));
 }
 
 boxed make_global_env() {
@@ -579,16 +545,16 @@ boxed make_global_env() {
 }
 
 boxed make_env_args(boxed env, boxed args) {
-    return cons(make_symbol("MCE-ENV-ARGS"), cons(env, args));
+    return cons(box<symbol>("MCE-ENV-ARGS"), cons(env, args));
 }
 
 bool is_env_args(boxed args) {
-    if (!box_contains<pair>(args)) {
+    if (!args->contains<pair>()) {
         return false;
     }
     auto first = list_ref(args, 0);
-    return box_contains<symbol>(first) &&
-           (*box_cast<symbol>(first) == "MCE-ENV-ARGS");
+    return first->contains<symbol>() &&
+           (*first->cast<symbol>() == "MCE-ENV-ARGS");
 }
 
 boxed env_args_env(boxed args) {
@@ -600,109 +566,107 @@ boxed env_args_args(boxed args) {
 }
 
 boxed applyx(boxed k, boxed env, boxed fn, boxed args) {
-    return (*box_cast<lambda>(fn))(
+    return (*fn->cast<lambda>())(
         make_step_contn(k, make_env_args(env, args)));
 }
 
 boxed result(boxed exp) {
     auto a = make_vector();
-    auto v = box_cast<vector>(a);
-    v->push_back(make_symbol("MCE-RESULT"));
+    auto v = a->cast<vector>();
+    v->push_back(box<symbol>("MCE-RESULT"));
     v->push_back(exp);
     return a;
 }
 
 bool is_result(boxed exp) {
-    if (!box_contains<vector>(exp)) {
+    if (!exp->contains<vector>()) {
         return false;
     }
-    auto v = box_cast<vector>(exp);
+    auto v = exp->cast<vector>();
     return (v->size() == 2) &&
-           box_contains<symbol>((*v)[0]) &&
-           (*box_cast<symbol>((*v)[0]) == "MCE-RESULT");
+           (*v)[0]->contains<symbol>() &&
+           (*(*v)[0]->cast<symbol>() == "MCE-RESULT");
 }
 
 boxed result_val(boxed exp) {
-    return (*box_cast<vector>(exp))[1];
+    return (*exp->cast<vector>())[1];
 }
 
 boxed less_than(boxed args) {
-    bool r = box_cast<double>(list_ref(args, 0)) <
-             box_cast<double>(list_ref(args, 1));
-    return boxin(r);
+    return box<bool>(list_ref(args, 0)->cast<double>() <
+                     list_ref(args, 1)->cast<double>());
 }
 
 boxed greater_than(boxed args) {
-    bool r = box_cast<double>(list_ref(args, 0)) >
-             box_cast<double>(list_ref(args, 1));
-    return boxin(r);
+    return box<bool>(list_ref(args, 0)->cast<double>() >
+                     list_ref(args, 1)->cast<double>());
 }
 
 boxed plus(boxed args) {
     double r = 0;
-    while (!box_is_empty(args)) {
-        auto p = box_cast<pair>(args);
-        r += box_cast<double>(p->first);
+    while (args->contains<pair>()) {
+        auto p = args->cast<pair>();
+        r += p->first->cast<double>();
         args = p->second;
     }
-    return boxin(r);
+    return box<double>(r);
 }
 
 boxed multiply(boxed args) {
     double r = 1;
-    while (!box_is_empty(args)) {
-        auto p = box_cast<pair>(args);
-        r *= box_cast<double>(p->first);
+    while (args->contains<pair>()) {
+        auto p = args->cast<pair>();
+        r *= p->first->cast<double>();
         args = p->second;
     }
-    return boxin(r);
+    return box<double>(r);
 }
 
 boxed is_null(boxed args) {
-    return boxin(box_is_empty(list_ref(args, 0)));
+    return box<bool>(list_ref(args, 0)->empty());
 }
 
 boxed is_string(boxed args) {
     auto a = list_ref(args, 0);
-    return boxin(!box_is_empty(a) && box_contains<std::string>(a));
+    return box<bool>(a->contains<std::string>());
 }
 
 boxed is_pair(boxed args) {
     auto a = list_ref(args, 0);
-    return boxin(!box_is_empty(a) && box_contains<pair>(a));
+    return box<bool>(a->contains<pair>());
 }
 
 boxed is_procedure(boxed args) {
     auto a = list_ref(args, 0);
-    return boxin(!box_is_empty(a) && box_contains<lambda>(a));
+    return box<bool>(a->contains<lambda>());
 }
 
 boxed is_vector(boxed args) {
     auto a = list_ref(args, 0);
-    return boxin(!box_is_empty(a) && box_contains<vector>(a));
+    return box<bool>(a->contains<vector>());
 }
 
 boxed vector_length(boxed args) {
     auto a = list_ref(args, 0);
-    return boxin(static_cast<double>(box_cast<vector>(a)->size()));
+    return box<double>(static_cast<double>(a->cast<vector>()->size()));
 }
 
 boxed vector_ref(boxed args) {
     auto a = list_ref(args, 0);
     auto i = list_ref(args, 1);
-    return box_cast<vector>(a)->at(box_cast<double>(i));
+    return a->cast<vector>()->at(i->cast<double>());
 }
 
 boxed is_string_equal(boxed args) {
     auto x = list_ref(args, 0);
     auto y = list_ref(args, 1);
-    return boxin(*box_cast<std::string>(x) == *box_cast<std::string>(y));
+    return box<bool>(*x->cast<std::string>() == *y->cast<std::string>());
 }
 
 boxed is_number_equal(boxed args) {
     auto x = list_ref(args, 0);
     auto y = list_ref(args, 1);
-    return boxin(box_cast<double>(x) == box_cast<double>(y));
+    return box<bool>(x->cast<double>() == y->cast<double>());
 }
 
 boxed car(boxed args) {
@@ -716,14 +680,14 @@ boxed cdr(boxed args) {
 boxed set_car(boxed args) {
     auto p = list_ref(args, 0);
     auto v = list_ref(args, 1);
-    box_cast<pair>(p)->first = v;
+    p->cast<pair>()->first = v;
     return p;
 }
 
 boxed set_cdr(boxed args) {
     auto p = list_ref(args, 0);
     auto v = list_ref(args, 1);
-    box_cast<pair>(p)->second = v;
+    p->cast<pair>()->second = v;
     return p;
 }
 
@@ -731,48 +695,49 @@ boxed is_eq(boxed args) {
     auto x = list_ref(args, 0);
     auto y = list_ref(args, 1);
 
-    if (box_is_empty(x)) {
-        return boxin(box_is_empty(y));
+    if (x->empty()) {
+        return box<bool>(y->empty());
     }
 
-    if (box_is_empty(y)) {
+    if (y->empty()) {
         return bfalse;
     }
 
-    if (!boxes_contain_same_type(x, y)) {
+    if (!x->contains_type_of(*y)) {
         return bfalse;
     }
 
-    if (box_contains<bool>(x)) {
-        return boxin(box_cast<bool>(x) == box_cast<bool>(y));
+    if (x->contains<bool>()) {
+        return box<bool>(x->cast<bool>() == y->cast<bool>());
     }
 
-    if (box_contains<char>(x)) {
-        return boxin(box_cast<char>(x) == box_cast<char>(y));
+    if (x->contains<char>()) {
+        return box<bool>(x->cast<char>() == y->cast<char>());
     }
 
-    if (box_contains<double>(x)) {
-        return boxin(box_cast<double>(x) == box_cast<double>(y));
+    if (x->contains<double>()) {
+        return box<bool>(x->cast<double>() == y->cast<double>());
     }
 
-    if (box_contains<std::string>(x)) {
-        return boxin(box_cast<std::string>(x) == box_cast<std::string>(y));
+    if (x->contains<std::string>()) {
+        return box<bool>(
+            x->cast<std::string>() == y->cast<std::string>());
     }
 
-    if (box_contains<symbol>(x)) {
-        return boxin(*box_cast<symbol>(x) == *box_cast<symbol>(y));
+    if (x->contains<symbol>()) {
+        return box<bool>(*x->cast<symbol>() == *y->cast<symbol>());
     }
 
-    if (box_contains<pair>(x)) {
-        return boxin(box_cast<pair>(x) == box_cast<pair>(y));
+    if (x->contains<pair>()) {
+        return box<bool>(x->cast<pair>() == y->cast<pair>());
     }
 
-    if (box_contains<vector>(x)) {
-        return boxin(box_cast<vector>(x) == box_cast<vector>(y));
+    if (x->contains<vector>()) {
+        return box<bool>(x->cast<vector>() == y->cast<vector>());
     }
 
-    if (box_contains<lambda>(x)) {
-        return boxin(box_cast<lambda>(x) == box_cast<lambda>(y));
+    if (x->contains<lambda>()) {
+        return box<bool>(x->cast<lambda>() == y->cast<lambda>());
     }
 
     return bfalse;
@@ -794,16 +759,16 @@ boxed gapplyx(boxed args) {
 }
 
 boxed save(boxed args) {
-    return make_string(mce_save(list_ref(args, 0)));
+    return box<std::string>(mce_save(list_ref(args, 0)));
 }
 
 boxed restore(boxed args) {
     auto a = list_ref(args, 0);
-    return mce_restore(*box_cast<std::string>(a));
+    return mce_restore(*a->cast<std::string>());
 }
 
 boxed getpid(boxed) {
-    return boxin(static_cast<double>(getpid()));
+    return box<double>(static_cast<double>(getpid()));
 }
 
 boxed gcons(boxed args) {
@@ -854,11 +819,11 @@ boxed find_global(const symbol& sym) {
     if (it == global_table.end()) {
         throw std::range_error(sym);
     }
-    return make_lambda(it->second);
+    return make_lambda<boxed>(it->second);
 }
 
 boxed step(boxed state) {
-    return (*box_cast<lambda>(list_ref(state, 0)))(
+    return (*list_ref(state, 0)->cast<lambda>())(
         cons(list_rest(state, 0), bnil));
 }
 
@@ -873,7 +838,7 @@ boxed run(boxed state) {
 boxed globalize(boxed x, boxed args, boxed cf);
 
 boxed handle_global_lambda(boxed args, boxed fn, boxed cf) {
-    auto f = box_cast<lambda>(fn);
+    auto f = fn->cast<lambda>();
 
     if (is_step_contn(args)) {
         auto sck = step_contn_k(args);
@@ -892,7 +857,7 @@ boxed handle_global_lambda(boxed args, boxed fn, boxed cf) {
 boxed lookup_global(const symbol& sym);
 
 boxed handle_global_lambda_kenv(boxed args, boxed fn) {
-    auto f = box_cast<lambda>(fn);
+    auto f = fn->cast<lambda>();
 
     if (is_step_contn(args)) {
         auto sca = step_contn_args(args);
@@ -907,16 +872,16 @@ boxed handle_global_lambda_kenv(boxed args, boxed fn) {
 }
 
 boxed wrap_global_lambda(boxed fn, boxed cf) {
-    const lambda l = box_cast<lambda>(fn);
+    const lambda l = fn->cast<lambda>();
     auto p = l->target<function*>();
 
     if (p && (kenvfn_set.find(*p) != kenvfn_set.end())) {
-        return make_lambda( [fn](boxed args) -> boxed {
+        return make_lambda<boxed>([fn](boxed args) -> boxed {
             return handle_global_lambda_kenv(args, fn);
         });
     }
 
-    return make_lambda( [fn, cf](boxed args) -> boxed {
+    return make_lambda<boxed>([fn, cf](boxed args) -> boxed {
         return handle_global_lambda(args, fn, cf);
     });
 }
@@ -928,15 +893,15 @@ boxed extend_env(boxed env, boxed syms, boxed values) {
 boxed improper_extend_env(boxed env, boxed syms, boxed values) {
     vector s;
     auto av = make_vector();
-    auto v = box_cast<vector>(av);
+    auto v = av->cast<vector>();
 
-    while (!box_is_empty(syms)) {
-        if (box_contains<symbol>(syms)) {
+    while (!syms->empty()) {
+        if (syms->contains<symbol>()) {
             s.push_back(syms);
             v->push_back(values);
             break;
         }
-        if (box_is_empty(values)) {
+        if (values->empty()) {
             break;
         }
 
@@ -960,7 +925,7 @@ boxed handle_lambda(boxed args,
                     boxed fn,
                     boxed env,
                     extend_env_fn extend_env) {
-    auto f = box_cast<lambda>(fn);
+    auto f = fn->cast<lambda>();
 
     if (is_step_contn(args)) {
         auto sca = step_contn_args(args);
@@ -975,7 +940,7 @@ boxed handle_lambda(boxed args,
 }
 
 boxed handle_contn_lambda(boxed args, boxed k) {
-    auto f = box_cast<lambda>(k);
+    auto f = k->cast<lambda>();
 
     if (is_step_contn(args)) {
         return (*f)(env_args_args(step_contn_args(args)));
@@ -988,8 +953,8 @@ boxed constructed_function(boxed args) {
     auto self = list_ref(args, 0);
     auto args2 = list_ref(args, 1);
     auto cf = list_ref(args, 2);
-    auto r = (*box_cast<lambda>(cf))(args2);
-    if (box_contains<lambda>(r)) {
+    auto r = (*cf->cast<lambda>())(args2);
+    if (r->contains<lambda>()) {
         return wrap_global_lambda(r, self);
     }
     return r;
@@ -997,7 +962,7 @@ boxed constructed_function(boxed args) {
 
 boxed global_lambda(boxed args) {
     auto self = list_ref(args, 0);
-    auto defn = box_cast<symbol>(list_ref(args, 1));
+    auto defn = list_ref(args, 1)->cast<symbol>();
     return wrap_global_lambda(find_global(*defn), self);
 }
 
@@ -1005,8 +970,8 @@ boxed evalx_initial(boxed args) {
     auto k = list_ref(args, 1);
     auto env = list_ref(args, 2);
     auto scanned = list_ref(args, 3);
-    return make_lambda([k, env, scanned] (boxed) -> boxed {
-        return (*box_cast<lambda>(scanned))(cons(k, cons(env, bnil)));
+    return make_lambda<boxed>([k, env, scanned](boxed) -> boxed {
+        return (*scanned->cast<lambda>())(cons(k, cons(env, bnil)));
     });
 }
 
@@ -1064,49 +1029,50 @@ define_forms(
 boxed make_form(boxed n, boxed args) {
     auto defn = cons(n, args);
 
-    auto f = boxin();
-    auto f2 = memoize_lambda(make_lambda2([f](boxed args) -> boxed {
-        return (*box_cast<lambda>(f))(args);
+    auto f = box();
+    auto f2 = memoize_lambda(make_lambda<lambda>([f](boxed args) -> boxed {
+        return (*f->cast<lambda>())(args);
     }), defn);
-    *f = *memoize_lambda(forms[box_cast<double>(n)](cons(f2, args)), defn);
+    *f = *memoize_lambda(forms[n->cast<double>()](cons(f2, args)), defn);
 
     return f;
 }
 
 boxed make_form(enum forms n, boxed args) {
-    return make_form(boxin(static_cast<double>(n)), args);
+    return make_form(box<double>(static_cast<double>(n)), args);
 }
 
 boxed make_form(boxed args) {
-    auto p = box_cast<pair>(args);
+    auto p = args->cast<pair>();
     return make_form(p->first, p->second);
 }
 
 boxed aform(enum forms n) {
-    return boxin(static_cast<double>(n));
+    return box<double>(static_cast<double>(n));
 }
 
 boxed lookup_global(const symbol& sym) {
     auto r = find_global(sym);
-    auto defn = cons(aform(forms::global_lambda), cons(make_symbol(sym), bnil));
-    auto f = boxin();
-    auto f2 = memoize_lambda(make_lambda2([f](boxed args) -> boxed {
-        return (*box_cast<lambda>(f))(args);
+    auto defn = cons(aform(forms::global_lambda),
+                     cons(box<symbol>(sym), bnil));
+    auto f = box();
+    auto f2 = memoize_lambda(make_lambda<lambda>([f](boxed args) -> boxed {
+        return (*f->cast<lambda>())(args);
     }), defn);
     *f = *memoize_lambda(wrap_global_lambda(r, f2), defn);
     return f;
 }
 
 boxed globalize(boxed x, boxed args, boxed cf) {
-    if (!box_contains<lambda>(x)) {
+    if (!x->contains<lambda>()) {
         return x;
     }
 
     auto defn = cons(aform(forms::constructed_function),
                      cons(args, cons(cf, bnil)));
-    auto f = boxin();
-    auto f2 = memoize_lambda(make_lambda2([f](boxed args) -> boxed {
-        return (*box_cast<lambda>(f))(args);
+    auto f = box();
+    auto f2 = memoize_lambda(make_lambda<lambda>([f](boxed args) -> boxed {
+        return (*f->cast<lambda>())(args);
     }), defn);
     *f = *memoize_lambda(wrap_global_lambda(x, f2), defn);
     return f;
@@ -1117,9 +1083,9 @@ boxed if1(boxed args) {
     auto env = list_ref(args, 2);
     auto scan1 = list_ref(args, 3);
     auto scan2 = list_ref(args, 4);
-    return make_lambda([k, env, scan1, scan2](boxed args) -> boxed {
-        auto v = box_cast<bool>(list_ref(args, 0));
-        auto f = box_cast<lambda>(v ? scan1 : scan2);
+    return make_lambda<boxed>([k, env, scan1, scan2](boxed args) -> boxed {
+        auto v = list_ref(args, 0)->cast<bool>();
+        auto f = (v ? scan1 : scan2)->cast<lambda>();
         return (*f)(cons(k, cons(env, bnil)));
     });
 }
@@ -1128,10 +1094,10 @@ boxed if0(boxed args) {
     auto scan0 = list_ref(args, 1);
     auto scan1 = list_ref(args, 2);
     auto scan2 = list_ref(args, 3);
-    return make_lambda([scan0, scan1, scan2](boxed args) -> boxed {
+    return make_lambda<boxed>([scan0, scan1, scan2](boxed args) -> boxed {
         auto k = list_ref(args, 0);
         auto env = list_ref(args, 1);
-        return (*box_cast<lambda>(scan0))(
+        return (*scan0->cast<lambda>())(
             cons(make_form(forms::if1,
                            cons(k, cons(env, cons(scan1, cons(scan2, bnil))))),
                  cons(env, bnil)));
@@ -1141,7 +1107,7 @@ boxed if0(boxed args) {
 boxed sclis2(boxed args) {
     auto k = list_ref(args, 1);
     auto v = list_ref(args, 2);
-    return make_lambda([k, v](boxed args) -> boxed {
+    return make_lambda<boxed>([k, v](boxed args) -> boxed {
         auto w = list_ref(args, 0);
         return send(k, cons(v, w));
     });
@@ -1151,9 +1117,9 @@ boxed sclis1(boxed args) {
     auto k = list_ref(args, 1);
     auto env = list_ref(args, 2);
     auto rest = list_ref(args, 3);
-    return make_lambda([k, env, rest](boxed args) -> boxed {
+    return make_lambda<boxed>([k, env, rest](boxed args) -> boxed {
         auto v = list_ref(args, 0);
-        return (*box_cast<lambda>(rest))(
+        return (*rest->cast<lambda>())(
             cons(make_form(forms::sclis2, cons(k, cons(v, bnil))),
                  cons(env, bnil)));
     });
@@ -1162,10 +1128,10 @@ boxed sclis1(boxed args) {
 boxed sclis0(boxed args) {
     auto first = list_ref(args, 1);
     auto rest = list_ref(args, 2);
-    return make_lambda([first, rest](boxed args) -> boxed {
+    return make_lambda<boxed>([first, rest](boxed args) -> boxed {
         auto k = list_ref(args, 0);
         auto env = list_ref(args, 1);
-        return (*box_cast<lambda>(first))(
+        return (*first->cast<lambda>())(
             cons(make_form(forms::sclis1,
                            cons(k, cons(env, cons(rest, bnil)))),
                  cons(env, bnil)));
@@ -1176,18 +1142,18 @@ boxed scseq1(boxed args) {
     auto k = list_ref(args, 1);
     auto env = list_ref(args, 2);
     auto rest = list_ref(args, 3);
-    return make_lambda([k, env, rest](boxed) -> boxed {
-        return (*box_cast<lambda>(rest))(cons(k, cons(env, bnil)));
+    return make_lambda<boxed>([k, env, rest](boxed) -> boxed {
+        return (*rest->cast<lambda>())(cons(k, cons(env, bnil)));
     });
 }
 
 boxed scseq0(boxed args) {
     auto first = list_ref(args, 1);
     auto rest = list_ref(args, 2);
-    return make_lambda([first, rest](boxed args) -> boxed {
+    return make_lambda<boxed>([first, rest](boxed args) -> boxed {
         auto k = list_ref(args, 0);
         auto env = list_ref(args, 1);
-        return (*box_cast<lambda>(first))(
+        return (*first->cast<lambda>())(
             cons(make_form(forms::scseq1,
                            cons(k, cons(env, cons(rest, bnil)))),
                  cons(env, bnil)));
@@ -1198,7 +1164,7 @@ boxed lambda1(boxed args) {
     auto params = list_ref(args, 1);
     auto scanned = list_ref(args, 2);
     auto env = list_ref(args, 3);
-    return make_lambda([params, scanned, env](boxed args) -> boxed {
+    return make_lambda<boxed>([params, scanned, env](boxed args) -> boxed {
         return handle_lambda(args, params, scanned, env, extend_env);
     });
 }
@@ -1206,7 +1172,7 @@ boxed lambda1(boxed args) {
 boxed lambda0(boxed args) {
     auto params = list_ref(args, 1);
     auto scanned = list_ref(args, 2);
-    return make_lambda([params, scanned](boxed args) -> boxed {
+    return make_lambda<boxed>([params, scanned](boxed args) -> boxed {
         auto k = list_ref(args, 0);
         auto env = list_ref(args, 1);
         return send(k,
@@ -1219,7 +1185,7 @@ boxed improper_lambda1(boxed args) {
     auto params = list_ref(args, 1);
     auto scanned = list_ref(args, 2);
     auto env = list_ref(args, 3);
-    return make_lambda([params, scanned, env](boxed args) -> boxed {
+    return make_lambda<boxed>([params, scanned, env](boxed args) -> boxed {
         return handle_lambda(args, params, scanned, env, improper_extend_env);
     });
 }
@@ -1227,7 +1193,7 @@ boxed improper_lambda1(boxed args) {
 boxed improper_lambda0(boxed args) {
     auto params = list_ref(args, 1);
     auto scanned = list_ref(args, 2);
-    return make_lambda([params, scanned](boxed args) -> boxed {
+    return make_lambda<boxed>([params, scanned](boxed args) -> boxed {
         auto k = list_ref(args, 0);
         auto env = list_ref(args, 1);
         return send(k,
@@ -1238,7 +1204,7 @@ boxed improper_lambda0(boxed args) {
 
 boxed letcc1(boxed args) {
     auto k = list_ref(args, 1);
-    return make_lambda([k](boxed args) -> boxed {
+    return make_lambda<boxed>([k](boxed args) -> boxed {
         return handle_contn_lambda(args, k); 
     });
 }
@@ -1246,10 +1212,10 @@ boxed letcc1(boxed args) {
 boxed letcc0(boxed args) {
     auto name = list_ref(args, 1);
     auto scanned = list_ref(args, 2);
-    return make_lambda([name, scanned](boxed args) -> boxed {
+    return make_lambda<boxed>([name, scanned](boxed args) -> boxed {
         auto k = list_ref(args, 0);
         auto env = list_ref(args, 1);
-        return (*box_cast<lambda>(scanned))(
+        return (*scanned->cast<lambda>())(
             cons(k,
                  cons(extend_env(env,
                                  cons(name, bnil),
@@ -1264,7 +1230,7 @@ boxed define1(boxed args) {
     auto env = list_ref(args, 2);
     auto name = list_ref(args, 3);
     auto i = list_ref(args, 4);
-    return make_lambda([k, env, name, i](boxed args) -> boxed {
+    return make_lambda<boxed>([k, env, name, i](boxed args) -> boxed {
         auto v = list_ref(args, 0);
         return send(k, ctenv_setvar(name, i, v, env));
     });
@@ -1274,10 +1240,10 @@ boxed define0(boxed args) {
     auto name = list_ref(args, 1);
     auto i = list_ref(args, 2);
     auto scanned = list_ref(args, 3);
-    return make_lambda([name, i, scanned](boxed args) -> boxed {
+    return make_lambda<boxed>([name, i, scanned](boxed args) -> boxed {
         auto k = list_ref(args, 0);
         auto env = list_ref(args, 1);
-        return (*box_cast<lambda>(scanned))(
+        return (*scanned->cast<lambda>())(
             cons(make_form(forms::define1,
                            cons(k, cons(env, cons(name, cons(i, bnil))))),
                  cons(env, bnil)));
@@ -1287,7 +1253,7 @@ boxed define0(boxed args) {
 boxed application1(boxed args) {
     auto k = list_ref(args, 1);
     auto env = list_ref(args, 2);
-    return make_lambda([k, env](boxed args) -> boxed {
+    return make_lambda<boxed>([k, env](boxed args) -> boxed {
         auto v = list_ref(args, 0);
         return applyx(k, env, list_ref(v, 0), list_rest(v, 0));
     });
@@ -1295,10 +1261,10 @@ boxed application1(boxed args) {
 
 boxed application0(boxed args) {
     auto scanned = list_ref(args, 1);
-    return make_lambda([scanned](boxed args) -> boxed {
+    return make_lambda<boxed>([scanned](boxed args) -> boxed {
         auto k = list_ref(args, 0);
         auto env = list_ref(args, 1);
-        return (*box_cast<lambda>(scanned))(
+        return (*scanned->cast<lambda>())(
             cons(make_form(forms::application1, cons(k, cons(env, bnil))),
                  cons(env, bnil)));
     });
@@ -1306,8 +1272,8 @@ boxed application0(boxed args) {
 
 bool is_unmemoized(std::shared_ptr<vector> v) {
     return (v->size() == 2) &&
-           box_contains<symbol>((*v)[0]) &&
-           (*box_cast<symbol>((*v)[0]) == "MCE-UNMEMOIZED");
+           (*v)[0]->contains<symbol>() &&
+           (*(*v)[0]->cast<symbol>() == "MCE-UNMEMOIZED");
 }
 
 boxed unmemoized_repexp(std::shared_ptr<vector> v) {
@@ -1315,32 +1281,28 @@ boxed unmemoized_repexp(std::shared_ptr<vector> v) {
 }
 
 boxed memoize_aux(boxed exp, cmap_table& tab, map_fn fn) {
-    if (box_is_empty(exp)) {
-        return exp;
-    }
-
-    if (box_contains<pair>(exp)) {
+    if (exp->contains<pair>()) {
         return cmap(fn, exp, tab, table_set);
     }
 
-    if (box_contains<vector>(exp)) {
-        auto v = box_cast<vector>(exp);
+    if (exp->contains<vector>()) {
+        auto v = exp->cast<vector>();
         if (is_unmemoized(v)) {
             auto repexp = unmemoized_repexp(v);
-            auto r = boxin();
-            auto f = boxin();
+            auto r = box();
+            auto f = box();
             auto entry = table_set(tab, exp, memoize_lambda(
-                make_lambda2([f](boxed args) -> boxed {
-                    return (*box_cast<lambda>(f))(args);
+                make_lambda<lambda>([f](boxed args) -> boxed {
+                    return (*f->cast<lambda>())(args);
                 }),
-                make_lambda([r] (boxed) -> boxed {
+                make_lambda<boxed>([r](boxed) -> boxed {
                     return r;
                 })));
             *r = *fn(repexp);
-            *f = make_lambda2([r, f](boxed args) -> boxed {
+            *f = Box(make_lambda<lambda>([r, f](boxed args) -> boxed {
                     *f = *make_form(r);
-                    return (*box_cast<lambda>(f))(args);
-                });
+                    return (*f->cast<lambda>())(args);
+                }));
             return entry;
         }
         return vector_cmap(fn, exp, tab, table_set);
@@ -1358,28 +1320,24 @@ boxed memoize(boxed exp) {
 }
 
 boxed unmemoize_aux(boxed exp, cmap_table& tab, map_fn fn) {
-    if (box_is_empty(exp)) {
-        return exp;
-    }
-
-    if (box_contains<pair>(exp)) {
+    if (exp->contains<pair>()) {
         return cmap(fn, exp, tab, table_set);
     }
 
-    if (box_contains<vector>(exp)) {
+    if (exp->contains<vector>()) {
         return vector_cmap(fn, exp, tab, table_set);
     }
 
-    if (box_contains<lambda>(exp)) {
+    if (exp->contains<lambda>()) {
         auto ref = tab.find(exp);
         if (ref != tab.end()) {
             return ref->second;
         }
 
         auto entry = table_set(tab, exp, make_vector());
-        auto v = box_cast<vector>(entry);
+        auto v = entry->cast<vector>();
 
-        v->push_back(make_symbol("MCE-UNMEMOIZED"));
+        v->push_back(box<symbol>("MCE-UNMEMOIZED"));
         v->push_back(fn(get_procedure_defn(exp)));
 
         return entry;
@@ -1398,18 +1356,18 @@ boxed unmemoize(boxed exp) {
 
 boxed make_serialized(size_t n) {
     auto a = make_vector();
-    auto v = box_cast<vector>(a);
+    auto v = a->cast<vector>();
 
-    v->push_back(make_symbol("MCE-SERIALIZED"));
-    v->push_back(boxin(static_cast<double>(n)));
+    v->push_back(box<symbol>("MCE-SERIALIZED"));
+    v->push_back(box<double>(static_cast<double>(n)));
 
     return a;
 }
 
 bool is_serialized(std::shared_ptr<vector> v) {
     return (v->size() == 2) &&
-           box_contains<symbol>((*v)[0]) &&
-           (*box_cast<symbol>((*v)[0]) == "MCE-SERIALIZED");
+           (*v)[0]->contains<symbol>() &&
+           (*(*v)[0]->cast<symbol>() == "MCE-SERIALIZED");
 }
 
 boxed serialized_n(std::shared_ptr<vector> v) {
@@ -1420,15 +1378,11 @@ boxed serialize_aux(boxed exp,
                     cmap_table& tab,
                     map_fn fn,
                     set_entry_fn set_entry) {
-    if (box_is_empty(exp)) {
-        return exp;
-    }
-
-    if (box_contains<pair>(exp)) {
+    if (exp->contains<pair>()) {
         return cmap(fn, exp, tab, set_entry);
     }
 
-    if (box_contains<vector>(exp)) {
+    if (exp->contains<vector>()) {
         return vector_cmap(fn, exp, tab, set_entry);
     }
 
@@ -1452,16 +1406,12 @@ boxed deserialize_aux(boxed exp,
                       cmap_table& tab,
                       map_fn fn,
                       set_entry_fn set_entry) {
-    if (box_is_empty(exp)) {
-        return exp;
-    }
-
-    if (box_contains<pair>(exp)) {
+    if (exp->contains<pair>()) {
         return cmap(fn, exp, tab, set_entry);
     }
 
-    if (box_contains<vector>(exp)) {
-        auto v = box_cast<vector>(exp);
+    if (exp->contains<vector>()) {
+        auto v = exp->cast<vector>();
         if (is_serialized(v)) {
             return tab.at(serialized_n(v));
         }
@@ -1475,7 +1425,9 @@ boxed deserialize(boxed exp) {
     size_t counter = 0;
     cmap_table tab;
     set_entry_fn set_entry = [&counter](cmap_table& tab, boxed, boxed entry) {
-        return table_set(tab, boxin(static_cast<double>(counter++)), entry);
+        return table_set(tab,
+                         box<double>(static_cast<double>(counter++)),
+                         entry);
     };
     map_fn fn = [&tab, &fn, &set_entry](boxed x) -> boxed {
         return deserialize_aux(x, tab, fn, set_entry);
@@ -1485,30 +1437,30 @@ boxed deserialize(boxed exp) {
 
 json pickle_aux(boxed exp) {
     json j;
-    if (box_is_empty(exp)) {
+    if (exp->empty()) {
         j.push_back(std::string(1, null_code));
     } else {
-        if (box_contains<bool>(exp)) {
+        if (exp->contains<bool>()) {
             j.push_back(std::string(1, boolean_code));
-            j.push_back(box_cast<bool>(exp) ? "t" : "f");
-        } else if (box_contains<double>(exp)) {
+            j.push_back(exp->cast<bool>() ? "t" : "f");
+        } else if (exp->contains<double>()) {
             j.push_back(std::string(1, number_code));
-            j.push_back(box_cast<double>(exp));
-        } else if (box_contains<char>(exp)) {
+            j.push_back(exp->cast<double>());
+        } else if (exp->contains<char>()) {
             j.push_back(std::string(1, char_code));
-            j.push_back(std::string(1, box_cast<char>(exp)));
-        } else if (box_contains<std::string>(exp)) {
+            j.push_back(std::string(1, exp->cast<char>()));
+        } else if (exp->contains<std::string>()) {
             j.push_back(std::string(1, string_code));
-            j.push_back(*box_cast<std::string>(exp));
-        } else if (box_contains<symbol>(exp)) {
+            j.push_back(*exp->cast<std::string>());
+        } else if (exp->contains<symbol>()) {
             j.push_back(std::string(1, symbol_code));
-            j.push_back(*box_cast<symbol>(exp));
-        } else if (box_contains<pair>(exp)) {
-            auto p = box_cast<pair>(exp);
+            j.push_back(*exp->cast<symbol>());
+        } else if (exp->contains<pair>()) {
+            auto p = exp->cast<pair>();
             j.push_back(std::string(1, pair_code));
             j.push_back(pickle_aux(p->first));
             j.push_back(pickle_aux(p->second));
-        } else if (box_contains<vector>(exp)) {
+        } else if (exp->contains<vector>()) {
             j.push_back(std::string(1, vector_code));
             j.push_back(pickle_aux(vector_to_list(exp)));
         } else {
@@ -1525,15 +1477,15 @@ std::string pickle(boxed exp) {
 boxed unpickle_aux(const json& j) {
     switch (j[0].get<std::string>()[0]) {
     case boolean_code:
-        return boxin(j[1].get<std::string>() == "t");
+        return box<bool>(j[1].get<std::string>() == "t");
     case number_code:
-        return boxin(j[1].get<double>());
+        return box<double>(j[1].get<double>());
     case char_code:
-        return boxin(j[1].get<std::string>()[0]);
+        return box<char>(j[1].get<std::string>()[0]);
     case string_code:
-        return make_string(j[1].get<std::string>());
+        return box<std::string>(j[1].get<std::string>());
     case symbol_code:
-        return make_symbol(j[1].get<std::string>());
+        return box<symbol>(j[1].get<std::string>());
     case pair_code:
         return cons(unpickle_aux(j[1]), unpickle_aux(j[2]));
     case vector_code:
