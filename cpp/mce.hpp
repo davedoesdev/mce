@@ -1,6 +1,7 @@
 #include <memory>
 #include <functional>
 #include <string>
+#include <istream>
 
 template<typename T>
 struct box_type { typedef T type; };
@@ -107,3 +108,7 @@ boxed cons(boxed car, boxed cdr);
 boxed mce_restore(const std::string& s);
 
 boxed run(boxed state);
+
+bool config(int argc, char *argv[]);
+
+boxed start(std::istream &stream);

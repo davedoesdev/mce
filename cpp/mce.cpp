@@ -6,6 +6,7 @@
 #include <unordered_map>
 #include <unordered_set>
 #include "json.hpp"
+#include "cxxopts.hpp"
 #include "mce.hpp"
 
 using nlohmann::json;
@@ -1509,4 +1510,30 @@ std::string mce_save(boxed exp) {
 
 boxed mce_restore(const std::string& s) {
     return memoize(deserialize(unpickle(s)));
+}
+
+bool config(int argc, char *argv[]) {
+    cxxopts::Options options("mce", "Metacircular Evaluator");
+    options.add_options()
+        ("h,help", "help")
+        ("gc-threshold",
+         "gc when object table exceeds this number",
+         cxxopts::value<size_t>()->default_value("100000"));
+    auto opts = options.parse(argc, argv);
+    if (opts.count("help")) {
+        std::cout << options.help() << std::endl;
+        return false;
+    }
+    gc_threshold = opts["gc-threshold"].as<size_t>();
+    return true;
+}
+
+boxed start(std::istream &stream) {
+    json s;
+    stream >> s;
+    auto r = mce_restore(s.get<std::string>());
+    if (r->contains<lambda>()) {
+        return (*r->cast<lambda>())(cons(bnil, bnil));
+    }
+    return run(r);
 }
