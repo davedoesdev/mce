@@ -1,25 +1,23 @@
 #include <iostream>
-#include <boost/program_options.hpp>
 #include "json.hpp"
+#include "cxxopts.hpp"
 #include "mce.hpp"
 
 using nlohmann::json;
-using namespace boost::program_options;
 
 int main(int argc, char *argv[]) {
-    options_description desc("Options");
-    desc.add_options()
-        ("help", "help")
+    cxxopts::Options options("mce", "Metacircular Evaluator");
+    options.add_options()
+        ("h,help", "help")
         ("gc-threshold",
-         value<size_t>()->default_value(100000),
-         "gc when object table exceeds this number");
-    variables_map vm;
-    store(parse_command_line(argc, argv, desc), vm);
-    if (vm.count("help")) {
-        std::cout << desc << std::endl;
+         "gc when object table exceeds this number",
+         cxxopts::value<size_t>()->default_value("100000"));
+    auto opts = options.parse(argc, argv);
+    if (opts.count("help")) {
+        std::cout << options.help() << std::endl;
         return 0;
     }
-    gc_threshold = vm["gc-threshold"].as<size_t>();
+    gc_threshold = opts["gc-threshold"].as<size_t>();
 
     json s;
     std::cin >> s;

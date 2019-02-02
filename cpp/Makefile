@@ -1,10 +1,10 @@
 all: mce
 
 SOURCES = main.cpp mce.cpp
-HEADERS = mce.hpp
+HEADERS = mce.hpp json.hpp cxxopts.hpp
 
 mce: $(SOURCES) $(HEADERS)
-	$(CXX) -g -Wall -Wextra -o $@ $(SOURCES) -lboost_program_options
+	$(CXX) -g -Wall -Wextra -o $@ $(SOURCES)
 
 clean:
 	rm -f mce
