@@ -438,9 +438,12 @@
                  (extend-env env params (env-args-args args))))))
 
 (define (handle-contn-lambda args k)
-    (if (step-contn? args)
-        (apply k (env-args-args (step-contn-args args)))
-        (run (apply k (env-args-args args)))))
+    (cond ((transfer? args)
+           (apply k (env-args-args (transfer-args args))))
+          ((step-contn? args)
+           (apply k (env-args-args (step-contn-args args))))
+          (else
+           (run (apply k (env-args-args args))))))
 
 (define global-table (make-equal-table))
 
@@ -453,16 +456,16 @@
         x))
 
 (define (handle-global-lambda args fn cf)
-    (if (step-contn? args)
-        (let ((sck (step-contn-k args))
-              (sca (step-contn-args args)))
-            (if (transfer? sca)
-                (apply fn (make-step-contn sck (transfer-args sca)))
-                (send sck
-                      (let ((eaa (env-args-args sca)))
-                          (globalize (apply fn eaa) eaa cf)))))
-        (let ((eaa (env-args-args args)))
-            (globalize (apply fn eaa) eaa cf))))
+    (cond ((transfer? args)
+           (apply fn args))
+          ((step-contn? args)
+           (let* ((sck (step-contn-k args))
+                  (sca (step-contn-args args))
+                  (eaa (env-args-args sca)))
+               (send sck (globalize (apply fn eaa) eaa cf))))
+          (else
+           (let ((eaa (env-args-args args)))
+            (globalize (apply fn eaa) eaa cf)))))
 
 (define (handle-global-lambda-kenv args fn)
     (if (step-contn? args)
@@ -483,7 +486,7 @@
 (define (transfer-args exp) (cdr exp))
 
 (define (transfer k env fn . args)
-    (apply fn (make-step-contn k (cons 'MCE-TRANSFER args))))
+    (apply fn (cons 'MCE-TRANSFER args)))
 
 (define (find-global sym #!optional (err #t))
     (let ((r (table-ref global-table sym)))

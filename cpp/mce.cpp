@@ -532,10 +532,9 @@ boxed transfer_args(boxed args) {
 }
 
 boxed transfer(boxed args) {
-    auto k = list_ref(args, 0);
     auto fn = list_ref(args, 2);
-    return (*fn->cast<lambda>())(make_step_contn(k,
-        cons(box<symbol>("MCE-TRANSFER"), list_rest(args, 2))));
+    return (*fn->cast<lambda>())(
+        cons(box<symbol>("MCE-TRANSFER"), list_rest(args, 2)));
 }
 
 boxed make_global_env() {
@@ -840,12 +839,13 @@ boxed globalize(boxed x, boxed args, boxed cf);
 boxed handle_global_lambda(boxed args, boxed fn, boxed cf) {
     auto f = fn->cast<lambda>();
 
+    if (is_transfer(args)) {
+        return (*f)(args);
+    }
+
     if (is_step_contn(args)) {
         auto sck = step_contn_k(args);
         auto sca = step_contn_args(args);
-        if (is_transfer(sca)) {
-            return (*f)(make_step_contn(sck, transfer_args(sca)));
-        }
         auto eaa = env_args_args(sca);
         return send(sck, globalize((*f)(eaa), eaa, cf));
     }
@@ -941,6 +941,10 @@ boxed handle_lambda(boxed args,
 
 boxed handle_contn_lambda(boxed args, boxed k) {
     auto f = k->cast<lambda>();
+
+    if (is_transfer(args)) {
+        return (*f)(env_args_args(transfer_args(args)));
+    }
 
     if (is_step_contn(args)) {
         return (*f)(env_args_args(step_contn_args(args)));

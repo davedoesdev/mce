@@ -459,8 +459,7 @@ function transfer_args(args) {
 }
 
 function transfer(k, env, fn, ...args) {
-    return fn(make_step_contn(k,
-        cons(new Symbol('MCE-TRANSFER'), vector_to_list(args))));
+    return fn(cons(new Symbol('MCE-TRANSFER'), vector_to_list(args)));
 }
 
 function globalize(x, args, cf) {
@@ -479,12 +478,13 @@ function call_global(f, args) {
 }
 
 function handle_global_lambda(args, fn, cf) {
+    if (is_transfer(args)) {
+        return fn(args);
+    }
+
     if (is_step_contn(args)) {
         const sck = step_contn_k(args);
         const sca = step_contn_args(args);
-        if (is_transfer(sca)) {
-            return fn(make_step_contn(sck, transfer_args(sca)));
-        }
         const eaa = env_args_args(sca);
         return send(sck, globalize(call_global(fn, eaa), eaa, cf));
     }
@@ -568,6 +568,10 @@ function handle_lambda(args, params, fn, env, extend_env) {
 }
 
 function handle_contn_lambda(args, k) {
+    if (is_transfer(args)) {
+        return k(env_args_args(transfer_args(args)));
+    }
+
     if (is_step_contn(args)) {
         return k(env_args_args(step_contn_args(args)));
     }
