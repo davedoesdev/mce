@@ -9,7 +9,7 @@ project (service)
 set(SERVICE_NAME "State-saving, continuation-passing metacircular evaluator")
 
 # Name of your service binary
-set(BINARY       "mce")
+set(BINARY "mce")
 
 # Source files to be linked with OS library parts to form bootable image
 set(SOURCES
@@ -41,9 +41,28 @@ set(LIBRARIES
   # path to full library
   )
 
-
 # include service build script
 include($ENV{INCLUDEOS_PREFIX}/includeos/post.service.cmake)
+
+get_filename_component(DISK_PATH disk REALPATH BASE_DIR "${CMAKE_SOURCE_DIR}")
+set(STATE_PATH "${DISK_PATH}/state")
+get_filename_component(TL_PATH ../.. REALPATH BASE_DIR "${CMAKE_SOURCE_DIR}")
+set(SCM_PATH "${TL_PATH}/scm")
+set(EXPAND_PATH "${SCM_PATH}/expand")
+set(SCAN_PATH "${SCM_PATH}/scan")
+set(TEST_PATH "${TL_PATH}/test")
+set(TEST_PROG "${TEST_PATH}/test-loop.scm")
+
+add_custom_command(
+  OUTPUT "${STATE_PATH}"
+  COMMAND mkdir -p "${DISK_PATH}"
+  COMMAND "${EXPAND_PATH}" < "${TEST_PROG}" | "${SCAN_PATH}" > "${STATE_PATH}"
+  DEPENDS "${TEST_PROG}"
+  )
+
+add_custom_target(mce_state DEPENDS "${STATE_PATH}")
+
+add_dependencies(service mce_state)
 
 # Create in-memory filesystem from folder
 diskbuilder(disk)
