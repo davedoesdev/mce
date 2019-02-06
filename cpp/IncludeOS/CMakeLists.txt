@@ -50,12 +50,13 @@ get_filename_component(TL_PATH ../.. REALPATH BASE_DIR "${CMAKE_SOURCE_DIR}")
 set(SCM_PATH "${TL_PATH}/scm")
 set(EXPAND_PATH "${SCM_PATH}/expand")
 set(SCAN_PATH "${SCM_PATH}/scan")
-set(TEST_PATH "${TL_PATH}/test")
+set(TEST_PATH "${TL_PATH}/examples")
 set(TEST_PROG "${TEST_PATH}/test-loop.scm")
+
+file(MAKE_DIRECTORY "${DISK_PATH}")
 
 add_custom_command(
   OUTPUT "${STATE_PATH}"
-  COMMAND mkdir -p "${DISK_PATH}"
   COMMAND "${EXPAND_PATH}" < "${TEST_PROG}" | "${SCAN_PATH}" > "${STATE_PATH}"
   DEPENDS "${TEST_PROG}"
   )

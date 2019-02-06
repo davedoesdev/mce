@@ -1,4 +1,5 @@
-(module expand (main main))
+(module expand
+    (main main))
 
 (define (main argv)
     (bigloo-warning-set! 0)

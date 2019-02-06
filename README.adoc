@@ -1,0 +1,196 @@
+# Description
+
+This is a continuation-passing metacircular evaluator for the Scheme language,
+with support for serializing the state of execution. Implementations are
+provided in Scheme (of course), C++ and JavaScript.
+
+It consists of the following components:
+
+Macro expansion::
+  Derived forms are expanded to basic forms in link:scm/expand.scm[].
+
+Conversion to continuation-passing style::
+  The program is converted to CPS form as decribed https://rawgit.now.sh/davedoesdev/mce/master/doc/dissertation.pdf#page=42[here]. See the `scan` function in link:scm/mce.scm[], which is roughly as described https://rawgit.now.sh/davedoesdev/mce/master/doc/dissertation.pdf#page=46[here].
+
+Executing the CPS::
+  The CPS form is executed by repeatedly stepping through its state, as decribed https://rawgit.now.sh/davedoesdev/mce/master/doc/dissertation.pdf#page=56[here]. See the `run` function in link:scm/mce.scm[].
+
+State-saving mechanism::
+  The state of the program can be serialized to a string at any point of its execution, as decribed https://rawgit.now.sh/davedoesdev/mce/master/doc/dissertation.pdf#page=48[here]. See the `mce-save` and `mce-restore` functions in link:scm/mce.scm[].
+
+The macro expansion and CPS conversion components are implemented in Scheme.
+The CPS execution component has Scheme, C++ and JavaScript implementations.
+
+# Building
+
+## Scheme
+
+You'll need to install the https://www-sop.inria.fr/indes/fp/Bigloo/[Bigloo]
+Scheme compiler to build them. Once you've done that:
+
+```bash
+make -C scm
+```
+
+You should end up with executables `expand`, `scan` and `mce` in the link:scm[]
+directory. `expand` does macro expansion, `scan` does CPS conversion and
+`mce` executes the CPS form.
+
+## C++
+
+If you have a modern C++ compiler, then this should work:
+
+```bash
+make -C cpp
+```
+
+You should end up with executable `mce` in the link:cpp[] directory. This
+executes CPS forms produced by `scm/scan`.
+
+## JavaScript
+
+Make sure you have https://nodejs.org/[Node.js] installed and then run:
+
+```bash
+pushd js
+npm install
+popd
+```
+
+The CPS execution component is in link:js/mce.js[].
+
+# Running the examples
+
+There are a number of examples in the link:examples[] directory.
+
+To run, say link:examples/test-loop.scm[], using the Scheme execution engine:
+
+```bash
+./scm/expand < examples/test-loop.scm | ./scm/scan | ./scm/mce
+```
+
+To run the same example using the C++ engine:
+
+```bash
+./scm/expand < examples/test-loop.scm | ./scm/scan | ./cpp/mce
+```
+
+And using the JavaScript engine:
+
+```bash
+./scm/expand < examples/test-loop.scm | ./scm/scan | (cd js && node -r esm mce)
+```
+
+Of course, you can write the CPS form to a file so you only have to do it once,
+for example:
+
+```bash
+./scm/expand < examples/test-loop.scm | ./scm/scan > test-loop.cps
+./scm/mce < test-loop.cps
+./cpp/mce < test-loop.cps
+(cd js && node -r esm mce) < test-loop.cps
+```
+
+# State-saving
+
+The example link:examples/test-state2.scm[] demonstrates state-saving by
+serializing a continuation to standard output.
+
+If you run it like this:
+
+```bash
+/scm/expand < examples/test-state2.scm | ./scm/scan | ./scm/mce
+```
+
+You should see the serialized continuation written to standard output.
+
+You can pipe the output into `./scm/mce`, `./cpp/mce` or `./js/mce.js` and
+it will resume where it left off:
+
+```bash
+$ ./scm/expand < examples/test-state2.scm | ./scm/scan | ./scm/mce | ./cpp/mce
+0
+1
+2
+3
+4
+5
+save 21774
+restore 21775
+6
+7
+8
+9
+10
+```
+
+You can see the continuation was saved here in one process (21774) and restored
+in another (21775).
+
+Of course, you can mix and match engines, for example passing state from a
+JavaScript engine to a Scheme one:
+
+```bash
+$ ./scm/expand < examples/test-state2.scm | ./scm/scan | (cd js && node -r esm mce) | ./scm/mce 
+0
+1
+2
+3
+4
+5
+save 22137
+restore 22136
+6
+7
+8
+9
+10
+```
+
+# C++ garbage collector
+
+The C++ engine implements a simple stop-and-copy garbage collector:
+
+* Shared pointers are used throughout to ensure data is released when not
+  referenced by the program.
+* Weak pointers to data that can form cycles (pairs, vectors and lambdas) are
+  stored in a global table, indexed by the underlying pointer value.
+* When a shared pointer to a pair, vector or lambda is released, the
+  corresponding entry is deleted from the table.
+* When the number of entries in the table exceeds a certain threshold:
+  1. The current computation state is serialized to a string.
+  2. All pairs, vectors and lambdas in the table have their contents nulled.
+  3. The table is cleared.
+  4. The current computation state is restored from the string.
+
+You can change the threshold by using the `--gc-threshold` argument to
+`./cpp/mce`. The default value is 100000.
+
+link:examples/test-mem.scm[] can be used to check the garbage collector is
+working. It runs in a loop creating cycles.
+
+# IncludeOS service
+
+A service for the https://www.includeos.org/[IncludeOS] library operating system
+can be found in the link:cpp/IncludeOS[] directory.
+
+The service uses the C++ execution engine and by default runs
+link:examples/test-loop.scm[] but you can change this by setting `TEST_PROG`
+in link:cpp/IncludeOS/CMakeLists.txt[].
+
+Assuming you have IncludeOS installed, you can build the service like this:
+
+```bash
+pushd cpp/IncludeOS
+mkdir build
+cd build
+cmake ..
+make
+popd
+```
+
+and run the service like this:
+
+```bash
+boot cpp/IncludeOS
+```

@@ -1,4 +1,4 @@
-(module expand
+(module mce
     (library packrat)
     (main main))
 

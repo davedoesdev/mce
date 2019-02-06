@@ -1,4 +1,4 @@
-all: mce expand scan
+all: mce scan expand
 
 %: %.scm
 	bigloo -o $@ $^
