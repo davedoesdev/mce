@@ -6,7 +6,7 @@
 template<typename T>
 struct box_type { typedef T type; };
 
-// Adapted from boost::any but without the need for typeid
+// Adapted from boost::any but without the need for type_traits
 class Box {
 public:
     Box() : content(nullptr) {
