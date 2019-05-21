@@ -6,6 +6,6 @@
                        (eprint "save " (getpid))
                        (write (save (lambda () (k #t))))
                        (stop #f))
-                    (print "restore " (getpid))))
+                   (print "restore " (getpid))))
         (if (< i 10)
             (loop (+ i 1)))))
