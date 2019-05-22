@@ -99,7 +99,7 @@ serializing a continuation to standard output.
 If you run it like this:
 
 ```bash
-/scm/expand < examples/test-state2.scm | ./scm/scan | ./scm/mce
+./scm/expand < examples/test-state2.scm | ./scm/scan | ./scm/mce
 ```
 
 You should see the serialized continuation written to standard output.
