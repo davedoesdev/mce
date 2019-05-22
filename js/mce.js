@@ -968,6 +968,7 @@ function run(state) {
     const stdin = await open('/dev/stdin');
     const s = JSON.parse(await stdin.readFile());
     const r = mce_restore(s);
+    //print(list_ref(get_procedure_defn(r), 3));
     if (typeof r === 'function') {
         r(cons(null, null));
     } else {
