@@ -68,7 +68,7 @@ private:
     public:
         holder(const T& v) : held(v) {}
 
-        placeholder* clone() {
+        placeholder* clone() override {
             return new holder(held);
         }
 
@@ -76,7 +76,7 @@ private:
             return typeid(T) == ti;
         }
 
-        bool contains_type_of(const Box& b) {
+        bool contains_type_of(const Box& b) override {
             return b.contains<T>();
         }
 
