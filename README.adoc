@@ -2,7 +2,7 @@
 
 This is a continuation-passing metacircular evaluator for the Scheme language,
 with support for serializing the state of execution. Implementations are
-provided in Scheme (of course), C++ and JavaScript.
+provided in Scheme (of course), C++, JavaScript and WebAssembly.
 
 It consists of the following components:
 
@@ -19,7 +19,8 @@ State-saving mechanism::
   The state of the program can be serialized to a string at any point of its execution, as decribed https://rawgit.now.sh/davedoesdev/mce/master/doc/dissertation.pdf#page=48[here]. See the `mce-save` and `mce-restore` functions in link:scm/mce.scm[].
 
 The macro expansion and CPS conversion components are implemented in Scheme.
-The CPS execution component has Scheme, C++ and JavaScript implementations.
+The CPS execution component has Scheme, C++, JavaScript and WebAssembly
+implementations.
 
 # Building
 
@@ -59,6 +60,19 @@ popd
 
 The CPS execution component is in link:js/mce.js[].
 
+## WebAssembly
+
+Install https://github.com/CraneStation/wasi-sdk[wasi-sdk] to `/opt/wasi-sdk`
+and then:
+
+```bash
+make -C cpp/wasm
+```
+
+You should end with the `mce.wasm` in the link:cpp/wasm[] directory. This is
+the CPS execution component. You'll need a WebAssembly runtime to run it,
+for example https://github.com/CraneStation/wasmtime[wasmtime].
+
 # Running the examples
 
 There are a number of examples in the link:examples[] directory.
@@ -81,6 +95,12 @@ And using the JavaScript engine:
 ./scm/expand < examples/test-loop.scm | ./scm/scan | (cd js && node -r esm mce)
 ```
 
+And using the WebAssembly engine:
+
+```bash
+./scm/expand < examples/test-loop.scm | ./scm/scan | wasmtime cpp/wasm/mce.wasm
+```
+
 Of course, you can write the CPS form to a file so you only have to do it once,
 for example:
 
@@ -89,6 +109,7 @@ for example:
 ./scm/mce < test-loop.cps
 ./cpp/mce < test-loop.cps
 (cd js && node -r esm mce) < test-loop.cps
+wasmtime cpp/wasm/mce.wasm < test-loop.cps
 ```
 
 # State-saving
@@ -104,8 +125,8 @@ If you run it like this:
 
 You should see the serialized continuation written to standard output.
 
-You can pipe the output into `./scm/mce`, `./cpp/mce` or `./js/mce.js` and
-it will resume where it left off:
+You can pipe the output into `./scm/mce`, `./cpp/mce`, `./js/mce.js` or
+`wasmtime cpp/wasm/mce.wasm` and it will resume where it left off:
 
 ```bash
 $ ./scm/expand < examples/test-state2.scm | ./scm/scan | ./scm/mce | ./cpp/mce
@@ -146,6 +167,27 @@ restore 22136
 9
 10
 ```
+
+or from a Scheme engine to a WebAssembly one:
+
+```bash
+$ ./scm/expand < examples/test-state2.scm | ./scm/scan | ./scm/mce | wasmtime cpp/wasm/mce.wasm 
+0
+1
+2
+3
+4
+5
+save 1025
+restore -1
+6
+7
+8
+9
+10
+```
+
+Note the WebAssembly process ID is always -1 because https://github.com/CraneStation/wasi-sysroot[wasi-sysroot] doesn't implement `getpid`.
 
 # C++ garbage collector
 

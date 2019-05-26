@@ -1,7 +1,7 @@
 all: mce.wasm
 
 SOURCES = ../main.cpp ../mce.cpp wasi.cpp
-HEADERS = ../mce.hpp ../json.hpp ../cxxopts.hpp
+HEADERS = ../mce.hpp ../json.hpp ../cxxopts.hpp wasi.hpp
 
 CXX=/opt/wasi-sdk/bin/clang++
 
