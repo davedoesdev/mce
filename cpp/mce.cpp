@@ -767,6 +767,12 @@ boxed restore(boxed args) {
     return mce_restore(*a->cast<std::string>());
 }
 
+#ifdef __wasi__
+pid_t getpid() {
+    return -1;
+}
+#endif
+
 boxed getpid(boxed) {
     return box<double>(static_cast<double>(getpid()));
 }
