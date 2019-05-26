@@ -189,7 +189,7 @@ restore -1
 
 Note the WebAssembly process ID is always -1 because https://github.com/CraneStation/wasi-sysroot[wasi-sysroot] doesn't implement `getpid`.
 
-# C++ garbage collector
+# C++ (and WebAssembly) garbage collector
 
 The C++ engine implements a simple stop-and-copy garbage collector:
 
@@ -206,7 +206,7 @@ The C++ engine implements a simple stop-and-copy garbage collector:
   4. The current computation state is restored from the string.
 
 You can change the threshold by using the `--gc-threshold` argument to
-`./cpp/mce`. The default value is 100000.
+`./cpp/mce` or `wasmtime cpp/wasm/mce.wasm`. The default value is 100000.
 
 link:examples/test-mem.scm[] can be used to check the garbage collector is
 working. It runs in a loop creating cycles.
