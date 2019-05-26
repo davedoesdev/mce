@@ -69,7 +69,7 @@ and then:
 make -C cpp/wasm
 ```
 
-You should end with the `mce.wasm` in the link:cpp/wasm[] directory. This is
+You should end with `mce.wasm` in the link:cpp/wasm[] directory. This is
 the CPS execution component. You'll need a WebAssembly runtime to run it,
 for example https://github.com/CraneStation/wasmtime[wasmtime].
 
