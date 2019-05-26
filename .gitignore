@@ -1,5 +1,6 @@
 mce
 mce.o
+mce.wasm
 expand
 expand.o
 scan
