@@ -1,5 +1,6 @@
 #include <memory>
 #include <istream>
+#include <string>
 
 template<typename T>
 struct box_type { typedef T type; };
@@ -97,3 +98,4 @@ typedef std::shared_ptr<Box> boxed;
 bool config(int argc, char *argv[]);
 
 boxed start(std::istream &stream);
+boxed start(const std::string &s);

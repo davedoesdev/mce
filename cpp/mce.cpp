@@ -6,7 +6,6 @@
 #include <unordered_map>
 #include <unordered_set>
 #include <functional>
-#include <string>
 #include "mce.hpp"
 #include "json.hpp"
 #include "cxxopts.hpp"
@@ -1534,12 +1533,20 @@ bool config(int argc, char *argv[]) {
     return true;
 }
 
-boxed start(std::istream &stream) {
-    json s;
-    stream >> s;
-    auto r = mce_restore(s.get<std::string>());
+boxed start(const json& j) {
+    auto r = mce_restore(j.get<std::string>());
     if (r->contains<lambda>()) {
         return (*r->cast<lambda>())(cons(bnil, bnil));
     }
     return run(r);
+}
+
+boxed start(std::istream &stream) {
+    json s;
+    stream >> s;
+    return start(s);
+}
+
+boxed start(const std::string& s) {
+    return start(json::parse(s));
 }
