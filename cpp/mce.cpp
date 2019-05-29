@@ -5,9 +5,15 @@
 #include <vector>
 #include <unordered_map>
 #include <unordered_set>
+#include <functional>
+#include <string>
+#include "mce.hpp"
 #include "json.hpp"
 #include "cxxopts.hpp"
-#include "mce.hpp"
+
+typedef boxed function(boxed);
+typedef std::function<function> func;
+typedef std::shared_ptr<func> lambda;
 
 using nlohmann::json;
 

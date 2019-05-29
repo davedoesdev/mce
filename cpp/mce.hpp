@@ -1,6 +1,4 @@
 #include <memory>
-#include <functional>
-#include <string>
 #include <istream>
 
 template<typename T>
@@ -32,7 +30,6 @@ public:
     bool empty() {
         return content == nullptr;
     }
-
     template<typename T>
     bool contains() const {
         return content &&
@@ -96,18 +93,6 @@ private:
 };
 
 typedef std::shared_ptr<Box> boxed;
-typedef boxed function(boxed);
-typedef std::function<function> func;
-typedef std::shared_ptr<func> lambda;
-
-extern size_t gc_threshold;
-extern const boxed bnil;
-
-boxed cons(boxed car, boxed cdr);
-
-boxed mce_restore(const std::string& s);
-
-boxed run(boxed state);
 
 bool config(int argc, char *argv[]);
 
