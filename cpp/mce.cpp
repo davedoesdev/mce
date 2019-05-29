@@ -1517,20 +1517,22 @@ boxed mce_restore(const std::string& s) {
     return memoize(deserialize(unpickle(s)));
 }
 
-bool config(int argc, char *argv[]) {
+void config(int argc, char *argv[], std::string& help, std::string& run) {
     cxxopts::Options options("mce", "Metacircular Evaluator");
     options.add_options()
         ("h,help", "help")
         ("gc-threshold",
          "gc when object table exceeds this number",
-         cxxopts::value<size_t>()->default_value("100000"));
+         cxxopts::value<size_t>()->default_value("100000"))
+        ("run",
+         "CPS form or state to run",
+         cxxopts::value<std::string>()->default_value(""));
     auto opts = options.parse(argc, argv);
     if (opts.count("help")) {
-        std::cout << options.help() << std::endl;
-        return false;
+        help = options.help();
     }
     gc_threshold = opts["gc-threshold"].as<size_t>();
-    return true;
+    run = opts["run"].as<std::string>();
 }
 
 boxed start(const json& j) {

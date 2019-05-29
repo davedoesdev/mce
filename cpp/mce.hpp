@@ -95,7 +95,7 @@ private:
 
 typedef std::shared_ptr<Box> boxed;
 
-bool config(int argc, char *argv[]);
+void config(int argc, char *argv[], std::string& help, std::string& run);
 
 boxed start(std::istream &stream);
 boxed start(const std::string &s);
