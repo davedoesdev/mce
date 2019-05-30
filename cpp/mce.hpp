@@ -94,8 +94,14 @@ private:
 };
 
 typedef std::shared_ptr<Box> boxed;
+typedef boxed function(boxed);
 
-void config(int argc, char *argv[], std::string& help, std::string& run);
+void register_global_function(const std::string& name, function f);
+void register_kenv_function(function f);
+
+extern size_t gc_threshold;
 
 boxed start(std::istream &stream);
 boxed start(const std::string &s);
+
+void start(int argc, char *argv[]);

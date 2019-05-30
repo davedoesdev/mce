@@ -10,7 +10,6 @@
 #include "json.hpp"
 #include "cxxopts.hpp"
 
-typedef boxed function(boxed);
 typedef std::function<function> func;
 typedef std::shared_ptr<func> lambda;
 
@@ -790,18 +789,18 @@ std::unordered_map<std::string, function*> global_table {
     { "ewrite", write },
     { "+", plus },
     { "*", multiply },
-    { "null?" , is_null },
+    { "null?", is_null },
     { "car", car },
     { "cdr", cdr },
     { "set-car!", set_car },
     { "set-cdr!", set_cdr },
-    { "eq?" , is_eq },
-    { "=" , is_number_equal },
+    { "eq?", is_eq },
+    { "=", is_number_equal },
     { "string?", is_string },
     { "pair?", is_pair },
     { "procedure?", is_procedure },
     { "string=?", is_string_equal },
-    { "vector?" , is_vector },
+    { "vector?", is_vector },
     { "vector-length", vector_length },
     { "vector-ref", vector_ref },
     { "unmemoize", gunmemoize },
@@ -814,10 +813,18 @@ std::unordered_map<std::string, function*> global_table {
     { "cons", gcons }
 };
 
+void register_global_function(const std::string& name, function f) {
+    global_table[name] = f;
+}
+
 std::unordered_set<function*> kenvfn_set {
     gapplyx,
     transfer
 };
+
+void register_kenv_function(function f) {
+    kenvfn_set.insert(f);
+}
 
 boxed find_global(const symbol& sym) {
     auto it = global_table.find(sym);
@@ -1517,24 +1524,6 @@ boxed mce_restore(const std::string& s) {
     return memoize(deserialize(unpickle(s)));
 }
 
-void config(int argc, char *argv[], std::string& help, std::string& run) {
-    cxxopts::Options options("mce", "Metacircular Evaluator");
-    options.add_options()
-        ("h,help", "help")
-        ("gc-threshold",
-         "gc when object table exceeds this number",
-         cxxopts::value<size_t>()->default_value("100000"))
-        ("run",
-         "CPS form or state to run",
-         cxxopts::value<std::string>()->default_value(""));
-    auto opts = options.parse(argc, argv);
-    if (opts.count("help")) {
-        help = options.help();
-    }
-    gc_threshold = opts["gc-threshold"].as<size_t>();
-    run = opts["run"].as<std::string>();
-}
-
 boxed start(const json& j) {
     auto r = mce_restore(j.get<std::string>());
     if (r->contains<lambda>()) {
@@ -1551,4 +1540,27 @@ boxed start(std::istream &stream) {
 
 boxed start(const std::string& s) {
     return start(json::parse(s));
+}
+
+void start(int argc, char *argv[]) {
+    cxxopts::Options options("mce", "Metacircular Evaluator");
+    options.add_options()
+        ("h,help", "help")
+        ("gc-threshold",
+         "gc when object table exceeds this number",
+         cxxopts::value<size_t>()->default_value("100000"))
+        ("run",
+         "CPS form or state to run",
+         cxxopts::value<std::string>());
+    auto opts = options.parse(argc, argv);
+    if (opts.count("help")) {
+        std::cout << options.help() << std::endl;
+        return;
+    }
+    gc_threshold = opts["gc-threshold"].as<size_t>();
+    if (opts.count("run")) {
+        start(opts["run"].as<std::string>());
+    } else {
+        start(std::cin);
+    }
 }
