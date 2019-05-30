@@ -1,9 +1,9 @@
 {
     "name": "mce",
     "engines": {
-        "node": ">=10"
+        "node": ">=12"
     },
     "dependencies": {
-        "esm": "^3.1.0"
+        "wasi": "devsnek/node-wasi"
     }
 }

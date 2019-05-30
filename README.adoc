@@ -1,3 +1,4 @@
+:prewrap!:
 # Description
 
 This is a continuation-passing metacircular evaluator for the Scheme language,
@@ -58,7 +59,7 @@ npm install
 popd
 ```
 
-The CPS execution component is in link:js/mce.js[].
+The CPS execution component is in link:js/mce.mjs[].
 
 ## WebAssembly
 
@@ -69,9 +70,11 @@ and then:
 make -C cpp/wasm
 ```
 
-You should end with `mce.wasm` in the link:cpp/wasm[] directory. This is
-the CPS execution component. You'll need a WebAssembly runtime to run it,
-for example https://github.com/CraneStation/wasmtime[wasmtime].
+You should end up with `mce.wasm` in the link:cpp/wasm[] directory. This is the
+CPS execution component. You'll need a WebAssembly runtime which supports
+https://github.com/CraneStation/wasmtime/blob/master/docs/WASI-overview.md[WASI]
+to run it, for example https://github.com/CraneStation/wasmtime[wasmtime] or
+https://github.com/devsnek/node-wasi[node-wasi].
 
 # Running the examples
 
@@ -92,13 +95,19 @@ To run the same example using the C++ engine:
 And using the JavaScript engine:
 
 ```bash
-./scm/expand < examples/test-loop.scm | ./scm/scan | (cd js && node -r esm mce)
+./scm/expand < examples/test-loop.scm | ./scm/scan | node --experimental-modules js/mce.mjs
 ```
 
 And using the WebAssembly engine:
 
 ```bash
 ./scm/expand < examples/test-loop.scm | ./scm/scan | wasmtime cpp/wasm/mce.wasm
+```
+
+or
+
+```bash
+./scm/expand < examples/test-loop.scm | ./scm/scan | node --experimental-modules js/run_wasm.mjs
 ```
 
 Of course, you can write the CPS form to a file so you only have to do it once,
@@ -108,8 +117,9 @@ for example:
 ./scm/expand < examples/test-loop.scm | ./scm/scan > test-loop.cps
 ./scm/mce < test-loop.cps
 ./cpp/mce < test-loop.cps
-(cd js && node -r esm mce) < test-loop.cps
+node --experimental-modules js/mce.mjs < test-loop.cps
 wasmtime cpp/wasm/mce.wasm < test-loop.cps
+node --experimental-modules js/run_wasm.mjs < test-loop.cps
 ```
 
 # State-saving
@@ -125,8 +135,9 @@ If you run it like this:
 
 You should see the serialized continuation written to standard output.
 
-You can pipe the output into `./scm/mce`, `./cpp/mce`, `./js/mce.js` or
-`wasmtime cpp/wasm/mce.wasm` and it will resume where it left off:
+You can pipe the output into `./scm/mce`, `./cpp/mce`, `./js/mce.mjs`,
+`wasmtime cpp/wasm/mce.wasm` or `js/run_wasm.js` and it will resume where
+it left off:
 
 ```bash
 $ ./scm/expand < examples/test-state2.scm | ./scm/scan | ./scm/mce | ./cpp/mce
@@ -152,7 +163,7 @@ Of course, you can mix and match engines, for example passing state from a
 JavaScript engine to a Scheme one:
 
 ```bash
-$ ./scm/expand < examples/test-state2.scm | ./scm/scan | (cd js && node -r esm mce) | ./scm/mce 
+$ ./scm/expand < examples/test-state2.scm | ./scm/scan | node --experimental-modules js/mce.mjs | ./scm/mce 
 0
 1
 2
