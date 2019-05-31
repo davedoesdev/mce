@@ -1,16 +1,18 @@
 all: mce scan expand
 
-%: %.scm
+%.o: %.scm
+	bigloo -c $^
+
+main.o: mce.o
+
+mce: main.o mce.o
 	bigloo -o $@ $^
 
 scan: mce
 	ln -s $^ $@
 
-test-loop: test-loop.scm
-	./expand < $^ | ./mce
-
-test-state: test-state.scm
-	./expand < $^ | ./mce
+expand: expand.o
+	bigloo -o $@ $^
 
 clean:
-	rm -f mce expand *.o
+	rm -f mce scan expand *.o

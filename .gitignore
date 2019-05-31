@@ -1,5 +1,6 @@
 mce
 mce.o
+main.o
 mce.wasm
 expand
 expand.o

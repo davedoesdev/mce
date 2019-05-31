@@ -1,6 +1,11 @@
 (module mce
     (library packrat)
-    (main main))
+    (export 
+        (register-global-function name f)
+        (register-kenv-function f)
+        (start-stream stream #!key (is_scan #f))
+        (start-string s #!key (is_scan #f))
+        (start argv)))
 
 (define (make-eq-table)
     (vector assq '()))
@@ -547,10 +552,16 @@
 (table-set! global-table 'vector-ref vector-ref)
 (table-set! global-table 'cons cons)
 
+(define (register-global-function name f)
+    (table-set! global-table name f))
+
 (define kenvfn-table (make-eq-table))
 
 (table-set! kenvfn-table transfer #t)
 (table-set! kenvfn-table applyx #t)
+
+(define (register-kenv-function f)
+    (table-set! kenvfn-table f #t))
 
 (define (cmap f l tab set-entry!)
    (let ((ref (table-ref tab l)))
@@ -741,13 +752,33 @@
 (define (mce-run exp . env)
     (run (mce-eval exp)))
 
-(define (main argv)
-    (let ((v (read)))
-        (if (string-suffix? "scan" (car argv))
-            (write (mce-save (mce-eval v)))
-            (if (string? v)
-                (let ((r (mce-restore v)))
-                    (if (procedure? r)
-                        (apply r '())
-                        (run r)))
-                (mce-run v)))))
+(define (start-parsed is_scan v)
+    (if is_scan
+        (write (mce-save (mce-eval v)))
+        (if (string? v)
+            (let ((r (mce-restore v)))
+                (if (procedure? r)
+                    (apply r '())
+                    (run r)))
+            (mce-run v))))
+
+(define (start-stream stream #!key (is_scan #f))
+    (start-parsed is_scan (read stream)))
+
+(define (start-string s #!key (is_scan #f))
+    (start-parsed is_scan (json-read (open-input-string s))))
+
+(define (start argv)
+    (let ((is_scan (string-suffix? "scan" (car argv)))
+          (s ""))
+        (args-parse (cdr argv)
+            ((("-h" "--help"))
+             (args-parse-usage #f))
+            (("--run" ?state (help "CPS form or state to run"))
+             (set! s state))
+            (else
+             (error "start" "Invalid argument " else)))
+        (if (not (string-null? s))
+            (start-string s :is_scan is_scan)
+            (if (null? (cdr argv))
+                (start-stream (current-input-port) :is_scan is_scan)))))
