@@ -4,6 +4,7 @@
         "node": ">=12"
     },
     "dependencies": {
-        "wasi": "devsnek/node-wasi"
+        "wasi": "devsnek/node-wasi",
+        "yargs": "^13.2.4"
     }
 }

@@ -95,7 +95,7 @@ To run the same example using the C++ engine:
 And using the JavaScript engine:
 
 ```bash
-./scm/expand < examples/test-loop.scm | ./scm/scan | node --experimental-modules js/mce.mjs
+./scm/expand < examples/test-loop.scm | ./scm/scan | node --experimental-modules js/main.mjs
 ```
 
 And using the WebAssembly engine:
@@ -117,7 +117,7 @@ for example:
 ./scm/expand < examples/test-loop.scm | ./scm/scan > test-loop.cps
 ./scm/mce < test-loop.cps
 ./cpp/mce < test-loop.cps
-node --experimental-modules js/mce.mjs < test-loop.cps
+node --experimental-modules js/main.mjs < test-loop.cps
 wasmtime cpp/wasm/mce.wasm < test-loop.cps
 node --experimental-modules js/run_wasm.mjs < test-loop.cps
 ```
@@ -136,7 +136,7 @@ If you run it like this:
 You should see the serialized continuation written to standard output.
 
 You can pipe the output into `./scm/mce`, `./cpp/mce`, `./js/mce.mjs`,
-`wasmtime cpp/wasm/mce.wasm` or `js/run_wasm.js` and it will resume where
+`wasmtime cpp/wasm/mce.wasm` or `js/run_wasm.mjs` and it will resume where
 it left off:
 
 ```bash
@@ -163,7 +163,7 @@ Of course, you can mix and match engines, for example passing state from a
 JavaScript engine to a Scheme one:
 
 ```bash
-$ ./scm/expand < examples/test-state2.scm | ./scm/scan | node --experimental-modules js/mce.mjs | ./scm/mce 
+$ ./scm/expand < examples/test-state2.scm | ./scm/scan | node --experimental-modules js/main.mjs | ./scm/mce 
 0
 1
 2

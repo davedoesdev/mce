@@ -1,6 +1,8 @@
 import fs from 'fs';
+import { promisify } from 'util';
 import { EOL } from 'os';
-const { readFile, open } = fs.promises;
+const { open } = fs.promises;
+import yargs from 'yargs';
 
 class Char extends String {}
 class Symbol extends String {}
@@ -392,10 +394,18 @@ const global_table = new Map([
     ['getpid', getpid]
 ]);
 
+export function register_global_function(name, f) {
+    global_table.set(name, f);
+}
+
 const kenvfn_set = new Set([
     applyx,
     transfer
 ]);
+
+export function register_kenv_function(f) {
+    kenvfn_set.add(f);
+}
 
 function find_global(sym) {
     const s = sym.toString();
@@ -964,14 +974,40 @@ function run(state) {
     return result_val(state);
 }
 
-(async function () {
-    const stdin = await open('/dev/stdin');
-    const s = JSON.parse(await stdin.readFile());
+const read_all = promisify((stream, cb) => {
+    const bufs = [];
+    stream.on('error', cb);
+    stream.on('data', buf => bufs.push(buf));
+    stream.on('end', () => cb(null, Buffer.concat(bufs)));
+});
+
+function start_parsed(s) {
     const r = mce_restore(s);
     //print(list_ref(get_procedure_defn(r), 3));
     if (typeof r === 'function') {
-        r(cons(null, null));
-    } else {
-        run(r);
+        return r(cons(null, null));
     }
-})();
+    return run(r);
+}
+
+export async function start_string(s) {
+    return start_parsed(JSON.parse(s));
+}
+
+export async function start_stream(stream) {
+    return start_string(await read_all(stream));
+}
+
+export async function start(argv) {
+    const args = yargs(argv)
+        .option('run', {
+            describe: 'CPS form or state to run',
+            type: 'string'
+        })
+        .argv;
+    if (args.run) {
+        // yargs removes enclosing double quotes!
+        return start_string(`"${args.run}"`);
+    }
+    return start_stream(process.stdin);
+}
