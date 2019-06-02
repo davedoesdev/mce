@@ -4,10 +4,10 @@ import { EOL } from 'os';
 const { open } = fs.promises;
 import yargs from 'yargs';
 
-class Char extends String {}
-class Symbol extends String {}
+export class Char extends String {}
+export class Symbol extends String {}
 
-class Pair {
+export class Pair {
     constructor(car, cdr) {
         this.car = car;
         this.cdr = cdr;
@@ -391,7 +391,8 @@ const global_table = new Map([
     ['save', mce_save],
     ['restore', mce_restore],
     ['transfer', transfer],
-    ['getpid', getpid]
+    ['getpid', getpid],
+    ['list->vector', list_to_vector]
 ]);
 
 export function register_global_function(name, f) {

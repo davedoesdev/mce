@@ -551,6 +551,7 @@
 (table-set! global-table 'vector-length vector-length)
 (table-set! global-table 'vector-ref vector-ref)
 (table-set! global-table 'cons cons)
+(table-set! global-table 'list->vector list->vector)
 
 (define (register-global-function name f)
     (table-set! global-table name f))

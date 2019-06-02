@@ -810,7 +810,8 @@ std::unordered_map<std::string, function*> global_table {
     { "restore", restore },
     { "transfer", transfer },
     { "getpid", getpid },
-    { "cons", gcons }
+    { "cons", gcons },
+    { "list->vector", list_to_vector }
 };
 
 void register_global_function(const std::string& name, function f) {
@@ -1542,7 +1543,7 @@ boxed start(const std::string& s) {
     return start(json::parse(s));
 }
 
-void start(int argc, char *argv[]) {
+boxed start(int argc, char *argv[]) {
     cxxopts::Options options("mce", "Metacircular Evaluator");
     options.add_options()
         ("h,help", "help")
@@ -1555,12 +1556,11 @@ void start(int argc, char *argv[]) {
     auto opts = options.parse(argc, argv);
     if (opts.count("help")) {
         std::cout << options.help() << std::endl;
-        return;
+        return bnil;
     }
     gc_threshold = opts["gc-threshold"].as<size_t>();
     if (opts.count("run")) {
-        start(opts["run"].as<std::string>());
-    } else {
-        start(std::cin);
+        return start(opts["run"].as<std::string>());
     }
+    return start(std::cin);
 }

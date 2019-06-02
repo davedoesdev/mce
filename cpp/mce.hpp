@@ -104,4 +104,4 @@ extern size_t gc_threshold;
 boxed start(std::istream &stream);
 boxed start(const std::string &s);
 
-void start(int argc, char *argv[]);
+boxed start(int argc, char *argv[]);
