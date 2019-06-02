@@ -23,39 +23,51 @@ class Attribute {
     }
 }
 
-function _parse_sxml(exp, elts) {
+function _parse_sxml(exp, parent) {
+    const doc = parent.ownerDocument;
+    const append = parent.appendChild.bind(parent);
     if (typeof exp === 'boolean') {
-        elts[0].appendChild(elts[0].ownerDocument.createTextNode(exp ? 'true' : 'false'));
+        append(doc.createTextNode(exp ? 'true' : 'false'));
     } else if ((typeof exp === 'number') ||
                (exp instanceof Char) ||
                (typeof exp === 'string')) {
-        elts[0].appendChild(elts[0].ownerDocument.createTextNode(exp.toString()));
+        append(doc.createTextNode(exp.toString()));
     } else if (exp instanceof Symbol) {
-        if ((elts[0] !== elts[0].ownerDocument.documentElement) || 
-            (exp.localeCompare(elts[0].tagName, undefined, { sensitivity: 'accent' }) !== 0)) {
-            if (exp.toString() === '@') {
-                elts.unshift(new Attribute(elts[0]));
+        const tag = exp.toString();
+        if (tag === '@') {
+            parent = new Attribute(parent);
+        } else {
+            if (parent === doc.documentElement) {
+                if (tag.localeCompare(parent.tagName, undefined, { sensitivity: 'accent' }) !== 0) {
+                    const matches = parent.getElementsByTagName(tag);
+                    if (matches.length) {
+                        parent = matches.item(0);
+                    } else {
+                        parent = append(doc.createElement(tag));
+                    }
+                }
             } else {
-                elts.unshift(elts[0].appendChild(elts[0].ownerDocument.createElement(exp.toString())));
+                parent = append(doc.createElement(tag));
             }
         }
     } else if (exp instanceof Pair) {
-        const sub_elts = [elts[0]];
+        let p = parent;
         while (exp instanceof Pair) {
-            _parse_sxml(exp.car, sub_elts);
+            p = _parse_sxml(exp.car, p);
             exp = exp.cdr;
         }
     } else if (Array.isArray(exp)) {
-        const sub_elts = [elts[0]];
+        let p = parent;
         for (let v of exp) {
-            _parse_sxml(v, sub_elts);
+            p = _parse_sxml(v, p);
         }
     }
+    return parent;
 }
 
 function parse_sxml(sxml) {
-    const dom = new JSDOM();
-    _parse_sxml(sxml, [dom.window.document.documentElement]);
+    const dom = new JSDOM('<!doctype html>');
+    _parse_sxml(sxml, dom.window.document.documentElement);
     return dom;
 }
 
@@ -63,8 +75,4 @@ function parse_sxml(sxml) {
     const sxml = await start(process.argv);
     const dom = parse_sxml(sxml);
     console.log(dom.serialize());
-    // we get 2 bodys - we should skip if any match existing
-    // what about doctype?
-    // don't need unshift, just current
-    // tail recursive
 })();
