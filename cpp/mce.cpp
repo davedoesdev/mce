@@ -779,6 +779,21 @@ boxed gcons(boxed args) {
     return cons(list_ref(args, 0), list_ref(args, 1));
 }
 
+std::unordered_map<std::string, boxed> config_table;
+
+void set_config(const std::string& k, boxed v)
+{
+    config_table[k] = v;
+}
+
+boxed get_config(boxed args) {
+    auto it = config_table.find(*list_ref(args, 0)->cast<std::string>());
+    if (it == config_table.end()) {
+        return box<bool>(false);
+    }
+    return it->second;
+}
+
 std::unordered_map<std::string, function*> global_table {
     { "result", result },
     { "<", less_than },
@@ -811,7 +826,8 @@ std::unordered_map<std::string, function*> global_table {
     { "transfer", transfer },
     { "getpid", getpid },
     { "cons", gcons },
-    { "list->vector", list_to_vector }
+    { "list->vector", list_to_vector },
+    { "get-config", get_config }
 };
 
 void register_global_function(const std::string& name, function f) {
@@ -830,6 +846,7 @@ void register_kenv_function(function f) {
 boxed find_global(const symbol& sym) {
     auto it = global_table.find(sym);
     if (it == global_table.end()) {
+        // out_of_range doesn't show sym when serialized
         throw std::range_error(sym);
     }
     return make_lambda<boxed>(it->second);
@@ -1552,6 +1569,9 @@ boxed start(int argc, char *argv[]) {
          cxxopts::value<size_t>()->default_value("100000"))
         ("run",
          "CPS form or state to run",
+         cxxopts::value<std::string>())
+        ("config",
+         "Set configuration",
          cxxopts::value<std::string>());
     auto opts = options.parse(argc, argv);
     if (opts.count("help")) {
@@ -1559,6 +1579,11 @@ boxed start(int argc, char *argv[]) {
         return bnil;
     }
     gc_threshold = opts["gc-threshold"].as<size_t>();
+    if (opts.count("config")) {
+        auto kv = opts["config"].as<std::string>();
+        auto pos = kv.find('=');
+        set_config(kv.substr(0, pos), box<std::string>(kv.substr(pos + 1)));
+    }
     if (opts.count("run")) {
         return start(opts["run"].as<std::string>());
     }

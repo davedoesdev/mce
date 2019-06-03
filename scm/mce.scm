@@ -3,6 +3,7 @@
     (export 
         (register-global-function name f)
         (register-kenv-function f)
+        (set-config k v)
         (start-stream stream #!key (is_scan #f))
         (start-string s #!key (is_scan #f))
         (start argv)))
@@ -498,7 +499,7 @@
         (if r
             (ref-value r)
             (if err
-                (error "lookup" "symbol not found" sym)
+                (error-lookup-not-found sym)
                 r))))
 
 (define (lookup-global sym #!optional (err #t))
@@ -552,6 +553,7 @@
 (table-set! global-table 'vector-ref vector-ref)
 (table-set! global-table 'cons cons)
 (table-set! global-table 'list->vector list->vector)
+(table-set! global-table 'get-config get-config)
 
 (define (register-global-function name f)
     (table-set! global-table name f))
@@ -563,6 +565,14 @@
 
 (define (register-kenv-function f)
     (table-set! kenvfn-table f #t))
+
+(define config-table (make-equal-table))
+
+(define (set-config k v)
+    (table-set! config-table k v))
+
+(define (get-config k)
+    (ref-value (table-ref config-table k)))
 
 (define (cmap f l tab set-entry!)
    (let ((ref (table-ref tab l)))
@@ -771,15 +781,20 @@
 
 (define (start argv)
     (let ((is_scan (string-suffix? "scan" (car argv)))
+          (execute #t)
           (s ""))
         (args-parse (cdr argv)
             ((("-h" "--help"))
-             (args-parse-usage #f))
+             (args-parse-usage #f)
+             (set! execute #f))
             (("--run" ?state (help "CPS form or state to run"))
              (set! s state))
+            (("--config" ?kv (help "Set configuration"))
+             (let ((pos (string-char-index kv #\= )))
+                 (set-config (substring kv 0 pos) (substring kv (+ pos 1)))))
             (else
              (error "start" "Invalid argument " else)))
-        (if (not (string-null? s))
-            (start-string s :is_scan is_scan)
-            (if (null? (cdr argv))
-                (start-stream (current-input-port) :is_scan is_scan)))))
+        (if execute
+            (if (string-null? s)
+                (start-stream (current-input-port) :is_scan is_scan)
+                (start-string s :is_scan is_scan)))))

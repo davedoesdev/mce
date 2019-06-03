@@ -16,7 +16,11 @@ class Attribute {
         }
         
         if (this.attr !== null) {
-            this.el.setAttribute(this.attr, child.nodeValue);
+            let val = '';
+            if (this.el.hasAttribute(this.attr)) {
+                val = this.el.getAttribute(this.attr);
+            }
+            this.el.setAttribute(this.attr, val + child.nodeValue);
         }
 
         return child;

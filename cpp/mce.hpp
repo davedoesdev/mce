@@ -99,6 +99,8 @@ typedef boxed function(boxed);
 void register_global_function(const std::string& name, function f);
 void register_kenv_function(function f);
 
+void set_config(const std::string& k, boxed v);
+
 extern size_t gc_threshold;
 
 boxed start(std::istream &stream);

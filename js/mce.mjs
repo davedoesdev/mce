@@ -360,6 +360,17 @@ function getpid() {
     return process.pid;
 }
 
+const config_table = new Map();
+
+export function set_config(k, v) {
+    config_table.set(k, v);
+}
+
+function get_config(k) {
+    const v = config_table.get(k);
+    return v === undefined ? false : v;
+}
+
 const global_table = new Map([
     ['result', result],
     ['+', plus],
@@ -392,7 +403,8 @@ const global_table = new Map([
     ['restore', mce_restore],
     ['transfer', transfer],
     ['getpid', getpid],
-    ['list->vector', list_to_vector]
+    ['list->vector', list_to_vector],
+    ['get-config', get_config]
 ]);
 
 export function register_global_function(name, f) {
@@ -1005,7 +1017,15 @@ export async function start(argv) {
             describe: 'CPS form or state to run',
             type: 'string'
         })
+        .option('config', {
+            describe: 'Set configuration',
+            type: 'string'
+        })
         .argv;
+    if (args.config) {
+        const pos = args.config.indexOf('=');
+        set_config(args.config.substr(0, pos), args.config.substr(pos + 1));
+    }
     if (args.run) {
         // yargs removes enclosing double quotes!
         return start_string(`"${args.run}"`);
