@@ -10,15 +10,15 @@ pid_t getpid() {
 
 extern "C" {
 
-void __cxa_allocate_exception() {
+void* __cxa_allocate_exception(size_t) {
     abort();
 }
 
-void __cxa_throw() {
+void __cxa_throw(void*, void*, void*) {
     abort();
 }
 
-void __cxa_begin_catch() {
+void* __cxa_begin_catch(void*) {
     abort();
 }
 

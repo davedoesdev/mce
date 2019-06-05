@@ -5,18 +5,18 @@ HEADERS = ../mce.hpp ../json.hpp ../cxxopts.hpp wasi.hpp
 
 CXX=/opt/wasi-sdk/bin/clang++
 
-mce.wasm: $(SOURCES) $(HEADERS)
-	$(CXX) -g --include=wasi.hpp -Wextra -o $@ $(SOURCES)
+mce.wasm: $(SOURCES) $(HEADERS) Makefile
+	$(CXX) -g --include=wasi.hpp -Wall -Wextra -Wl,--fatal-warnings,-z,stack-size=1048576 -o $@ $(SOURCES)
 
 clean:
 	rm -f mce.wasm
 
-# Currently won't compile with -Wall because of
-# https://bugs.llvm.org/show_bug.cgi?id=40412
-# Also, when we come to making a module, we should do
+# Requires llvm 9 because of https://bugs.llvm.org/show_bug.cgi?id=40412
+
+# When we come to making a module, we should do
 # /opt/wasi-sdk/bin/clang++ -c wup.cpp
 # /opt/wasi-sdk/bin/wasm-ld -o wup.wasm --no-entry wup.o
-# Since only wasm-ld can do the exports
+# since only wasm-ld can do the exports
 # See here for more info: https://github.com/PetterS/clang-wasm
 # including potentially more compile flags.
 # Note that uses default visibility to mark exports, which has the downside of
@@ -26,4 +26,4 @@ clean:
 # symbol should be exported so we should be able to use:
 # #define WASM_EXPORT __attribute__((used)) extern "C"
 # and thus not need --export-dynamic
-# Both these things will need wasi-sdk to be updated to llvm 9 (late 2019)
+# This also requires llvm 9.
