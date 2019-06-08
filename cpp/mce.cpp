@@ -830,6 +830,14 @@ std::unordered_map<std::string, function*> global_table {
     { "get-config", get_config }
 };
 
+function *get_global_function(const std::string& name) {
+    auto it = global_table.find(name);
+    if (it == global_table.end()) {
+        return nullptr;
+    }
+    return it->second;
+}
+
 void register_global_function(const std::string& name, function f) {
     global_table[name] = f;
 }

@@ -5,6 +5,7 @@
     },
     "dependencies": {
         "jsdom": "^15.1.1",
+        "simple-crypt": "^2.1.6",
         "wasi": "devsnek/node-wasi",
         "yargs": "^13.2.4"
     }

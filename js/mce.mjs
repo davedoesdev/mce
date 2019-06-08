@@ -366,7 +366,7 @@ export function set_config(k, v) {
     config_table.set(k, v);
 }
 
-function get_config(k) {
+export function get_config(k) {
     const v = config_table.get(k);
     return v === undefined ? false : v;
 }
@@ -406,6 +406,10 @@ const global_table = new Map([
     ['list->vector', list_to_vector],
     ['get-config', get_config]
 ]);
+
+export function get_global_function(name) {
+    return global_table.get(name);
+}
 
 export function register_global_function(name, f) {
     global_table.set(name, f);

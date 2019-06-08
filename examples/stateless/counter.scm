@@ -1,6 +1,6 @@
 (let loop ((i 0))
-    ;(print (get-config "hello"))
-    ;`(html (body (form
-    ;    (a (@ (href ,(save (lambda () (loop (+ i 1)))))) "up")))
-    `(body form ,i " " a (@ href "?contn=" ,(save (lambda () (loop (+ i 1))))) "up")
+    (define (up)
+        (loop (+ i 1)))
+    ;`(body (form (a (@ (href ,(save up))) "up")))
+    `(body form ,i " " a (@ href ,(save up)) "up")
     )

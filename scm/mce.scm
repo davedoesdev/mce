@@ -1,8 +1,10 @@
 (module mce
     (library packrat)
     (export 
+        (get-global-function name)
         (register-global-function name f)
         (register-kenv-function f)
+        (get-config k)
         (set-config k v)
         (start-stream stream #!key (is_scan #f))
         (start-string s #!key (is_scan #f))
@@ -554,6 +556,9 @@
 (table-set! global-table 'cons cons)
 (table-set! global-table 'list->vector list->vector)
 (table-set! global-table 'get-config get-config)
+
+(define (get-global-function name)
+    (ref-value (table-ref global-table name)))
 
 (define (register-global-function name f)
     (table-set! global-table name f))

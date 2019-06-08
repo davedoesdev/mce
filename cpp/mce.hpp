@@ -96,9 +96,11 @@ private:
 typedef std::shared_ptr<Box> boxed;
 typedef boxed function(boxed);
 
+function *get_global_function(const std::string& name);
 void register_global_function(const std::string& name, function f);
 void register_kenv_function(function f);
 
+boxed get_config(const std::string& k);
 void set_config(const std::string& k, boxed v);
 
 extern size_t gc_threshold;
