@@ -14,6 +14,8 @@ export class Pair {
     }
 }
 
+export function make_runtime() {
+
 function cons(car, cdr) {
     return new Pair(car, cdr);
 }
@@ -362,11 +364,11 @@ function getpid() {
 
 const config_table = new Map();
 
-export function set_config(k, v) {
+function set_config(k, v) {
     config_table.set(k, v);
 }
 
-export function get_config(k) {
+function get_config(k) {
     const v = config_table.get(k);
     return v === undefined ? false : v;
 }
@@ -407,11 +409,11 @@ const global_table = new Map([
     ['get-config', get_config]
 ]);
 
-export function get_global_function(name) {
+function get_global_function(name) {
     return global_table.get(name);
 }
 
-export function register_global_function(name, f) {
+function register_global_function(name, f) {
     global_table.set(name, f);
 }
 
@@ -420,7 +422,7 @@ const kenvfn_set = new Set([
     transfer
 ]);
 
-export function register_kenv_function(f) {
+function register_kenv_function(f) {
     kenvfn_set.add(f);
 }
 
@@ -1007,15 +1009,15 @@ function start_parsed(s) {
     return run(r);
 }
 
-export async function start_string(s) {
+async function start_string(s) {
     return start_parsed(JSON.parse(s));
 }
 
-export async function start_stream(stream) {
+async function start_stream(stream) {
     return start_string(await read_all(stream));
 }
 
-export async function start(argv) {
+async function start(argv) {
     const args = yargs(argv)
         .option('run', {
             describe: 'CPS form or state to run',
@@ -1035,4 +1037,21 @@ export async function start(argv) {
         return start_string(`"${args.run}"`);
     }
     return start_stream(process.stdin);
+}
+
+return {
+    get_config,
+    set_config,
+    get_global_function,
+    register_global_function,
+    register_kenv_function,
+    start_stream,
+    start_string,
+    start
+};
+
+}
+
+export async function start(argv) {
+    return make_runtime().start(argv);
 }

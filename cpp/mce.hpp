@@ -158,6 +158,6 @@ private:
     friend boxed get_config(boxed args);
 };
 
-boxed start(std::istream &stream, std::shared_ptr<Runtime> runtime);
-boxed start(const std::string &s, std::shared_ptr<Runtime> runtime);
-boxed start(int argc, char *argv[], std::shared_ptr<Runtime> runtime);
+boxed start(std::shared_ptr<Runtime> runtime, std::istream &stream);
+boxed start(std::shared_ptr<Runtime> runtime, const std::string &s);
+boxed start(int argc, char *argv[]);

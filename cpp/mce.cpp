@@ -1514,7 +1514,7 @@ boxed mce_restore(const std::string& s, std::shared_ptr<Runtime> runtime) {
     return memoize(deserialize(unpickle(s, runtime)));
 }
 
-boxed start(const json& j, std::shared_ptr<Runtime> runtime) {
+boxed start(std::shared_ptr<Runtime> runtime, const json& j) {
     auto r = mce_restore(j.get<std::string>(), runtime);
     if (r->contains<lambda>()) {
         auto bnil = box(runtime);
@@ -1523,17 +1523,17 @@ boxed start(const json& j, std::shared_ptr<Runtime> runtime) {
     return run(r);
 }
 
-boxed start(std::istream &stream, std::shared_ptr<Runtime> runtime) {
+boxed start(std::shared_ptr<Runtime> runtime, std::istream &stream) {
     json s;
     stream >> s;
-    return start(s, runtime);
+    return start(runtime, s);
 }
 
-boxed start(const std::string& s, std::shared_ptr<Runtime> runtime) {
-    return start(json::parse(s), runtime);
+boxed start(std::shared_ptr<Runtime> runtime, const std::string& s) {
+    return start(runtime, json::parse(s));
 }
 
-boxed start(int argc, char *argv[], std::shared_ptr<Runtime> runtime) {
+boxed start(int argc, char *argv[]) {
     cxxopts::Options options("mce", "Metacircular Evaluator");
     options.add_options()
         ("h,help", "help")
@@ -1547,6 +1547,7 @@ boxed start(int argc, char *argv[], std::shared_ptr<Runtime> runtime) {
          "Set configuration",
          cxxopts::value<std::string>());
     auto opts = options.parse(argc, argv);
+    auto runtime = std::make_shared<Runtime>();
     if (opts.count("help")) {
         std::cout << options.help() << std::endl;
         return box(runtime);
@@ -1558,9 +1559,9 @@ boxed start(int argc, char *argv[], std::shared_ptr<Runtime> runtime) {
         runtime->set_config(kv.substr(0, pos), box<std::string>(kv.substr(pos + 1), runtime));
     }
     if (opts.count("run")) {
-        return start(opts["run"].as<std::string>(), runtime);
+        return start(runtime, opts["run"].as<std::string>());
     }
-    return start(std::cin, runtime);
+    return start(runtime, std::cin);
 }
 
 Runtime::Runtime() :

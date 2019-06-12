@@ -1,14 +1,27 @@
 (module mce
     (library packrat)
     (export 
-        (get-global-function name)
-        (register-global-function name f)
-        (register-kenv-function f)
-        (get-config k)
-        (set-config k v)
-        (start-stream stream #!key (is_scan #f))
-        (start-string s #!key (is_scan #f))
+        (make-runtime)
+        (get-config runtime k)
+        (set-config! runtime k v)
+        (get-global-function runtime name)
+        (register-global-function! runtime name f)
+        (register-kenv-function! runtime f)
+        (start-stream runtime stream #!key (is_scan #f))
+        (start-string runtime s #!key (is_scan #f))
         (start argv)))
+
+(define-struct runtime-ops
+    get-config
+    set-config!
+    get-global-function
+    register-global-function!
+    register-kenv-function!
+    start-stream
+    start-string
+    start)
+
+(define (make-runtime)
 
 (define (make-eq-table)
     (vector assq '()))
@@ -42,7 +55,7 @@
                         (cons i1 i2)
                         (loop2 (+ i2 1) (cdr e2))))))))
 
-(define (putin-ctenv ctenv sym)
+(define (putin-ctenv! ctenv sym)
     (let ((i (ctenv-index ctenv sym)))
         (if i
             i
@@ -78,7 +91,7 @@
                        (loop (cdr src) (cdr dst)))))
         newl))
 
-(define (ctenv-setvar name i val env)
+(define (ctenv-setvar! name i val env)
     (let* ((senv (list-ref env (inexact->exact (car i))))
            (syms (car senv))
            (vals (cdr senv))
@@ -160,9 +173,9 @@
     (syntax-rules ()
         ((define-form name body ...)
          (begin
-            (define name (vector-length forms))
-            (let ((len (vector-length forms)))
-                (set! forms (extend-vector forms len body ...)))))))
+            (define name -1)
+            (set! name (vector-length forms))
+            (set! forms (extend-vector forms (vector-length forms) body ...))))))
 
 (define-form symbol-lookup
     (lambda (this i)
@@ -261,7 +274,7 @@
 (define-form define1
     (lambda (this k env name i)
         (lambda (v)
-            (send k (ctenv-setvar name i v env)))))
+            (send k (ctenv-setvar! name i v env)))))
 
 (define-form application0
     (lambda (this scanned)
@@ -305,8 +318,8 @@
 (define (error-lookup-not-found name)
     (error "lookup" "symbol not found" name))
 
-(define (error-set-not-found name)
-    (error "set" "symbol not found" name))
+(define (error-set!-not-found name)
+    (error "set!" "symbol not found" name))
 
 (define (make-undefined-lookup name ctenv fixups)
     (let ((f '()))
@@ -318,13 +331,13 @@
         (set-car! fixups (cons fixup (car fixups)))
         (lambda args (apply f args))))
 
-(define (make-undefined-set name scanned ctenv fixups)
+(define (make-undefined-set! name scanned ctenv fixups)
     (let ((f '()))
         (define (fixup)
             (let ((i (ctenv-index ctenv name)))
                 (if i
                     (begin (set! f (make-form define0 name i scanned)) '())
-                    (error-set-not-found name))))
+                    (error-set!-not-found name))))
         (set-car! fixups (cons fixup (car fixups)))
         (lambda args (apply f args))))
 
@@ -373,10 +386,10 @@
                        (scanned (scseq (cddr exp) ctenv fixups)))
                     (if i
                         (make-form define0 name i scanned)
-                        (make-undefined-set name scanned ctenv fixups))))
+                        (make-undefined-set! name scanned ctenv fixups))))
                ((mce-define)
                 (let* ((name (cadr exp))
-                       (i (putin-ctenv ctenv name))
+                       (i (putin-ctenv! ctenv name))
                        (scanned (scseq (cddr exp) ctenv fixups)))
                     (make-form define0 name i scanned)))
                ((begin)
@@ -399,7 +412,7 @@
                         (let ((toplevel (assoc name toplevels)))
                             (if (not toplevel)
                                 (error-lookup-not-found name))
-                            (let* ((i (putin-ctenv global-ctenv name))
+                            (let* ((i (putin-ctenv! global-ctenv name))
                                    (tlexp (list toplevels (cadr toplevel)))
                                    (scanned (scan tlexp global-ctenv))
                                    (form1 (make-form define0 name i scanned))
@@ -560,7 +573,7 @@
 (define (get-global-function name)
     (ref-value (table-ref global-table name)))
 
-(define (register-global-function name f)
+(define (register-global-function! name f)
     (table-set! global-table name f))
 
 (define kenvfn-table (make-eq-table))
@@ -568,12 +581,12 @@
 (table-set! kenvfn-table transfer #t)
 (table-set! kenvfn-table applyx #t)
 
-(define (register-kenv-function f)
+(define (register-kenv-function! f)
     (table-set! kenvfn-table f #t))
 
 (define config-table (make-equal-table))
 
-(define (set-config k v)
+(define (set-config! k v)
     (table-set! config-table k v))
 
 (define (get-config k)
@@ -796,10 +809,47 @@
              (set! s state))
             (("--config" ?kv (help "Set configuration"))
              (let ((pos (string-char-index kv #\= )))
-                 (set-config (substring kv 0 pos) (substring kv (+ pos 1)))))
+                 (set-config! (substring kv 0 pos) (substring kv (+ pos 1)))))
             (else
              (error "start" "Invalid argument " else)))
         (if execute
             (if (string-null? s)
                 (start-stream (current-input-port) :is_scan is_scan)
                 (start-string s :is_scan is_scan)))))
+
+(let ((runtime-ops (make-runtime-ops)))
+    (runtime-ops-get-config-set! runtime-ops get-config)
+    (runtime-ops-set-config!-set! runtime-ops set-config!)
+    (runtime-ops-get-global-function-set! runtime-ops get-global-function)
+    (runtime-ops-register-global-function!-set! runtime-ops register-global-function!)
+    (runtime-ops-register-kenv-function!-set! runtime-ops register-kenv-function!)
+    (runtime-ops-start-stream-set! runtime-ops start-stream)
+    (runtime-ops-start-string-set! runtime-ops start-string)
+    (runtime-ops-start-set! runtime-ops start)
+    runtime-ops)
+
+)
+
+(define (get-config runtime k)
+    ((runtime-ops-get-config runtime) k))
+
+(define (set-config! runtime k v)
+    ((runtime-ops-set-config! runtime) k v))
+
+(define (get-global-function runtime name)
+    ((runtime-ops-get-global-function runtime) name))
+
+(define (register-global-function! runtime name f)
+    ((runtime-ops-register-global-function! runtime) name f))
+
+(define (register-kenv-function! runtime f)
+    ((runtime-ops-register-kenv-function! runtime) f))
+
+(define (start-stream runtime stream #!key (is_scan #f))
+    ((runtime-ops-start-stream runtime) stream is_scan: is_scan))
+
+(define (start-string runtime s #!key (is_scan #f))
+    ((runtime-ops-start-string runtime) s is_scan: is_scan))
+
+(define (start argv)
+    ((runtime-ops-start (make-runtime)) argv))
