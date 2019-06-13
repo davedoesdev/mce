@@ -27,7 +27,7 @@ class Attribute {
     }
 }
 
-function _parse_shtml(exp, parent) {
+function _parse_shtml(exp, parent, save) {
     const doc = parent.ownerDocument;
     const append = parent.appendChild.bind(parent);
     if (typeof exp === 'boolean') {
@@ -57,24 +57,26 @@ function _parse_shtml(exp, parent) {
     } else if (exp instanceof Pair) {
         let p = parent;
         while (exp instanceof Pair) {
-            p = _parse_shtml(exp.car, p);
+            p = _parse_shtml(exp.car, p, save);
             exp = exp.cdr;
         }
     } else if (Array.isArray(exp)) {
         let p = parent;
         for (let v of exp) {
-            p = _parse_shtml(v, p);
+            p = _parse_shtml(v, p, save);
         }
+    } else if (typeof exp === 'function') {
+        append(doc.createTextNode(save(exp)));
     }
     return parent;
 }
 
-export function parse_shtml(shtml) {
+export function parse_shtml(shtml, save) {
     const dom = new JSDOM('<!doctype html>');
-    _parse_shtml(shtml, dom.window.document.documentElement);
+    _parse_shtml(shtml, dom.window.document.documentElement, save);
     return dom;
 }
 
-export function shtml_to_html(shtml) {
-    return parse_shtml(shtml).serialize();
+export function shtml_to_html(shtml, save) {
+    return parse_shtml(shtml, save).serialize();
 }
