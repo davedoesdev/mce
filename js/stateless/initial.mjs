@@ -1,4 +1,3 @@
-// should mce be a class and we create instances? yes
 // can we automatically save functions?
 // use env to set keys; delete envs first? (remember modules are loaded first)
 // use simple_crypt to sign and encrypt states

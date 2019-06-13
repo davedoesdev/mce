@@ -1,6 +1,6 @@
 #include "mce.hpp"
 
 int main(int argc, char *argv[]) {
-    start(argc, argv);
+    mce::start(argc, argv);
     return 0;
 }

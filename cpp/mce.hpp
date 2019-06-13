@@ -6,6 +6,8 @@
 #include <vector>
 #include <functional>
 
+namespace mce {
+
 template<typename T>
 struct box_type { typedef T type; };
 
@@ -125,13 +127,14 @@ public:
     symbol(const std::string& s);
 };
 
-class Runtime {
+class Runtime : public std::enable_shared_from_this<Runtime> {
 public:
     Runtime();
 
     void set_gc_threshold(size_t v);
     boxed maybe_gc(boxed state);
 
+    boxed get_config(const std::string& k);
     void set_config(const std::string& k, boxed v);
 
     function* get_global_function(const std::string& name);
@@ -155,9 +158,10 @@ private:
     friend lambda make_lambda<lambda>(func fn, std::shared_ptr<Runtime> runtime);
     friend boxed find_global(const symbol& sym, std::shared_ptr<Runtime> runtime);
     friend boxed wrap_global_lambda(boxed fn, boxed cf);
-    friend boxed get_config(boxed args);
 };
 
 boxed start(std::shared_ptr<Runtime> runtime, std::istream &stream);
 boxed start(std::shared_ptr<Runtime> runtime, const std::string &s);
 boxed start(int argc, char *argv[]);
+
+}

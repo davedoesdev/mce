@@ -8,6 +8,8 @@
 
 using nlohmann::json;
 
+namespace mce {
+
 const char null_code    = 'a';
 const char boolean_code = 'b';
 const char number_code  = 'c';
@@ -762,24 +764,27 @@ boxed restore(boxed args) {
 }
 
 boxed getpid(boxed args) {
-    return box<double>(static_cast<double>(getpid()), args->get_runtime());
+    return box<double>(static_cast<double>(::getpid()), args->get_runtime());
 }
 
 boxed gcons(boxed args) {
     return cons(list_ref(args, 0), list_ref(args, 1));
 }
 
-void Runtime::set_config(const std::string& k, boxed v) {
-    config_table[k] = v;
+boxed Runtime::get_config(const std::string& k) {
+    auto it = config_table.find(k);
+    if (it == config_table.end()) {
+        return box<bool>(false, shared_from_this());
+    }
+    return it->second;
 }
 
 boxed get_config(boxed args) {
-    auto runtime = args->get_runtime();
-    auto it = runtime->config_table.find(*list_ref(args, 0)->cast<std::string>());
-    if (it == runtime->config_table.end()) {
-        return box<bool>(false, runtime);
-    }
-    return it->second;
+    return args->get_runtime()->get_config(*list_ref(args, 0)->cast<std::string>());
+}
+
+void Runtime::set_config(const std::string& k, boxed v) {
+    config_table[k] = v;
 }
 
 function* Runtime::get_global_function(const std::string& name) {
@@ -1599,7 +1604,7 @@ Runtime::Runtime() :
         { "getpid", getpid },
         { "cons", gcons },
         { "list->vector", list_to_vector },
-        { "get-config", get_config }
+        { "get-config", mce::get_config }
     },
     kenvfn_set({
         gapplyx,
@@ -1608,4 +1613,6 @@ Runtime::Runtime() :
 
 void Runtime::set_gc_threshold(size_t v) {
     gc_threshold = v;
+}
+
 }
