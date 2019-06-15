@@ -981,13 +981,13 @@ function result_val(exp) {
     return exp[1];
 }
 
-function step(state) {
-    return state.car(cons(state.cdr, null));
+async function step(state) {
+    return await state.car(cons(state.cdr, null));
 }
 
-function run(state) {
+async function run(state) {
     while (!is_result(state)) {
-        state = step(state);
+        state = await step(state);
     }
 
     return result_val(state);
@@ -1000,21 +1000,21 @@ const read_all = promisify((stream, cb) => {
     stream.on('end', () => cb(null, Buffer.concat(bufs)));
 });
 
-function start_parsed(s) {
+async function start_parsed(s) {
     const r = mce_restore(s);
     //print(list_ref(get_procedure_defn(r), 3));
     if (typeof r === 'function') {
-        return r(cons(null, null));
+        return await r(cons(null, null));
     }
-    return run(r);
+    return await run(r);
 }
 
 async function start_string(s) {
-    return start_parsed(JSON.parse(s));
+    return await start_parsed(JSON.parse(s));
 }
 
 async function start_stream(stream) {
-    return start_string(await read_all(stream));
+    return await start_string(await read_all(stream));
 }
 
 async function start(argv) {
@@ -1034,9 +1034,9 @@ async function start(argv) {
     }
     if (args.run) {
         // yargs removes enclosing double quotes!
-        return start_string(`"${args.run}"`);
+        return await start_string(`"${args.run}"`);
     }
-    return start_stream(process.stdin);
+    return await start_stream(process.stdin);
 }
 
 return {
@@ -1047,11 +1047,12 @@ return {
     register_kenv_function,
     start_stream,
     start_string,
-    start
+    start,
+    send
 };
 
 }
 
 export async function start(argv) {
-    return make_runtime().start(argv);
+    return await make_runtime().start(argv);
 }

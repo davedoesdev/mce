@@ -160,6 +160,7 @@ private:
     friend boxed wrap_global_lambda(boxed fn, boxed cf);
 };
 
+boxed send(boxed k, boxed v);
 boxed start(std::shared_ptr<Runtime> runtime, std::istream &stream);
 boxed start(std::shared_ptr<Runtime> runtime, const std::string &s);
 boxed start(int argc, char *argv[]);

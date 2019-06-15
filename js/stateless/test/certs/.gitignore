@@ -1,0 +1,6 @@
+*
+!make_ca_cert.sh
+!make_server_cert.sh
+!make_stateless_keys.sh
+!extensions
+!.gitignore

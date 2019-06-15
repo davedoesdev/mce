@@ -9,7 +9,8 @@
         (register-kenv-function! runtime f)
         (start-stream runtime stream #!key (is_scan #f))
         (start-string runtime s #!key (is_scan #f))
-        (start argv)))
+        (start argv)
+        (send runtime k v)))
 
 (define-struct runtime-ops
     get-config
@@ -19,7 +20,8 @@
     register-kenv-function!
     start-stream
     start-string
-    start)
+    start
+    send)
 
 (define (make-runtime)
 
@@ -826,6 +828,7 @@
     (runtime-ops-start-stream-set! runtime-ops start-stream)
     (runtime-ops-start-string-set! runtime-ops start-string)
     (runtime-ops-start-set! runtime-ops start)
+    (runtime-ops-send-set! runtime-ops send)
     runtime-ops)
 
 )
@@ -853,3 +856,6 @@
 
 (define (start argv)
     ((runtime-ops-start (make-runtime)) argv))
+
+(define (send runtime k v)
+    ((runtime-ops-send runtime) k v))
