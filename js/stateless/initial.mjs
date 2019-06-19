@@ -1,5 +1,3 @@
-// use simple_crypt to sign states
-
 (async () => {
     const priv_pem = process.env.STATELESS_PRIV_PEM;
     delete process.env.STATELESS_PRIV_PEM;
