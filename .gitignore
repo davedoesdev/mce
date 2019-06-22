@@ -6,3 +6,5 @@ expand
 expand.o
 scan
 node_modules
+js/stateless/.env
+js/stateless/yarn.lock

@@ -1519,8 +1519,8 @@ boxed mce_restore(const std::string& s, std::shared_ptr<Runtime> runtime) {
     return memoize(deserialize(unpickle(s, runtime)));
 }
 
-boxed start(std::shared_ptr<Runtime> runtime, const json& j) {
-    auto r = mce_restore(j.get<std::string>(), runtime);
+boxed start(std::shared_ptr<Runtime> runtime, const std::string& s) {
+    auto r = mce_restore(s, runtime);
     if (r->contains<lambda>()) {
         auto bnil = box(runtime);
         return (*r->cast<lambda>())(cons(bnil, bnil));
@@ -1529,13 +1529,9 @@ boxed start(std::shared_ptr<Runtime> runtime, const json& j) {
 }
 
 boxed start(std::shared_ptr<Runtime> runtime, std::istream &stream) {
-    json s;
-    stream >> s;
-    return start(runtime, s);
-}
-
-boxed start(std::shared_ptr<Runtime> runtime, const std::string& s) {
-    return start(runtime, json::parse(s));
+    json j;
+    stream >> j;
+    return start(runtime, j.get<std::string>());
 }
 
 boxed start(int argc, char *argv[]) {
@@ -1564,7 +1560,7 @@ boxed start(int argc, char *argv[]) {
         runtime->set_config(kv.substr(0, pos), box<std::string>(kv.substr(pos + 1), runtime));
     }
     if (opts.count("run")) {
-        return start(runtime, opts["run"].as<std::string>());
+        return start(runtime, json::parse(opts["run"].as<std::string>()));
     }
     return start(runtime, std::cin);
 }

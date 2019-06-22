@@ -797,7 +797,7 @@
     (start-parsed is_scan (read stream)))
 
 (define (start-string s #!key (is_scan #f))
-    (start-parsed is_scan (json-read (open-input-string s))))
+    (start-parsed is_scan s))
 
 (define (start argv)
     (let ((is_scan (string-suffix? "scan" (car argv)))
@@ -817,7 +817,7 @@
         (if execute
             (if (string-null? s)
                 (start-stream (current-input-port) :is_scan is_scan)
-                (start-string s :is_scan is_scan)))))
+                (start-parsed is_scan (json-read (open-input-string s)))))))
 
 (let ((runtime-ops (make-runtime-ops)))
     (runtime-ops-get-config-set! runtime-ops get-config)

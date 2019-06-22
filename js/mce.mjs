@@ -1,7 +1,8 @@
 import fs from 'fs';
-import { promisify } from 'util';
-import { EOL } from 'os';
-const { open } = fs.promises;
+import util from 'util';
+const { promisify } = util;
+import os from 'os';
+const { EOL } = os;
 import yargs from 'yargs';
 
 export class Char extends String {}

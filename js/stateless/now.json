@@ -1,0 +1,11 @@
+{
+  "version": 2,
+  "builds": [{
+    "src": "stateless.mjs",
+    "use": "@now/node",
+    "config": { "maxLambdaSize": "50mb" }
+  }],
+  "routes": [
+    { "src": "stateless", "dest": "stateless.mjs" }
+  ]
+}
