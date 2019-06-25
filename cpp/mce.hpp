@@ -161,8 +161,8 @@ private:
 };
 
 boxed send(boxed k, boxed v);
-boxed start(std::shared_ptr<Runtime> runtime, std::istream &stream);
-boxed start(std::shared_ptr<Runtime> runtime, const std::string &s);
+boxed start(std::istream &stream, boxed args);
+boxed start(const std::string &s, boxed args);
 boxed start(int argc, char *argv[]);
 
 }

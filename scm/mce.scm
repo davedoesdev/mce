@@ -7,8 +7,8 @@
         (get-global-function runtime name)
         (register-global-function! runtime name f)
         (register-kenv-function! runtime f)
-        (start-stream runtime stream #!key (is_scan #f))
-        (start-string runtime s #!key (is_scan #f))
+        (start-stream runtime stream #!key (is_scan #f) (args '()))
+        (start-string runtime s #!key (is_scan #f) (args '()))
         (start argv)
         (send runtime k v)))
 
@@ -783,21 +783,21 @@
 (define (mce-run exp . env)
     (run (mce-eval exp)))
 
-(define (start-parsed is_scan v)
+(define (start-parsed is_scan v args)
     (if is_scan
         (write (mce-save (mce-eval v)))
         (if (string? v)
             (let ((r (mce-restore v)))
                 (if (procedure? r)
-                    (apply r '())
+                    (apply r args)
                     (run r)))
             (mce-run v))))
 
-(define (start-stream stream #!key (is_scan #f))
-    (start-parsed is_scan (read stream)))
+(define (start-stream stream #!key (is_scan #f) (args '()))
+    (start-parsed is_scan (read stream) args))
 
-(define (start-string s #!key (is_scan #f))
-    (start-parsed is_scan s))
+(define (start-string s #!key (is_scan #f) (args '()))
+    (start-parsed is_scan s args))
 
 (define (start argv)
     (let ((is_scan (string-suffix? "scan" (car argv)))
@@ -817,7 +817,7 @@
         (if execute
             (if (string-null? s)
                 (start-stream (current-input-port) :is_scan is_scan)
-                (start-parsed is_scan (json-read (open-input-string s)))))))
+                (start-parsed is_scan (json-read (open-input-string s)) '())))))
 
 (let ((runtime-ops (make-runtime-ops)))
     (runtime-ops-get-config-set! runtime-ops get-config)
@@ -848,11 +848,11 @@
 (define (register-kenv-function! runtime f)
     ((runtime-ops-register-kenv-function! runtime) f))
 
-(define (start-stream runtime stream #!key (is_scan #f))
-    ((runtime-ops-start-stream runtime) stream is_scan: is_scan))
+(define (start-stream runtime stream #!key (is_scan #f) (args '()))
+    ((runtime-ops-start-stream runtime) stream is_scan: is_scan args: args))
 
-(define (start-string runtime s #!key (is_scan #f))
-    ((runtime-ops-start-string runtime) s is_scan: is_scan))
+(define (start-string runtime s #!key (is_scan #f) (args '()))
+    ((runtime-ops-start-string runtime) s is_scan: is_scan args: args))
 
 (define (start argv)
     ((runtime-ops-start (make-runtime)) argv))

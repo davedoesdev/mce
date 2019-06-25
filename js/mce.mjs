@@ -88,7 +88,7 @@ function get_procedure_defn(proc) {
 }
 
 function memoize_lambda(proc, defn) {
-    return args => {
+    const f = args => {
         if (is_yield_defn(args)) {
             if (typeof defn === 'function') {
                 return defn();
@@ -97,6 +97,8 @@ function memoize_lambda(proc, defn) {
         }
         return proc(args);
     };
+    f.memoized = true;
+    return f;
 }
 
 function ctenv_lookup(i, env) {
@@ -410,12 +412,15 @@ const global_table = new Map([
     ['get-config', get_config]
 ]);
 
+const global_set = new Set(global_table.values());
+
 function get_global_function(name) {
     return global_table.get(name);
 }
 
 function register_global_function(name, f) {
     global_table.set(name, f);
+    global_set.add(f);
 }
 
 const kenvfn_set = new Set([
@@ -493,7 +498,7 @@ function transfer(k, env, fn, ...args) {
 }
 
 function globalize(x, args, cf) {
-    if (typeof x !== 'function') {
+    if ((typeof x !== 'function') || x.memoized) {
         return x;
     }
 
@@ -504,7 +509,10 @@ function globalize(x, args, cf) {
 }
 
 function call_global(f, args) {
-    return f(...list_to_vector(args));
+    if (global_set.has(f)) {
+        return f(...list_to_vector(args));
+    }
+    return f(args);
 }
 
 function handle_global_lambda(args, fn, cf) {
@@ -1001,21 +1009,17 @@ const read_all = promisify((stream, cb) => {
     stream.on('end', () => cb(null, Buffer.concat(bufs)));
 });
 
-async function start_parsed(s) {
+async function start_string(s, args = null) {
     const r = mce_restore(s);
     //print(list_ref(get_procedure_defn(r), 3));
     if (typeof r === 'function') {
-        return await r(cons(null, null));
+        return await r(args);
     }
     return await run(r);
 }
 
-async function start_string(s) {
-    return await start_parsed(JSON.parse(s));
-}
-
-async function start_stream(stream) {
-    return await start_string(await read_all(stream));
+async function start_stream(stream, args = null) {
+    return await start_string(JSON.parse(await read_all(stream)), args);
 }
 
 async function start(argv) {
@@ -1035,7 +1039,7 @@ async function start(argv) {
     }
     if (args.run) {
         // yargs removes enclosing double quotes!
-        return await start_string(`"${args.run}"`);
+        return await start_string(JSON.parse(`"${args.run}"`));
     }
     return await start_stream(process.stdin);
 }
@@ -1046,8 +1050,8 @@ return {
     get_global_function,
     register_global_function,
     register_kenv_function,
-    start_stream,
     start_string,
+    start_stream,
     start,
     send
 };

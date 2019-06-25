@@ -293,5 +293,12 @@
     (cond ((null? l) #f)
           ((eqv? (car l) o) #t)
           (else (memv o (cdr l)))))
+
+(toplevel (append l1 l2)
+    (if (null? l1)
+        l2
+        (cons (car l1) (append (cdr l1) l2))))
+
+(toplevel eappend append)
 ) 
 ,(read))))))
