@@ -1,6 +1,3 @@
-// shtml to html convert should ignore false attributes then we don't
-//   have to do the check in the example
-
 import qs from 'querystring';
 import micro from 'micro';
 const { text, send } = micro;
@@ -17,6 +14,7 @@ export default async (req, res) => {
         args.set(k, form[k]);
     }
     // Need to verify signature
+    //   Override restore - start_string should use registered version
 
     res.setHeader('Content-Type', 'text/html');
     send(res, 200, await run(data, priv_pem, args));

@@ -25,13 +25,21 @@ class Attribute {
 
         return child;
     }
+
+    reset() {
+        this.attr = null;
+    }
 }
 
 async function _parse_shtml(exp, parent, save) {
     const doc = parent.ownerDocument;
     const append = parent.appendChild.bind(parent);
     if (typeof exp === 'boolean') {
-        append(doc.createTextNode(exp ? 'true' : 'false'));
+        if ((parent instanceof Attribute) && !exp) {
+            parent.reset();
+        } else {
+            append(doc.createTextNode(exp ? 'true' : 'false'));
+        }
     } else if ((typeof exp === 'number') ||
                (exp instanceof Char) ||
                (typeof exp === 'string')) {
