@@ -266,12 +266,26 @@ function plus(...args) {
     return r;
 }
 
+function minus(n, ...args) {
+    for (let arg of args) {
+        n -= arg;
+    }
+    return n;
+}
+
 function multiply(...args) {
     let r = 1;
     for (let arg of args) {
         r *= arg;
     }
     return r;
+}
+
+function divide(n, ...args) {
+    for (let arg of args) {
+        n /= arg;
+    }
+    return n;
 }
 
 function less_than(x, y) {
@@ -379,7 +393,9 @@ function get_config(k) {
 const global_table = new Map([
     ['result', result],
     ['+', plus],
+    ['-', minus],
     ['*', multiply],
+    ['/', divide],
     ['<', less_than],
     ['>', greater_than],
     ['print', print],
@@ -1053,7 +1069,8 @@ return {
     start_string,
     start_stream,
     start,
-    send
+    send,
+    cons
 };
 
 }

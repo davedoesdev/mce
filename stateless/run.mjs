@@ -1,4 +1,4 @@
-import { make_runtime } from '../mce.mjs';
+import { make_runtime } from '../js/mce.mjs';
 import { shtml_to_html } from './shtml.mjs';
 
 import simple_crypt from 'simple-crypt';
@@ -7,7 +7,7 @@ const { promisify } = util;
 
 const make = promisify(simple_crypt.Crypt.make.bind(simple_crypt.Crypt));
 
-export default async (v, priv_pem) => {
+export default async (v, priv_pem, args = null) => {
     const crypt = await make(priv_pem, { json: false });
     const sign = promisify(crypt.sign.bind(crypt));
 
@@ -21,13 +21,22 @@ export default async (v, priv_pem) => {
     };
     runtime.register_global_function('save', new_save);
     runtime.register_kenv_function(new_save);
+
+    let alist = null;
+    if (args) {
+        for (let [k, v] of args) {
+            alist = runtime.cons(runtime.cons(k, v), alist);
+        }
+        alist = runtime.cons(alist, null);
+    }
+
     let shtml;
     if (Array.isArray(v)) {
         shtml = await runtime.start(v);
     } else if (typeof v === 'string') {
-        shtml = await runtime.start_string(v);
+        shtml = await runtime.start_string(v, alist);
     } else {
-        shtml = await runtime.start_stream(v);
+        shtml = await runtime.start_stream(v, alist);
     }
     return await shtml_to_html(shtml, save_and_sign);
 }

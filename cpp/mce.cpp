@@ -603,12 +603,32 @@ boxed plus(boxed args) {
     return box<double>(r, args->get_runtime());
 }
 
+boxed minus(boxed args) {
+    auto p = args->cast<pair>();
+    double r = p->first->cast<double>();
+    while ((args = p->second)->contains<pair>()) {
+        p = args->cast<pair>();
+        r -= p->first->cast<double>();
+    }
+    return box<double>(r, args->get_runtime());
+}
+
 boxed multiply(boxed args) {
     double r = 1;
     while (args->contains<pair>()) {
         auto p = args->cast<pair>();
         r *= p->first->cast<double>();
         args = p->second;
+    }
+    return box<double>(r, args->get_runtime());
+}
+
+boxed divide(boxed args) {
+    auto p = args->cast<pair>();
+    double r = p->first->cast<double>();
+    while ((args = p->second)->contains<pair>()) {
+        p = args->cast<pair>();
+        r /= p->first->cast<double>();
     }
     return box<double>(r, args->get_runtime());
 }
@@ -1576,7 +1596,9 @@ Runtime::Runtime() :
         { "write", write },
         { "ewrite", write },
         { "+", plus },
+        { "-", minus },
         { "*", multiply },
+        { "/", divide },
         { "null?", is_null },
         { "car", car },
         { "cdr", cdr },

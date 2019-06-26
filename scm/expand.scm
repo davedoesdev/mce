@@ -300,5 +300,12 @@
         (cons (car l1) (append (cdr l1) l2))))
 
 (toplevel eappend append)
+
+(toplevel (assoc k alist)
+    (if (null? alist)
+        #f
+        (if (equal? (car (car alist)) k)
+            (car alist)
+            (assoc k (cdr alist)))))
 ) 
 ,(read))))))

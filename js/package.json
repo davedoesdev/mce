@@ -2,10 +2,7 @@
     "name": "mce",
     "license": "MIT",
     "dependencies": {
-        "jsdom": "^15.1.1",
-        "micro": "^9.3.4",
-        "simple-crypt": "^2.1.6",
-        "wasi": "devsnek/node-wasi",
+        "wasi": "0.0.6",
         "yargs": "^13.2.4"
     }
 }
