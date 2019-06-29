@@ -14,13 +14,14 @@ export default async (v, priv_pem, args = null) => {
     const runtime = make_runtime();
     const save = runtime.get_global_function('save');
     const save_and_sign = async exp => {
-        return JSON.stringify(await sign(save(exp)));
+        return JSON.stringify(await sign(Buffer.from(save(exp))));
     };
     const new_save = async (k, env, exp) => {
         return runtime.send(k, await save_and_sign(exp));
     };
     runtime.register_global_function('save', new_save);
     runtime.register_kenv_function(new_save);
+    runtime.unregister_global_function('restore');
 
     let alist = null;
     if (args) {
@@ -33,7 +34,7 @@ export default async (v, priv_pem, args = null) => {
     let shtml;
     if (Array.isArray(v)) {
         shtml = await runtime.start(v);
-    } else if (typeof v === 'string') {
+    } else if ((typeof v === 'string') || Buffer.isBuffer(v)) {
         shtml = await runtime.start_string(v, alist);
     } else {
         shtml = await runtime.start_stream(v, alist);

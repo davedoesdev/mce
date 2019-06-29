@@ -819,6 +819,10 @@ void Runtime::register_global_function(const std::string& name, function f) {
     global_table[name] = f;
 }
 
+void Runtime::unregister_global_function(const std::string& name) {
+    global_table.erase(name);
+}
+
 void Runtime::register_kenv_function(function f) {
     kenvfn_set.insert(f);
 }

@@ -6,6 +6,7 @@
         (set-config! runtime k v)
         (get-global-function runtime name)
         (register-global-function! runtime name f)
+        (unregister-global-function! runtime name)
         (register-kenv-function! runtime f)
         (start-stream runtime stream #!key (is_scan #f) (args '()))
         (start-string runtime s #!key (is_scan #f) (args '()))
@@ -17,6 +18,7 @@
     set-config!
     get-global-function
     register-global-function!
+    unregister-global-function!
     register-kenv-function!
     start-stream
     start-string
@@ -40,6 +42,11 @@
 (define (table-set! table key val)
     (vector-set! table 1 (cons (cons key val) (vector-ref table 1)))
     val)
+
+(define (table-delete! table key)
+    (let ((r (table-ref table key)))
+        (if r (remq! r (vector-ref table 1)))
+        r))
 
 (define (make-global-ctenv) (list '()))
 
@@ -580,6 +587,9 @@
 (define (register-global-function! name f)
     (table-set! global-table name f))
 
+(define (unregister-global-function! name)
+    (table-delete! global-table name))
+
 (define kenvfn-table (make-eq-table))
 
 (table-set! kenvfn-table transfer #t)
@@ -826,6 +836,7 @@
     (runtime-ops-set-config!-set! runtime-ops set-config!)
     (runtime-ops-get-global-function-set! runtime-ops get-global-function)
     (runtime-ops-register-global-function!-set! runtime-ops register-global-function!)
+    (runtime-ops-unregister-global-function!-set! runtime-ops unregister-global-function!)
     (runtime-ops-register-kenv-function!-set! runtime-ops register-kenv-function!)
     (runtime-ops-start-stream-set! runtime-ops start-stream)
     (runtime-ops-start-string-set! runtime-ops start-string)
@@ -846,6 +857,9 @@
 
 (define (register-global-function! runtime name f)
     ((runtime-ops-register-global-function! runtime) name f))
+
+(define (unregister-global-function! runtime name)
+    ((runtime-ops-unregister-global-function! runtime) name))
 
 (define (register-kenv-function! runtime f)
     ((runtime-ops-register-kenv-function! runtime) f))

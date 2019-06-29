@@ -439,6 +439,10 @@ function register_global_function(name, f) {
     global_set.add(f);
 }
 
+function unregister_global_function(name) {
+    global_table.delete(name);    
+}
+
 const kenvfn_set = new Set([
     applyx,
     transfer
@@ -1027,7 +1031,6 @@ const read_all = promisify((stream, cb) => {
 
 async function start_string(s, args = null) {
     const r = mce_restore(s);
-    //print(list_ref(get_procedure_defn(r), 3));
     if (typeof r === 'function') {
         return await r(args);
     }
@@ -1065,6 +1068,7 @@ return {
     set_config,
     get_global_function,
     register_global_function,
+    unregister_global_function,
     register_kenv_function,
     start_string,
     start_stream,

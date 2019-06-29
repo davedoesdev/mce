@@ -139,6 +139,7 @@ public:
 
     function* get_global_function(const std::string& name);
     void register_global_function(const std::string& name, function f);
+    void unregister_global_function(const std::string& name);
 
     void register_kenv_function(function f);
 
