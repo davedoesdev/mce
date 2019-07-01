@@ -1,5 +1,5 @@
 import jsdom from 'jsdom';
-import { Char, Symbol, Pair } from '../js/mce.mjs';
+import { Char, Symbol, Pair } from './mce.mjs';
 const { JSDOM } = jsdom;
 
 class Attribute {

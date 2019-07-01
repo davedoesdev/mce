@@ -6,6 +6,10 @@
     "config": { "maxLambdaSize": "50mb" }
   }],
   "routes": [
-    { "src": "stateless", "dest": "stateless.mjs" }
-  ]
+    { "src": "/", "dest": "/stateless.mjs" }
+  ],
+  "env": {
+    "STATELESS_PUB_PEM": "-----BEGIN PUBLIC KEY-----\nMIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAw+bVrHk6mDTwCHIXL0J+\npgnGds7CIAT8aE+QnpJEhlf2mvGKBN28AbAgLQkXKpggXNkurfwlgWhgdaMB+XPQ\nOIQJLDxbNJemLq89g2Uya1B4RyqrklKe3r75uLVo6aKPdhUGfVFNBaeE/4xzuJx/\n/x+9egrY+V9cWSo0x1lcM+HotNtu25kzBRvIY+jmMpnI3uFD6seTV3L14fW/ZenR\n8/aAeH/azOWDWPGPGt7fjd2EKMS86GdI8gukZOpLooYQibpvnSURB2xqTnnMk173\ntUBY7qAoeF8APOCnzWD1R9ZCIvLMQLLowy5zqovmX5bB6joVNb9iyuN6I0wkFs0A\nWwIDAQAB\n-----END PUBLIC KEY-----\n",
+    "STATELESS_PRIV_PEM": "@stateless-priv-pem"
+  }
 }

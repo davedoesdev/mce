@@ -6,5 +6,8 @@
         "micro": "^9.3.4",
         "simple-crypt": "^2.1.6",
         "yargs": "^13.2.4"
+    },
+    "scripts": {
+        "postinstall": "./workaround-issue-413.sh"
     }
 }

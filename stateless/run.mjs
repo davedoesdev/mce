@@ -1,4 +1,4 @@
-import { make_runtime } from '../js/mce.mjs';
+import { make_runtime } from './mce.mjs';
 import { shtml_to_html } from './shtml.mjs';
 
 import simple_crypt from 'simple-crypt';
