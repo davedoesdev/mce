@@ -11,13 +11,16 @@ Macro expansion::
   Derived forms are expanded to basic forms in link:scm/expand.scm[].
 
 Conversion to continuation-passing style::
-  The program is converted to CPS form as decribed https://rawgit.now.sh/davedoesdev/mce/master/doc/dissertation.pdf#page=42[here]. See the `scan` function in link:scm/mce.scm[], which is roughly as described https://rawgit.now.sh/davedoesdev/mce/master/doc/dissertation.pdf#page=46[here].
+  The program is converted to CPS form as decribed http://rawgit.davedoesdev.com/davedoesdev/mce/master/doc/dissertation.pdf#page=42[here]. See the `scan` function in link:scm/mce.scm[], which is roughly as described http://rawgit.davedoesdev.com/davedoesdev/mce/master/doc/dissertation.pdf#page=46[here].
 
 Executing the CPS::
-  The CPS form is executed by repeatedly stepping through its state, as decribed https://rawgit.now.sh/davedoesdev/mce/master/doc/dissertation.pdf#page=56[here]. See the `run` function in link:scm/mce.scm[].
+  The CPS form is executed by repeatedly stepping through its state, as decribed http://rawgit.davedoesdev.com/davedoesdev/mce/master/doc/dissertation.pdf#page=56[here]. See the `run` function in link:scm/mce.scm[].
 
 State-saving mechanism::
-  The state of the program can be serialized to a string at any point of its execution, as decribed https://rawgit.now.sh/davedoesdev/mce/master/doc/dissertation.pdf#page=48[here]. See the `mce-save` and `mce-restore` functions in link:scm/mce.scm[].
+  The state of the program can be serialized to a string at any point of its execution, as decribed http://rawgit.davedoesdev.com/davedoesdev/mce/master/doc/dissertation.pdf#page=48[here]. See the `mce-save` and `mce-restore` functions in link:scm/mce.scm[].
+
+Stateless servers::
+  An experimental Web framework is provided which serializes the whole program state into a HTML document when user interaction is required. The state is restored when the browser POSTs back the user input form. The framework is modelled after the stateless server arrangement described http://rawgit.davedoesdev.com/davedoesdev/mce/master/doc/dissertation.pdf#page=103[here].
 
 The macro expansion and CPS conversion components are implemented in Scheme.
 The CPS execution component has Scheme, C++, JavaScript and WebAssembly
@@ -247,3 +250,72 @@ and run the service like this:
 ```bash
 boot cpp/IncludeOS
 ```
+
+# Stateless servers
+
+A serverless deployment for https://zeit.co/now[Zeit Now] can be found in the
+link:serverless[] directory. This restores a program state received in a POST
+request and runs it, passing the user input in the form. The program can then
+process the input and generate a new HTML page (with the program's state
+serialized into it).
+
+An example which displays a number and lets the user increase or decrease it can
+be found in link:examples/stateless/counter.scm[]:
+
+[source,scheme]
+.counter.scm
+----
+(let loop ((i 0))
+    (define (next form)
+        (loop ((if (assoc "up" form) + -) i 1)))
+    `(body form (@ action ,(get-config "url") method "post") ,i " "
+        (input (@ type "hidden" name "state" value ,next))
+        (input (@ type "submit" name "up" value "Up"))
+        (input (@ type "submit" name "down" value "Down"))))
+----
+
+First, make the cryptographic keys by running:
+
+```bash
+./certs/make_stateless_keys.sh
+```
+
+This produces `certs/stateless_priv.pem` and `certs/stateless_pub.pem` which
+are used to sign and verify program state so arbritary untrusted state isn't
+executed.
+
+Next, generate the initial program state by running:
+
+```bash
+./examples/stateless/make.sh
+```
+
+This generates `stateless/counter.html`.
+
+To test this out locally:
+
+```bash
+cd stateless
+now dev
+```
+
+and then visit http://localhost:3000/counter.html
+
+When you're ready to deploy to Zeit Now, run:
+
+```bash
+now
+```
+
+Note you'll need to use `now secret add` to tell Zeit Now about your keys for
+signing and verifying program state:
+
+```bash
+now secret add stateless-priv-pem -- "$(grep STATELESS_PRIV_PEM .env | sed 's/[^=]*=//')"
+now secret add stateless-pub-pem -- "$(grep STATELESS_PUB_PEM .env | sed 's/[^=]*=//')"
+```
+
+You can then visit `/counter.html` on your deployed site.
+
+Mine is available at `https://stateless.davedoesdev.now.sh/counter.html` if you
+want to take a look.
