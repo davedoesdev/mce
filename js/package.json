@@ -2,7 +2,6 @@
     "name": "mce",
     "license": "MIT",
     "dependencies": {
-        "wasi": "0.0.6",
-        "yargs": "^13.2.4"
+        "yargs": "^15.1.0"
     }
 }

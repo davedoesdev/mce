@@ -2,10 +2,10 @@
     "name": "stateless",
     "license": "MIT",
     "dependencies": {
-        "jsdom": "^15.1.1",
+        "jsdom": "^16.0.1",
         "micro": "^9.3.4",
-        "simple-crypt": "^2.1.6",
-        "yargs": "^13.2.4"
+        "simple-crypt": "^3.0.2",
+        "yargs": "^15.1.0"
     },
     "scripts": {
         "postinstall": "./workaround-issue-413.sh"
