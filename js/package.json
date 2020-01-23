@@ -1,5 +1,10 @@
 {
     "name": "mce",
+    "description": "State-saving, continuation-passing metacircular evaluator for Scheme",
+    "repository": {
+        "type": "git",
+        "url": "https://github.com/davedoesdev/mce.git"
+    },
     "license": "MIT",
     "dependencies": {
         "yargs": "^15.1.0"

@@ -1,4 +1,4 @@
-import run from './run.mjs';
+import run from './run.js';
 
 (async () => {
     const priv_pem = process.env.STATELESS_PRIV_PEM;

@@ -1,7 +1,7 @@
 import qs from 'querystring';
 import micro from 'micro';
 const { text, send } = micro;
-import run from './run.mjs';
+import run from './run.js';
 import simple_crypt from 'simple-crypt';
 import util from 'util';
 const { promisify } = util;

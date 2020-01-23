@@ -1,6 +1,12 @@
 {
     "name": "stateless",
+    "description": "Stateless counter",
+    "repository": {
+      "type": "git",
+      "url": "https://github.com/davedoesdev/mce.git"
+    },
     "license": "MIT",
+    "type": "module",
     "dependencies": {
         "jsdom": "^16.0.1",
         "micro": "^9.3.4",
