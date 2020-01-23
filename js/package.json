@@ -1,5 +1,7 @@
 {
-    "name": "mce",
+    "name": "@davedoesdev/mce",
+    "version": "0.0.1",
+    "main": "mce.mjs",
     "description": "State-saving, continuation-passing metacircular evaluator for Scheme",
     "repository": {
         "type": "git",
