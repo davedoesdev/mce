@@ -1,4 +1,4 @@
-import { start } from './mce.mjs';
+import { start } from './mce.js';
 
 (async function () {
     await start(process.argv);

@@ -2,18 +2,20 @@
     "name": "stateless",
     "description": "Stateless counter",
     "repository": {
-      "type": "git",
-      "url": "https://github.com/davedoesdev/mce.git"
+        "type": "git",
+        "url": "https://github.com/davedoesdev/mce.git"
     },
     "license": "MIT",
     "type": "module",
     "dependencies": {
+        "@davedoesdev/mce": "^0.0.2",
         "jsdom": "^16.0.1",
         "micro": "^9.3.4",
         "simple-crypt": "^3.0.2",
         "yargs": "^15.1.0"
     },
     "scripts": {
-        "postinstall": "./workaround-issue-413.sh"
+        "postinstall": "./workaround-issue-413.sh",
+        "now-build": "echo hello"
     }
 }

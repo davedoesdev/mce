@@ -62,7 +62,7 @@ npm install
 popd
 ```
 
-The CPS execution component is in link:js/mce.mjs[].
+The CPS execution component is in link:js/mce.js[].
 
 ## WebAssembly
 
@@ -98,7 +98,7 @@ To run the same example using the C++ engine:
 And using the JavaScript engine:
 
 ```bash
-./scm/expand < examples/test-loop.scm | ./scm/scan | node js/main.mjs
+./scm/expand < examples/test-loop.scm | ./scm/scan | node js/main.js
 ```
 
 And using the WebAssembly engine:
@@ -110,7 +110,7 @@ And using the WebAssembly engine:
 or
 
 ```bash
-./scm/expand < examples/test-loop.scm | ./scm/scan | node --experimental-wasi-unstable-preview1 js/run_wasm.mjs
+./scm/expand < examples/test-loop.scm | ./scm/scan | node --experimental-wasi-unstable-preview1 js/run_wasm.js
 ```
 
 Of course, you can write the CPS form to a file so you only have to do it once,
@@ -120,9 +120,9 @@ for example:
 ./scm/expand < examples/test-loop.scm | ./scm/scan > test-loop.cps
 ./scm/mce < test-loop.cps
 ./cpp/mce < test-loop.cps
-node --experimental-wasi-unstable-preview1 js/main.mjs < test-loop.cps
+node --experimental-wasi-unstable-preview1 js/main.js < test-loop.cps
 wasmtime cpp/wasm/mce.wasm < test-loop.cps
-node js/run_wasm.mjs < test-loop.cps
+node js/run_wasm.js < test-loop.cps
 ```
 
 # State-saving
@@ -138,8 +138,8 @@ If you run it like this:
 
 You should see the serialized continuation written to standard output.
 
-You can pipe the output into `./scm/mce`, `./cpp/mce`, `./js/mce.mjs`,
-`wasmtime cpp/wasm/mce.wasm` or `js/run_wasm.mjs` and it will resume where
+You can pipe the output into `./scm/mce`, `./cpp/mce`, `./js/mce.js`,
+`wasmtime cpp/wasm/mce.wasm` or `js/run_wasm.js` and it will resume where
 it left off:
 
 ```bash
@@ -166,7 +166,7 @@ Of course, you can mix and match engines, for example passing state from a
 JavaScript engine to a Scheme one:
 
 ```bash
-$ ./scm/expand < examples/test-state2.scm | ./scm/scan | node --experimental-modules js/main.mjs | ./scm/mce 
+$ ./scm/expand < examples/test-state2.scm | ./scm/scan | node --experimental-modules js/main.js | ./scm/mce 
 0
 1
 2
