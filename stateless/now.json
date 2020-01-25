@@ -1,7 +1,7 @@
 {
   "version": 2,
   "builds": [{
-    "src": "stateless.js",
+    "src": "now_stateless.js",
     "use": "@now/node",
     "config": { "maxLambdaSize": "50mb" }
   }, {
@@ -9,7 +9,7 @@
     "use": "@now/static"
   }],
   "routes": [
-    { "src": "/", "dest": "/stateless.js" },
+    { "src": "/", "dest": "/now_stateless.js" },
     { "src": "/counter.html", "dest": "/counter.html" }
   ],
   "env": {
