@@ -276,18 +276,18 @@ now dev
 
 and then visit http://localhost:3000/counter.html
 
-When you're ready to deploy to Zeit Now, run:
-
-```bash
-now
-```
-
-Note you'll need to use `now secret add` to tell Zeit Now about your keys for
-signing and verifying program state:
+When you're ready to deploy to Zeit Now, first use `now secret add` to tell it
+about your keys for signing and verifying program state:
 
 ```bash
 now secret add stateless-priv-pem -- "$(grep STATELESS_PRIV_PEM .env | sed 's/[^=]*=//')"
 now secret add stateless-pub-pem -- "$(grep STATELESS_PUB_PEM .env | sed 's/[^=]*=//')"
+```
+
+To deploy:
+
+```bash
+now
 ```
 
 You can then visit `/counter.html` on your deployed site.
