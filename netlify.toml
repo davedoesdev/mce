@@ -2,3 +2,4 @@
   base = "stateless/"
   publish = "."
   command = "npm install"
+  functions = "functions/"
