@@ -1,7 +1,7 @@
 import run from './run.js';
 
 (async () => {
-    const priv_pem = process.env.STATELESS_PRIV_PEM;
-    delete process.env.STATELESS_PRIV_PEM;
-    console.log(await run(process.argv, priv_pem));
+    const key = process.env.STATELESS_KEY;
+    delete process.env.STATELESS_KEY;
+    console.log(await run(process.argv, key));
 })();

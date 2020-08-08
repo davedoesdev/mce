@@ -1,27 +1,34 @@
 import qs from 'querystring';
-import micro from 'micro';
-const { text, send } = micro;
 import run from './run.js';
-import simple_crypt from 'simple-crypt';
-import util from 'util';
-const { promisify } = util;
+import sodium_plus from 'sodium-plus';
+const { CryptographyKey, SodiumPlus } = sodium_plus;
 
 const make = promisify(simple_crypt.Crypt.make.bind(simple_crypt.Crypt));
 
-export default async (req, res) => {
-    const priv_pem = process.env.STATELESS_PRIV_PEM.replace(/\\n/g, '\n');
-    const pub_pem = process.env.STATELESS_PUB_PEM.replace(/\\n/g, '\n');
+export default async event => {
+    const key64 = process.env.STATELESS_KEY;
+    const key = new CryptographyKey(Buffer.from(key64, 'base64'));
+    const sodium = await SodiumPlus.auto();
 
-    const form = qs.parse(await text(req));
-    const crypt = await make(pub_pem, { json: false });
-    const verify = promisify(crypt.verify.bind(crypt));
-    const data = await verify(JSON.parse(form.state));
+    const form = qs.parse(event.body);
+    const state = JSON.parse(form.state);
+    const msg = Buffer.from(state.msg, 'base64');
+    const mac = Buffer.from(state.mac, 'base64');
+   
+    if (!await sodium.crypto_auth_verify(msg, key, mac)) {
+        throw new Error('failed to verify state');
+    }
 
     const args = new Map();
     for (let k in form) {
         args.set(k, form[k]);
     }
 
-    res.setHeader('Content-Type', 'text/html');
-    send(res, 200, await run(data, priv_pem, args));
+    return {
+        statusCode: 200,
+        headers: {
+            'Content-Type': 'text/html'
+        },
+        body: await run(data, key64, args)
+    };
 }
