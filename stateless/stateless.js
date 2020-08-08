@@ -3,9 +3,7 @@ import run from './run.js';
 import sodium_plus from 'sodium-plus';
 const { CryptographyKey, SodiumPlus } = sodium_plus;
 
-const make = promisify(simple_crypt.Crypt.make.bind(simple_crypt.Crypt));
-
-export default async event => {
+export async function handler(event) {
     const key64 = process.env.STATELESS_KEY;
     const key = new CryptographyKey(Buffer.from(key64, 'base64'));
     const sodium = await SodiumPlus.auto();
