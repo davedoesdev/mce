@@ -1,5 +1,5 @@
 import { make_runtime } from '@davedoesdev/mce';
-import { shtml_to_html } from './shtml.js';
+import { shtml_to_html } from './shtml.mjs';
 import sodium_plus from 'sodium-plus';
 const { CryptographyKey, SodiumPlus } = sodium_plus;
 

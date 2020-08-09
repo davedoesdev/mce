@@ -1,4 +1,4 @@
-import run from './run.js';
+import run from './run.mjs';
 
 (async () => {
     const key = process.env.STATELESS_KEY;

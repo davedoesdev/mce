@@ -1,5 +1,5 @@
 import qs from 'querystring';
-import run from './run.js';
+import run from './run.mjs';
 import sodium_plus from 'sodium-plus';
 const { CryptographyKey, SodiumPlus } = sodium_plus;
 
