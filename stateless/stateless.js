@@ -8,6 +8,9 @@ try {
 try {
     require('./shtml.mjs');
 } catch {}
+try {
+    require('sodium-plus');
+} catch {}
 
 exports.handler = async event => {
     return await (await import('./stateless.mjs')).handler(event);
