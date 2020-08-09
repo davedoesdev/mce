@@ -11,6 +11,9 @@ try {
 try {
     require('sodium-plus');
 } catch {}
+try {
+    require('@davedoesdev/mce');
+} catch {}
 
 exports.handler = async event => {
     return await (await import('./stateless.mjs')).handler(event);
