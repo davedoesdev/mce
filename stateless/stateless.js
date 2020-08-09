@@ -1,4 +1,4 @@
-// These requires are to get Netlify to include the .mjs files in the deployment
+// These requires are to get Netlify to include them in the deployment
 try { require('./stateless.mjs'); } catch {}
 try { require('./run.mjs'); } catch {}
 try { require('./shtml.mjs'); } catch {}
