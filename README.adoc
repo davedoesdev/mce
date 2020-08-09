@@ -227,8 +227,9 @@ working. It runs in a loop creating cycles.
 
 # Stateless servers
 
-A serverless deployment for https://zeit.co/now[Zeit Now] can be found in the
-link:stateless[] directory. This restores a program state received in a POST
+A serverless deployment for
+https://www.netlify.com/products/functions/[Netlify Functions] can be found in
+the link:stateless[] directory. This restores a program state received in a POST
 request and runs it, passing the user input in the form. The program can then
 process the input and generate a new HTML page (with the program's state
 serialized into it).
@@ -248,15 +249,14 @@ be found in link:examples/stateless/counter.scm[]:
         (input (@ type "submit" name "down" value "Down"))))
 ----
 
-First, make the cryptographic keys by running:
+First, make a cryptographic key by running:
 
 ```bash
-./certs/make_stateless_keys.sh
+./stateless/make_key.sh
 ```
 
-This produces `certs/stateless_priv.pem` and `certs/stateless_pub.pem` which
-are used to sign and verify program state so arbritary untrusted state isn't
-executed.
+This produces `stateless/key` which is used to sign and verify program state so
+arbritary untrusted state isn't executed.
 
 Next, generate the initial program state by running:
 
@@ -266,31 +266,34 @@ Next, generate the initial program state by running:
 
 This generates `stateless/counter.html`.
 
-To test this out locally:
+Follow the https://docs.netlify.com/cli/get-started/[Netlify CLI] instructions
+to link your repository with Netlify:
 
 ```bash
-cd stateless
-npm install # you only need to do this once
-now dev
+npm install netlify-cli -g
+netlify login
+netlify init
 ```
 
-and then visit http://localhost:3000/counter.html
+Then visit your repository's site on Netlify and in
+Settings->Build & deploy->Environment
+(https://app.netlify.com/sites/XXX/settings/deploys#environment)
+add an environment variable called `STATELESS_KEY` with value set to the
+content of the `stateless/key` file.
 
-When you're ready to deploy to Zeit Now, first use `now secret add` to tell it
-about your keys for signing and verifying program state:
+You should now be able to use the example at
+https://XXX.netlify.app/counter.html.
+
+Mine is available at https://mce-stateless.netlify.app/counter.html if you want
+to take a look.
+
+If you want to try it out locally, you can do:
 
 ```bash
-now secret add stateless-priv-pem -- "$(grep STATELESS_PRIV_PEM .env | sed 's/[^=]*=//')"
-now secret add stateless-pub-pem -- "$(grep STATELESS_PUB_PEM .env | sed 's/[^=]*=//')"
+netlify build # you only need to do this once
+netlify dev
 ```
 
-To deploy:
+and then visit http://localhost:8888/counter.html.
 
-```bash
-now
-```
 
-You can then visit `/counter.html` on your deployed site.
-
-Mine is available at `https://stateless.davedoesdev.now.sh/counter.html` if you
-want to take a look.
