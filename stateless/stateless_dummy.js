@@ -1,1 +1,1 @@
-import { dummy } from './stateless.js';
+import { handler } from './stateless.js';
