@@ -891,7 +891,7 @@ function serialize(exp) {
         return entry;
     };
     const fn = x => serialize_aux(x, tab, fn, set_entry);
-    return fn(exp);
+    return cons(fn(exp), counter);
 }
 
 function deserialize_aux(exp, tab, fn, set_entry) {
@@ -914,7 +914,7 @@ function deserialize(exp) {
         return table_set(tab, counter++, entry);
     };
     const fn = x => deserialize_aux(x, tab, fn, set_entry);
-    return fn(exp);
+    return fn(exp.car);
 }
 
 const null_code    = 'a';
@@ -951,7 +951,10 @@ function pickle_aux(exp) {
         j.push(pickle_aux(exp.cdr));
     } else if (Array.isArray(exp)) {
         j.push(vector_code);
-        j.push(pickle_aux(vector_to_list(exp)));
+        j.push(exp.length);
+        for (let v of exp) {
+            j.push(pickle_aux(v));
+        }
     } else {
         throw new UnknownPickleExpressionError(exp);
     }
@@ -977,7 +980,7 @@ function unpickle_aux(exp) {
     case pair_code:
         return cons(unpickle_aux(exp[1]), unpickle_aux(exp[2]));
     case vector_code:
-        return list_to_vector(unpickle_aux(exp[1]));
+        return exp.slice(2).map(unpickle_aux);
     default:
         return null;
     }

@@ -269,7 +269,7 @@ boxed vector_cmap(map_fn f, boxed v, cmap_table& tab, set_entry_fn set_entry) {
     auto ev = entry->cast<vector>();
     auto vv = v->cast<vector>();
 
-    for (auto el : *vv) {
+    for (auto const& el : *vv) {
         ev->push_back(f(el));
     }
 
@@ -345,7 +345,7 @@ boxed xdisplay(boxed args, std::ostream& out, bool is_write) {
             bool first = true;
             out << "#(";
             auto vec = exp->cast<vector>();
-            for (auto v : *vec) {
+            for (auto const& v : *vec) {
                 if (!first) {
                     out << " ";
                 }
@@ -1435,7 +1435,8 @@ boxed serialize(boxed exp) {
     map_fn fn = [&tab, &fn, &set_entry](boxed x) -> boxed {
         return serialize_aux(x, tab, fn, set_entry);
     };
-    return fn(exp);
+    auto serialized = fn(exp);
+    return cons(serialized, box<double>(counter, runtime));
 }
 
 boxed deserialize_aux(boxed exp,
@@ -1468,7 +1469,7 @@ boxed deserialize(boxed exp) {
     map_fn fn = [&tab, &fn, &set_entry](boxed x) -> boxed {
         return deserialize_aux(x, tab, fn, set_entry);
     };
-    return fn(exp);
+    return fn(exp->cast<pair>()->first);
 }
 
 json pickle_aux(boxed exp) {
@@ -1498,7 +1499,11 @@ json pickle_aux(boxed exp) {
             j.push_back(pickle_aux(p->second));
         } else if (exp->contains<vector>()) {
             j.push_back(std::string(1, vector_code));
-            j.push_back(pickle_aux(vector_to_list(exp)));
+            auto vec = exp->cast<vector>();
+            j.push_back(vec->size());
+            for (auto const& v : *vec) {
+                j.push_back(pickle_aux(v));
+            }
         } else {
             throw std::range_error("unknown pickle expression");
         }
@@ -1524,8 +1529,16 @@ boxed unpickle_aux(const json& j, std::shared_ptr<Runtime> runtime) {
         return box<symbol>(j[1].get<std::string>(), runtime);
     case pair_code:
         return cons(unpickle_aux(j[1], runtime), unpickle_aux(j[2], runtime));
-    case vector_code:
-        return list_to_vector(unpickle_aux(j[1], runtime));
+    case vector_code: {
+        auto a = make_vector(runtime);
+        auto v = a->cast<vector>();
+        auto size = j.size();
+        v->resize(size - 2);
+        for (json::size_type i = 2; i < size; ++i) {
+            v->at(i - 2) = unpickle_aux(j[i], runtime);
+        }
+        return a;
+    }
     default:
         return box(runtime);
     }

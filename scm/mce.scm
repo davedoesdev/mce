@@ -704,7 +704,8 @@
                   (set! counter (+ counter 1))
                   entry))
              (fn (lambda (x) (serialize-aux x tab fn set-entry!))))
-        (fn exp)))
+        (let ((serialized (fn exp)))
+            (cons serialized counter))))
 
 (define (deserialize-aux exp tab fn set-entry!)
     (cond ((pair? exp) (cmap fn exp tab set-entry!))
@@ -723,7 +724,7 @@
                   (set! counter (+ counter 1))
                   entry))
              (fn (lambda (x) (deserialize-aux x tab fn set-entry!))))
-        (fn exp)))
+        (fn (car exp))))
 
 (define null-code    "a")
 (define boolean-code "b")
@@ -750,7 +751,9 @@
          ((pair? exp)
           (list pair-code (pickle-aux (car exp)) (pickle-aux (cdr exp))))
          ((vector? exp)
-          (list vector-code (pickle-aux (vector->list exp))))
+          (cons vector-code
+                (cons (vector-length exp)
+                      (map pickle-aux (vector->list exp)))))
          (else
           exp)))
 
@@ -776,7 +779,7 @@
               ((equal? code pair-code)
                (cons (unpickle-aux (cadr exp)) (unpickle-aux (caddr exp))))
               ((equal? code vector-code)
-               (list->vector (unpickle-aux (cadr exp))))
+               (list->vector (map unpickle-aux (cddr exp))))
               (else
                exp))))
 
