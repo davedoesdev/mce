@@ -10,14 +10,17 @@ using nlohmann::json;
 
 namespace mce {
 
-const char null_code    = 'a';
-const char boolean_code = 'b';
-const char number_code  = 'c';
-const char char_code    = 'd';
-const char string_code  = 'e';
-const char symbol_code  = 'f';
-const char pair_code    = 'g';
-const char vector_code  = 'h';
+const char null_code       = 'a';
+const char boolean_code    = 'b';
+const char number_code     = 'c';
+const char char_code       = 'd';
+const char string_code     = 'e';
+const char symbol_code     = 'f';
+const char pair_code       = 'g';
+const char vector_code     = 'h';
+
+const char unmemoized_code = '0';
+const char serialized_code = '1';
 
 symbol::symbol(const std::string& s) : std::string(s) {}
 
@@ -313,12 +316,12 @@ boxed xdisplay(boxed args, std::ostream& out, bool is_write) {
                 out << c;
             }
         } else if (exp->contains<std::string>()) {
-            auto& s = *exp->cast<std::string>();
+            auto s = exp->cast<std::string>();
             if (is_write) {
-                json j = s;
+                json j = *s;
                 out << j.dump();
             } else {
-                out << s;
+                out << *s;
             }
         } else if (exp->contains<symbol>()) {
             out << *exp->cast<symbol>();
@@ -1476,37 +1479,35 @@ json pickle_aux(boxed exp) {
     json j;
     if (exp->empty()) {
         j.push_back(std::string(1, null_code));
-    } else {
-        if (exp->contains<bool>()) {
-            j.push_back(std::string(1, boolean_code));
-            j.push_back(exp->cast<bool>() ? "t" : "f");
-        } else if (exp->contains<double>()) {
-            j.push_back(std::string(1, number_code));
-            j.push_back(exp->cast<double>());
-        } else if (exp->contains<char>()) {
-            j.push_back(std::string(1, char_code));
-            j.push_back(std::string(1, exp->cast<char>()));
-        } else if (exp->contains<std::string>()) {
-            j.push_back(std::string(1, string_code));
-            j.push_back(*exp->cast<std::string>());
-        } else if (exp->contains<symbol>()) {
-            j.push_back(std::string(1, symbol_code));
-            j.push_back(*exp->cast<symbol>());
-        } else if (exp->contains<pair>()) {
-            auto p = exp->cast<pair>();
-            j.push_back(std::string(1, pair_code));
-            j.push_back(pickle_aux(p->first));
-            j.push_back(pickle_aux(p->second));
-        } else if (exp->contains<vector>()) {
-            j.push_back(std::string(1, vector_code));
-            auto vec = exp->cast<vector>();
-            j.push_back(vec->size());
-            for (auto const& v : *vec) {
-                j.push_back(pickle_aux(v));
-            }
-        } else {
-            throw std::range_error("unknown pickle expression");
+    } else if (exp->contains<bool>()) {
+        j.push_back(std::string(1, boolean_code));
+        j.push_back(exp->cast<bool>() ? "t" : "f");
+    } else if (exp->contains<double>()) {
+        j.push_back(std::string(1, number_code));
+        j.push_back(exp->cast<double>());
+    } else if (exp->contains<char>()) {
+        j.push_back(std::string(1, char_code));
+        j.push_back(std::string(1, exp->cast<char>()));
+    } else if (exp->contains<std::string>()) {
+        j.push_back(std::string(1, string_code));
+        j.push_back(*exp->cast<std::string>());
+    } else if (exp->contains<symbol>()) {
+        j.push_back(std::string(1, symbol_code));
+        j.push_back(*exp->cast<symbol>());
+    } else if (exp->contains<pair>()) {
+        auto p = exp->cast<pair>();
+        j.push_back(std::string(1, pair_code));
+        j.push_back(pickle_aux(p->first));
+        j.push_back(pickle_aux(p->second));
+    } else if (exp->contains<vector>()) {
+        j.push_back(std::string(1, vector_code));
+        auto vec = exp->cast<vector>();
+        j.push_back(vec->size());
+        for (auto const& v : *vec) {
+            j.push_back(pickle_aux(v));
         }
+    } else {
+        throw std::range_error("unknown pickle expression");
     }
     return j;
 }
@@ -1571,6 +1572,98 @@ boxed start(std::istream &stream, boxed args) {
     return start(j.get<std::string>(), args);
 }
 
+template<typename T>
+size_t bpickle_aux(const T& data, std::vector<unsigned char>& v) {
+    size_t r = v.size();
+    for (size_t i = 0; i < sizeof(data); ++i) {
+        v.push_back(reinterpret_cast<const unsigned char*>(&data)[i]);
+    }
+    return r;
+}
+
+void bpickle_aux(std::vector<unsigned char>& v, size_t pos) {
+    auto size = static_cast<uint64_t>(v.size());
+    for (size_t i = 0; i < sizeof(size); ++i) {
+        v[pos + i] = reinterpret_cast<const unsigned char*>(&size)[i];
+    }
+}
+
+void bpickle(boxed exp, std::vector<unsigned char>& v) {
+    if (exp->empty()) {
+        v.push_back(null_code);
+    } else if (exp->contains<bool>()) {
+        v.push_back(boolean_code);
+        v.push_back(exp->cast<bool>() ? 1 : 0);
+    } else if (exp->contains<double>()) {
+        v.push_back(number_code);
+        bpickle_aux(exp->cast<double>(), v);
+    } else if (exp->contains<char>()) {
+        v.push_back(char_code);
+        bpickle_aux(exp->cast<char>(), v);
+    } else if (exp->contains<std::string>()) {
+        v.push_back(string_code);
+        auto s = exp->cast<std::string>();
+        bpickle_aux(static_cast<uint64_t>(s->size()), v);
+        for (auto const& c : *s) {
+            bpickle_aux(c, v);
+        }
+    } else if (exp->contains<symbol>()) {
+        v.push_back(symbol_code);
+        auto s = exp->cast<symbol>();
+        bpickle_aux(static_cast<uint64_t>(s->size()), v);
+        for (auto const& c : *s) {
+            bpickle_aux(c, v);
+        }
+    } else if (exp->contains<pair>()) {
+        v.push_back(pair_code);
+        auto p = exp->cast<pair>();
+        auto pos1 = bpickle_aux(static_cast<uint64_t>(0), v);
+        auto pos2 = bpickle_aux(static_cast<uint64_t>(0), v);
+        bpickle_aux(v, pos1);
+        bpickle(p->first, v);
+        bpickle_aux(v, pos2);
+        bpickle(p->second, v);
+    } else if (exp->contains<vector>()) {
+        auto vec = exp->cast<vector>();
+        if (is_serialized(vec)) {
+            v.push_back(serialized_code);
+            return bpickle(serialized_n(vec), v);
+        }
+        if (is_unmemoized(vec)) {
+            v.push_back(unmemoized_code);
+            return bpickle(unmemoized_repexp(vec), v);
+        }
+        v.push_back(vector_code);
+        auto size = vec->size();
+        bpickle_aux(static_cast<uint64_t>(size), v);
+        std::vector<size_t> posv;
+        for (size_t i = 0; i < size; ++i) {
+            posv.push_back(bpickle_aux(static_cast<uint64_t>(0), v));
+        }
+        for (size_t i = 0; i < size; ++i) {
+            bpickle_aux(v, posv[i]);        
+            bpickle(vec->at(i), v);
+        }
+    } else {
+        throw std::range_error("unknown pickle expression");
+    }
+}
+
+void bconvert(const std::string& s, std::shared_ptr<Runtime> runtime) {
+    auto exp = mce_restore(s, runtime);
+    std::vector<unsigned char> v;
+    bpickle(serialize(unmemoize(exp)), v);
+    for (auto const& c : v) {
+        std::cout << c;
+    }
+}
+
+void bconvert(std::istream &stream, std::shared_ptr<Runtime> runtime) {
+    json j;
+    stream >> j;
+    return bconvert(j.get<std::string>(), runtime);
+}
+
 boxed start(int argc, char *argv[]) {
     cxxopts::Options options("mce", "Metacircular Evaluator");
     options.add_options()
@@ -1583,7 +1676,10 @@ boxed start(int argc, char *argv[]) {
          cxxopts::value<std::string>())
         ("config",
          "Set configuration",
-         cxxopts::value<std::string>());
+         cxxopts::value<std::string>())
+        ("bconvert",
+         "Convert CPS form or state to binary format",
+         cxxopts::value<std::string>()->implicit_value(""));
     auto opts = options.parse(argc, argv);
     auto runtime = std::make_shared<Runtime>();
     if (opts.count("help")) {
@@ -1598,6 +1694,15 @@ boxed start(int argc, char *argv[]) {
     }
     if (opts.count("run")) {
         return start(json::parse(opts["run"].as<std::string>()), box(runtime));
+    }
+    if (opts.count("bconvert")) {
+        auto state = opts["bconvert"].as<std::string>();
+        if (state.empty()) {
+            bconvert(std::cin, runtime);
+        } else {
+            bconvert(state, runtime);
+        }
+        return box(runtime);
     }
     return start(std::cin, box(runtime));
 }
