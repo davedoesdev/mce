@@ -1572,6 +1572,8 @@ boxed start(std::istream &stream, boxed args) {
     return start(j.get<std::string>(), args);
 }
 
+// Copy binary representation to vector and return index in vector
+// where it starts
 template<typename T>
 size_t bpickle_aux(const T& data, std::vector<unsigned char>& v) {
     size_t r = v.size();
@@ -1581,8 +1583,9 @@ size_t bpickle_aux(const T& data, std::vector<unsigned char>& v) {
     return r;
 }
 
-void bpickle_aux(std::vector<unsigned char>& v, size_t pos) {
-    auto size = static_cast<uint64_t>(v.size());
+// Copy current size of vector to another given position in the vector
+void bpickle_aux(std::vector<unsigned char>& v, size_t pos, size_t adjust = 0) {
+    auto size = static_cast<uint64_t>(v.size() - adjust);
     for (size_t i = 0; i < sizeof(size); ++i) {
         v[pos + i] = reinterpret_cast<const unsigned char*>(&size)[i];
     }
@@ -1617,7 +1620,21 @@ void bpickle(boxed exp, std::vector<unsigned char>& v) {
     } else if (exp->contains<pair>()) {
         v.push_back(pair_code);
         auto p = exp->cast<pair>();
+        // Leave space for index/address of first and second values.
+        // This means they can be found easily and changed (set-car!, set-cdr!).
+        //
+        // The index or address is 4 bytes (uint64) preceeded with a 0 byte
+        // indicating it's an index into the vector or 1 indicating it's
+        // an address.
+        //
+        // So the byte vector can be used to store the initial data but can
+        // accommodate dynamically allocated objects using their address in
+        // memory. An evaluator using malloc, for example, can allocate
+        // a new object and then use its address in set-car! change the
+        // preceeding byte to 1.
+        v.push_back(0);
         auto pos1 = bpickle_aux(static_cast<uint64_t>(0), v);
+        v.push_back(0);
         auto pos2 = bpickle_aux(static_cast<uint64_t>(0), v);
         bpickle_aux(v, pos1);
         bpickle(p->first, v);
@@ -1634,10 +1651,14 @@ void bpickle(boxed exp, std::vector<unsigned char>& v) {
             return bpickle(unmemoized_repexp(vec), v);
         }
         v.push_back(vector_code);
+        // Add size of vector
         auto size = vec->size();
         bpickle_aux(static_cast<uint64_t>(size), v);
         std::vector<size_t> posv;
         for (size_t i = 0; i < size; ++i) {
+            // Leave space for index/address of each element. See comment for
+            // pair above.
+            v.push_back(0);
             posv.push_back(bpickle_aux(static_cast<uint64_t>(0), v));
         }
         for (size_t i = 0; i < size; ++i) {
@@ -1652,7 +1673,9 @@ void bpickle(boxed exp, std::vector<unsigned char>& v) {
 void bconvert(const std::string& s, std::shared_ptr<Runtime> runtime) {
     auto exp = mce_restore(s, runtime);
     std::vector<unsigned char> v;
+    auto pos = bpickle_aux(static_cast<uint64_t>(0), v);
     bpickle(serialize(unmemoize(exp)), v);
+    bpickle_aux(v, pos, sizeof(uint64_t));
     for (auto const& c : v) {
         std::cout << c;
     }
