@@ -20,7 +20,7 @@ const char pair_code       = 'g';
 const char vector_code     = 'h';
 
 const char unmemoized_code = '0';
-const char serialized_code = '1';
+const char redirect_code   = '1';
 
 symbol::symbol(const std::string& s) : std::string(s) {}
 
@@ -1584,14 +1584,14 @@ size_t bpickle_aux(const T& data, std::vector<unsigned char>& v) {
 }
 
 // Copy current size of vector to another given position in the vector
-void bpickle_aux(std::vector<unsigned char>& v, size_t pos, size_t adjust = 0) {
-    auto size = static_cast<uint64_t>(v.size() - adjust);
+void bpickle_aux(std::vector<unsigned char>& v, size_t pos) {
+    auto size = static_cast<uint64_t>(v.size());
     for (size_t i = 0; i < sizeof(size); ++i) {
         v[pos + i] = reinterpret_cast<const unsigned char*>(&size)[i];
     }
 }
 
-void bpickle(boxed exp, std::vector<unsigned char>& v) {
+void bpickle(boxed exp, std::vector<uint64_t>& refs, std::vector<unsigned char>& v) {
     if (exp->empty()) {
         v.push_back(null_code);
     } else if (exp->contains<bool>()) {
@@ -1618,6 +1618,7 @@ void bpickle(boxed exp, std::vector<unsigned char>& v) {
             bpickle_aux(c, v);
         }
     } else if (exp->contains<pair>()) {
+        refs.push_back(static_cast<uint64_t>(v.size()));
         v.push_back(pair_code);
         auto p = exp->cast<pair>();
         // Leave space for index/address of first and second values.
@@ -1637,18 +1638,20 @@ void bpickle(boxed exp, std::vector<unsigned char>& v) {
         v.push_back(0);
         auto pos2 = bpickle_aux(static_cast<uint64_t>(0), v);
         bpickle_aux(v, pos1);
-        bpickle(p->first, v);
+        bpickle(p->first, refs, v);
         bpickle_aux(v, pos2);
-        bpickle(p->second, v);
+        bpickle(p->second, refs, v);
     } else if (exp->contains<vector>()) {
         auto vec = exp->cast<vector>();
         if (is_serialized(vec)) {
-            v.push_back(serialized_code);
-            return bpickle(serialized_n(vec), v);
+            v.push_back(redirect_code);
+            bpickle_aux(refs[serialized_n(vec)->cast<double>()], v);
+            return;
         }
+        refs.push_back(static_cast<uint64_t>(v.size()));
         if (is_unmemoized(vec)) {
             v.push_back(unmemoized_code);
-            return bpickle(unmemoized_repexp(vec), v);
+            return bpickle(unmemoized_repexp(vec), refs, v);
         }
         v.push_back(vector_code);
         // Add size of vector
@@ -1663,7 +1666,7 @@ void bpickle(boxed exp, std::vector<unsigned char>& v) {
         }
         for (size_t i = 0; i < size; ++i) {
             bpickle_aux(v, posv[i]);        
-            bpickle(vec->at(i), v);
+            bpickle(vec->at(i), refs, v);
         }
     } else {
         throw std::range_error("unknown pickle expression");
@@ -1671,11 +1674,21 @@ void bpickle(boxed exp, std::vector<unsigned char>& v) {
 }
 
 void bconvert(const std::string& s, std::shared_ptr<Runtime> runtime) {
-    auto exp = mce_restore(s, runtime);
+    auto exp = serialize(unmemoize(mce_restore(s, runtime)))->cast<pair>();
+
+    std::vector<uint64_t> refs;
     std::vector<unsigned char> v;
-    auto pos = bpickle_aux(static_cast<uint64_t>(0), v);
-    bpickle(serialize(unmemoize(exp)), v);
-    bpickle_aux(v, pos, sizeof(uint64_t));
+    bpickle(exp->first, refs, v);
+
+    if (refs.size() != exp->second->cast<double>()) {
+        throw std::length_error("unexpected number of references");
+    }
+
+    auto size = static_cast<uint64_t>(v.size());
+    for (size_t i = 0; i < sizeof(size); ++i) {
+        std::cout << reinterpret_cast<const unsigned char*>(&size)[i];
+    }
+
     for (auto const& c : v) {
         std::cout << c;
     }
