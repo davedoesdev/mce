@@ -1,6 +1,7 @@
 #include <stdio.h>
 #include <stdint.h>
 #include <stdlib.h>
+#include <stdbool.h>
 #include <assert.h>
 
 #define null_code       'a'
@@ -13,7 +14,8 @@
 #define vector_code     'h'
 
 #define unmemoized_code '0'
-#define serialized_code '1'
+#define redirect_code   '1'
+#define result_code     '2'
 
 /*
 pair is:
@@ -22,7 +24,15 @@ pair is:
 2: first value: index/address
 10: second value: whether index(0) or address(1)
 11: second value: index/address
-19: first value
+19: first value (if index)
+
+vector is:
+0: vector_code
+1: length
+9: for each element:
+     0: whether index(0) or address(1)
+     1: index/address
+9 + length * 9: first element (if index)
 */
 
 #if 0
@@ -68,6 +78,39 @@ void deserialize(unsigned char *state, uint64_t size) {
 }
 #endif
 
+unsigned char *car(unsigned char *initial_state, unsigned char *state) {
+    assert(state[0] == pair_code);
+    uint64_t i = *(uint64_t*)&state[2];
+    return state[1] ? (unsigned char*) i : &initial_state[i];
+}
+
+unsigned char *cdr(unsigned char *initial_state, unsigned char *state) {
+    assert(state[0] == pair_code);
+    uint64_t i = *(uint64_t*)&state[11];
+    return state[10] ? (unsigned char*) i : &initial_state[i];
+}
+
+unsigned char *step(unsigned char *initial_state, unsigned char *state) {
+    printf("%c\n", car(initial_state, state)[0]);
+
+    return state;
+}
+
+unsigned char *run(unsigned char *initial_state, unsigned char *state) {
+    while (state[0] != result_code) {
+        state = step(initial_state, state);
+    }
+    return &state[1];
+}
+
+unsigned char *start(unsigned char *state) {
+    if (state[0] == unmemoized_code) {
+        // TODO: call lambda with args
+        return NULL;
+    }
+    return run(state, state);
+}
+
 int main(void) {
     /* Read size of state */
     uint64_t size;
@@ -84,8 +127,8 @@ int main(void) {
     /* Read state */
     assert(fread(state, sizeof(*state), size, stdin) == size);
 
-    // memoize (what data structure for lambda?)
-    // run
+    /* Run state */
+    start(state);
 
     return 0;
 }

@@ -21,6 +21,7 @@ const char vector_code     = 'h';
 
 const char unmemoized_code = '0';
 const char redirect_code   = '1';
+const char result_code     = '2';
 
 symbol::symbol(const std::string& s) : std::string(s) {}
 
@@ -1652,6 +1653,10 @@ void bpickle(boxed exp, std::vector<uint64_t>& refs, std::vector<unsigned char>&
         if (is_unmemoized(vec)) {
             v.push_back(unmemoized_code);
             return bpickle(unmemoized_repexp(vec), refs, v);
+        }
+        if (is_result(exp)) {
+            v.push_back(result_code);
+            return bpickle(result_val(exp), refs, v);
         }
         v.push_back(vector_code);
         // Add size of vector
