@@ -1632,7 +1632,7 @@ void bpickle(boxed exp, std::vector<uint64_t>& refs, std::vector<unsigned char>&
         // So the byte vector can be used to store the initial data but can
         // accommodate dynamically allocated objects using their address in
         // memory. An evaluator using malloc, for example, can allocate
-        // a new object and then use its address in set-car! change the
+        // a new object and then use its address in set-car! to change the
         // preceeding byte to 1.
         v.push_back(0);
         auto pos1 = bpickle_aux(static_cast<uint64_t>(0), v);

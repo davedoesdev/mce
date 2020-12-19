@@ -1,8 +1,10 @@
+#define _GNU_SOURCE
 #include <stdio.h>
 #include <stdint.h>
 #include <stdlib.h>
 #include <stdbool.h>
 #include <assert.h>
+#include <errno.h>
 
 #define null_code       'a'
 #define boolean_code    'b'
@@ -90,10 +92,106 @@ unsigned char *cdr(unsigned char *initial_state, unsigned char *state) {
     return state[10] ? (unsigned char*) i : &initial_state[i];
 }
 
-unsigned char *step(unsigned char *initial_state, unsigned char *state) {
-    printf("%c\n", car(initial_state, state)[0]);
-
+unsigned char *cons(unsigned char *car, unsigned char *cdr) {
+    unsigned char *state = (unsigned char*) malloc(1 + 1 + 8 + 1 + 8);
+    assert(state);
+    state[0] = pair_code;
+    state[1] = 1;
+    *(uint64_t*)&state[2] = (uint64_t)car;
+    state[10] = 1;
+    *(uint64_t*)&state[11] = (uint64_t)cdr;
     return state;
+}
+
+double double_val(unsigned char *state) {
+    assert(state[0] == number_code);
+    return *(double*)&state[1];
+}
+
+unsigned char *handle_form(unsigned char *initial_state,
+                           double n,
+                           unsigned char *args)
+{
+    switch ((int)n) {
+        case 0:
+            return symbol_lookup(initial_state, n, args);
+
+        case 1:
+            return send_value(initial_state, n, args);
+
+        case 2:
+            return constructed_function(initial_state, n, args);
+
+        case 3:
+            return global_lambda(initial_state, n, args);
+
+        case 4:
+            return if0(initial_state, n, args);
+
+        case 5:
+            return if1(initial_state, n, args);
+
+        case 6:
+            return sclis0(initial_state, n, args);
+
+        case 7:
+            return sclis1(initial_state, n, args);
+
+        case 8:
+            return sclis2(initial_state, n, args);
+
+        case 9:
+            return scseq0(initial_state, n, args);
+
+        case 10:
+            return scseq1(initial_state, n, args);
+
+        case 11:
+            return lambda0(initial_state, n, args);
+
+        case 12:
+            return lambda1(initial_state, n, args);
+
+        case 13:
+            return improper_lambda0(initial_state, n, args);
+
+        case 14:
+            return improper_lambda1(initial_state, n, args);
+
+        case 15:
+            return letcc0(initial_state, n, args);
+
+        case 16:
+            return letcc1(initial_state, n, args);
+
+        case 17:
+            return define0(initial_state, n, args);
+
+        case 18:
+            return define1(initial_state, n, args);
+
+        case 19:
+            return application0(initial_state, n, args);
+
+        case 20:
+            return application1(initial_state, n, args);
+
+        case 21:
+            return evalx_initial(initial_state, n, args);
+
+        default:
+            assert_perror(EINVAL);        
+    }
+
+    return NULL;
+}
+
+unsigned char *step(unsigned char *initial_state, unsigned char *state) {
+    unsigned char *unmemoized = car(initial_state, state);
+    assert(unmemoized[0] == unmemoized_code);
+    return handle_form(initial_state,
+                       double_val(car(initial_state, &unmemoized[1])),
+                       cons(cdr(initial_state, &unmemoized[1]), NULL));
 }
 
 unsigned char *run(unsigned char *initial_state, unsigned char *state) {
