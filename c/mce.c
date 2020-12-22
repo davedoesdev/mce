@@ -103,81 +103,133 @@ unsigned char *cons(unsigned char *car, unsigned char *cdr) {
     return state;
 }
 
+#define send cons
+
+unsigned char *list_ref(unsigned char *initial_state, unsigned char *l, uint64_t i) {
+    while (i > 0) {
+        l = cdr(l);
+        --i;
+    }
+    return car(l);
+}
+
+unsigned char *list_rest(unsigned char *initial_state, unsigned char *l, uint64_t i) {
+    while (i > 0) {
+        l = cdr(l);
+        --i;
+    }
+    return cdr(l);
+}
+
+uint64_t vector_size(unsigned char *v) {
+    assert(state[0] == vector_code);
+    return *(uint64_t*)&v[1];
+}
+
+unsigned char *vector_ref(unsigned char *initial_state, unsigned char *v, uint64_t i) {
+    assert(v[0] == vector_code);
+    unsigned char *el = &v[9 + i * 9];
+    uint64_t eli = *(uint64_t*)&v[1];
+    return el[0] ? (unsigned char*) eli : &initial_state[eli];
+}
+
 double double_val(unsigned char *state) {
     assert(state[0] == number_code);
     return *(double*)&state[1];
 }
 
+unsigned char *ctenv_lookup(unsigned char *initial_state,
+                            unsigned char *i,
+                            unsigned char *env) {
+    uint64_t first = (uint64_t)double_val(car(initial_state, i));
+    uint64_t second = (uint64_t)double_val(cdr(initial_state, i));
+    unsigned char *bindings = list_ref(initial_state, env, first);
+    unsigned char *v = cdr(bindings);
+    if (second < vector_size(v)) {
+        return vector_ref(initial_state, v, second);
+    }
+    return NULL;
+}
+
+unsigned char *symbol_lookup(unsigned char *initial_state,
+                             unsigned char *form_args,
+                             unsigned char *args) {
+    unsigned char *i = list_ref(initial_state, form_args, 0);
+    unsigned char *k = list_ref(initial_state, args, 0);
+    unsigned char *env = list_ref(initial_state, args, 1);
+    return send(k, ctenv_lookup(initial_state, i, env));
+}
+
 unsigned char *handle_form(unsigned char *initial_state,
-                           double n,
-                           unsigned char *args)
-{
+                           double form_n,
+                           unsigned char *form_args,
+                           unsigned char *args) {
     switch ((int)n) {
         case 0:
-            return symbol_lookup(initial_state, n, args);
+            return symbol_lookup(initial_state, form_args, args);
 
         case 1:
-            return send_value(initial_state, n, args);
+            return send_value(initial_state, form_args, args);
 
         case 2:
-            return constructed_function(initial_state, n, args);
+            return constructed_function(initial_state, form_args, args);
 
         case 3:
-            return global_lambda(initial_state, n, args);
+            return global_lambda(initial_state, form_args, args);
 
         case 4:
-            return if0(initial_state, n, args);
+            return if0(initial_state, form_args, args);
 
         case 5:
-            return if1(initial_state, n, args);
+            return if1(initial_state, form_args, args);
 
         case 6:
-            return sclis0(initial_state, n, args);
+            return sclis0(initial_state, form_args, args);
 
         case 7:
-            return sclis1(initial_state, n, args);
+            return sclis1(initial_state, form_args, args);
 
         case 8:
-            return sclis2(initial_state, n, args);
+            return sclis2(initial_state, form_args, args);
 
         case 9:
-            return scseq0(initial_state, n, args);
+            return scseq0(initial_state, form_args, args);
 
         case 10:
-            return scseq1(initial_state, n, args);
+            return scseq1(initial_state, form_args, args);
 
         case 11:
-            return lambda0(initial_state, n, args);
+            return lambda0(initial_state, form_args, args);
 
         case 12:
-            return lambda1(initial_state, n, args);
+            return lambda1(initial_state, form_args, args);
 
         case 13:
-            return improper_lambda0(initial_state, n, args);
+            return improper_lambda0(initial_state, form_args, args);
 
         case 14:
-            return improper_lambda1(initial_state, n, args);
+            return improper_lambda1(initial_state, form_args, args);
 
         case 15:
-            return letcc0(initial_state, n, args);
+            return letcc0(initial_state, form_args, args);
 
         case 16:
-            return letcc1(initial_state, n, args);
+            return letcc1(initial_state, form_args, args);
 
         case 17:
-            return define0(initial_state, n, args);
+            return define0(initial_state, form_args, args);
 
         case 18:
-            return define1(initial_state, n, args);
+            return define1(initial_state, form_args, args);
 
         case 19:
-            return application0(initial_state, n, args);
+            return application0(initial_state, form_args, args);
 
         case 20:
-            return application1(initial_state, n, args);
+            return application1(initial_state, form_args, args);
 
         case 21:
-            return evalx_initial(initial_state, n, args);
+            return evalx_initial(initial_state, form_args, args);
 
         default:
             assert_perror(EINVAL);        
@@ -191,7 +243,8 @@ unsigned char *step(unsigned char *initial_state, unsigned char *state) {
     assert(unmemoized[0] == unmemoized_code);
     return handle_form(initial_state,
                        double_val(car(initial_state, &unmemoized[1])),
-                       cons(cdr(initial_state, &unmemoized[1]), NULL));
+                       cdr(initial_state, &unmemoized[1]),
+                       cons(cdr(initial_state, state), NULL));
 }
 
 unsigned char *run(unsigned char *initial_state, unsigned char *state) {
