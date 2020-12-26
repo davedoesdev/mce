@@ -138,6 +138,22 @@ double double_val(unsigned char *state) {
     return *(double*)&state[1];
 }
 
+unsigned char *make_double(double v) {
+    unsigned char *state = (unsigned char*) malloc(1 + sizeof(double));
+    state[0] = double_code;
+    *(double*)&state[1] = v;
+    return state;
+}
+
+unsigned char *make_symbol(char *s) {
+    size_t len = strlen(s);
+    unsigned char *state = (unsigned char*) malloc(1 + 8 + len);
+    state[0] = symbol_code;
+    *(uint64_t*)&state[1] = len;
+    memcpy(&state[9], s, len);
+    return state;
+}
+
 unsigned char *ctenv_lookup(unsigned char *initial_state,
                             unsigned char *i,
                             unsigned char *env) {
@@ -158,6 +174,47 @@ unsigned char *symbol_lookup(unsigned char *initial_state,
     unsigned char *k = list_ref(initial_state, args, 0);
     unsigned char *env = list_ref(initial_state, args, 1);
     return send(k, ctenv_lookup(initial_state, i, env));
+}
+
+unsigned char *send_value(unsigned char *initial_state,
+                          unsigned char *form_args,
+                          unsigned char *args) {
+    unsigned char *exp = list_ref(initial_state, form_args, 0);
+    unsigned char *k = list_ref(initial_state, args, 0);
+    return send(k, exp);
+}
+
+unsigned char *handle_unmemoized(unsigned char *initial_state,
+                                 unsigned char *state,
+                                 unsigned char *args);
+unsigned char *step(unsigned char *initial_state, unsigned char *state);
+unsigned char *run(unsigned char *initial_state, unsigned char *state);
+
+unsigned char *make_global(char *name) {
+    unsigned char *state = (unsigned char*) malloc(1 + 1 + 1 + 8 + 1 + 8);
+    assert(state);
+    state[0] = unmemoized_code;
+    state[1] = pair_code;
+    state[2] = 1;
+    *(uint64_t*)&state[3] = (uint64_t)make_double(3/*global_lambda*/);
+    state[11] = 1;
+    *(uint64_t*)&state[12] = (uint64_t)cons(make_symbol(name), NULL);
+    return state;
+}
+
+unsigned char *constructed_function(unsigned char *initial_state,
+                                    unsigned char *form_args,
+                                    unsigned char *args) {
+    unsigned char *args2 = list_ref(initial_state, form_args, 0);
+    unsigned char *cf = list_ref(initial_state, form_args, 1);
+    unsigned char *f = run(initial_state, cons(cf, cons(make_global("result"), cons(NULL, args2))));
+    return step(initial_state, cons(f, args));
+}
+
+unsigned char *global_lambda(unsigned char *initial_state,
+                             unsigned char *form_args,
+                             unsigned char *args) {
+
 }
 
 unsigned char *handle_form(unsigned char *initial_state,
@@ -238,13 +295,21 @@ unsigned char *handle_form(unsigned char *initial_state,
     return NULL;
 }
 
+unsigned char *handle_unmemoized(unsigned char *initial_state,
+                                 unsigned char *state,
+                                 unsigned char *args) {
+    assert(state[0] == unmemoized_code);
+    return handle_form(initial_state,
+                       double_val(car(initial_state, &state[1])),
+                       cdr(initial_state, &state[1]),
+                       args);
+}
+
 unsigned char *step(unsigned char *initial_state, unsigned char *state) {
     unsigned char *unmemoized = car(initial_state, state);
-    assert(unmemoized[0] == unmemoized_code);
-    return handle_form(initial_state,
-                       double_val(car(initial_state, &unmemoized[1])),
-                       cdr(initial_state, &unmemoized[1]),
-                       cons(cdr(initial_state, state), NULL));
+    return handle_unmemoized(initial_state,
+                             unmemoized,
+                             cons(cdr(initial_state, state), NULL));
 }
 
 unsigned char *run(unsigned char *initial_state, unsigned char *state) {
