@@ -1656,6 +1656,9 @@ void bpickle(boxed exp, std::vector<uint64_t>& refs, std::vector<unsigned char>&
         }
         if (is_result(exp)) {
             v.push_back(result_code);
+            v.push_back(0);
+            auto pos = bpickle_aux(static_cast<uint64_t>(0), v);
+            bpickle_aux(v, pos);
             return bpickle(result_val(exp), refs, v);
         }
         v.push_back(vector_code);

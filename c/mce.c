@@ -140,6 +140,7 @@ double double_val(unsigned char *state) {
 
 unsigned char *make_double(double v) {
     unsigned char *state = (unsigned char*) malloc(1 + sizeof(double));
+    assert(state);
     state[0] = double_code;
     *(double*)&state[1] = v;
     return state;
@@ -148,9 +149,26 @@ unsigned char *make_double(double v) {
 unsigned char *make_symbol(char *s) {
     size_t len = strlen(s);
     unsigned char *state = (unsigned char*) malloc(1 + 8 + len);
+    assert(state);
     state[0] = symbol_code;
     *(uint64_t*)&state[1] = len;
     memcpy(&state[9], s, len);
+    return state;
+}
+
+bool symbol_equals(unsigned char *state, char *s) {
+    assert(state[0] == symbol_code);
+    size_t len = strlen(s);
+    return ((*(uint64_t*)&state[1] == len) &&
+            (memcmp(&state[9], s, len) == 0));
+}
+
+unsigned char *make_result(unsigned char *state) {
+    unsigned char *state = (unsigned char*) malloc(1 + 1 + 8);
+    assert(state);
+    state[0] = result_code;
+    state[1] = 1;
+    *(uint64_t*)&state[2] = (uint64_t)state;
     return state;
 }
 
@@ -202,18 +220,34 @@ unsigned char *make_global(char *name) {
     return state;
 }
 
+unsigned char *global_result;
+
 unsigned char *constructed_function(unsigned char *initial_state,
                                     unsigned char *form_args,
                                     unsigned char *args) {
     unsigned char *args2 = list_ref(initial_state, form_args, 0);
     unsigned char *cf = list_ref(initial_state, form_args, 1);
-    unsigned char *f = run(initial_state, cons(cf, cons(make_global("result"), cons(NULL, args2))));
+    unsigned char *f = run(initial_state, cons(cf, cons(global_result, cons(NULL, args2))));
     return step(initial_state, cons(f, args));
 }
 
 unsigned char *global_lambda(unsigned char *initial_state,
                              unsigned char *form_args,
                              unsigned char *args) {
+    unsigned char *defn = list_ref(initial_state, form_args, 0);
+
+    if (symbol_equals(defn, "result")) {
+        return make_result(list_ref(initial_state, args, 2));
+    }
+
+    assert_perror(EINVAL);        
+    return NULL;
+}
+
+unsigned char *if0(unsigned char *initial_state,
+                   unsigned char *form_args,
+                   unsigned char *args) {
+
 
 }
 
@@ -316,7 +350,8 @@ unsigned char *run(unsigned char *initial_state, unsigned char *state) {
     while (state[0] != result_code) {
         state = step(initial_state, state);
     }
-    return &state[1];
+    uint64_t i = *(uint64_t*)&state[2];
+    return state[1] ? (unsigned char*) i : &initial_state[i];
 }
 
 unsigned char *start(unsigned char *state) {
@@ -344,6 +379,7 @@ int main(void) {
     assert(fread(state, sizeof(*state), size, stdin) == size);
 
     /* Run state */
+    global_result = make_global("result");
     start(state);
 
     return 0;
