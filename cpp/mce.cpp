@@ -427,8 +427,12 @@ boxed memoize_lambda(boxed proc, boxed defn) {
     return memoize_lambda(proc->cast<lambda>(), defn);
 }
 
-boxed send(boxed k, boxed v) {
-    return cons(k, v);
+boxed send(boxed k, boxed args) {
+    return cons(k, args);
+}
+
+boxed sendv(boxed k, boxed v) {
+    return send(k, cons(v, box(v->get_runtime())));
 }
 
 boxed ctenv_lookup(boxed i, boxed env) {
@@ -477,7 +481,7 @@ boxed symbol_lookup(boxed args) {
     return make_lambda<boxed>([i](boxed args) -> boxed {
         auto k = list_ref(args, 0);
         auto env = list_ref(args, 1);
-        return send(k, ctenv_lookup(i, env));
+        return sendv(k, ctenv_lookup(i, env));
     }, args->get_runtime());
 }
 
@@ -485,7 +489,7 @@ boxed send_value(boxed args) {
     auto exp = list_ref(args, 1);
     return make_lambda<boxed>([exp](boxed args) -> boxed {
         auto k = list_ref(args, 0);
-        return send(k, exp);
+        return sendv(k, exp);
     }, args->get_runtime());
 }
 
@@ -841,8 +845,7 @@ boxed find_global(const symbol& sym, std::shared_ptr<Runtime> runtime) {
 }
 
 boxed step(boxed state) {
-    return (*list_ref(state, 0)->cast<lambda>())(
-        cons(list_rest(state, 0), box(state->get_runtime())));
+    return (*list_ref(state, 0)->cast<lambda>())(list_rest(state, 0));
 }
 
 boxed run(boxed state) {
@@ -866,7 +869,7 @@ boxed handle_global_lambda(boxed args, boxed fn, boxed cf) {
         auto sck = step_contn_k(args);
         auto sca = step_contn_args(args);
         auto eaa = env_args_args(sca);
-        return send(sck, globalize((*f)(eaa), eaa, cf));
+        return sendv(sck, globalize((*f)(eaa), eaa, cf));
     }
 
     auto eaa = env_args_args(args);
@@ -997,7 +1000,7 @@ boxed evalx_initial(boxed args) {
     auto env = list_ref(args, 2);
     auto scanned = list_ref(args, 3);
     return make_lambda<boxed>([k, env, scanned](boxed) -> boxed {
-        return (*scanned->cast<lambda>())(cons(k, cons(env, box(k->get_runtime()))));
+        return send(scanned, cons(k, cons(env, box(k->get_runtime()))));
     }, args->get_runtime());
 }
 
@@ -1113,8 +1116,8 @@ boxed if1(boxed args) {
     auto scan2 = list_ref(args, 4);
     return make_lambda<boxed>([k, env, scan1, scan2](boxed args) -> boxed {
         auto v = list_ref(args, 0)->cast<bool>();
-        auto f = (v ? scan1 : scan2)->cast<lambda>();
-        return (*f)(cons(k, cons(env, box(args->get_runtime()))));
+        auto f = v ? scan1 : scan2;
+        return send(f, cons(k, cons(env, box(args->get_runtime()))));
     }, args->get_runtime());
 }
 
@@ -1126,7 +1129,7 @@ boxed if0(boxed args) {
         auto k = list_ref(args, 0);
         auto env = list_ref(args, 1);
         auto bnil = box(args->get_runtime());
-        return (*scan0->cast<lambda>())(
+        return send(scan0,
             cons(make_form(forms::if1,
                            cons(k, cons(env, cons(scan1, cons(scan2, bnil))))),
                  cons(env, bnil)));
@@ -1138,7 +1141,7 @@ boxed sclis2(boxed args) {
     auto v = list_ref(args, 2);
     return make_lambda<boxed>([k, v](boxed args) -> boxed {
         auto w = list_ref(args, 0);
-        return send(k, cons(v, w));
+        return sendv(k, cons(v, w));
     }, args->get_runtime());
 }
 
@@ -1149,7 +1152,7 @@ boxed sclis1(boxed args) {
     return make_lambda<boxed>([k, env, rest](boxed args) -> boxed {
         auto v = list_ref(args, 0);
         auto bnil = box(args->get_runtime());
-        return (*rest->cast<lambda>())(
+        return send(rest,
             cons(make_form(forms::sclis2, cons(k, cons(v, bnil))),
                  cons(env, bnil)));
     }, args->get_runtime());
@@ -1162,7 +1165,7 @@ boxed sclis0(boxed args) {
         auto k = list_ref(args, 0);
         auto env = list_ref(args, 1);
         auto bnil = box(args->get_runtime());
-        return (*first->cast<lambda>())(
+        return send(first,
             cons(make_form(forms::sclis1,
                            cons(k, cons(env, cons(rest, bnil)))),
                  cons(env, bnil)));
@@ -1174,7 +1177,7 @@ boxed scseq1(boxed args) {
     auto env = list_ref(args, 2);
     auto rest = list_ref(args, 3);
     return make_lambda<boxed>([k, env, rest](boxed) -> boxed {
-        return (*rest->cast<lambda>())(cons(k, cons(env, box(k->get_runtime()))));
+        return send(rest, cons(k, cons(env, box(k->get_runtime()))));
     }, args->get_runtime());
 }
 
@@ -1208,9 +1211,9 @@ boxed lambda0(boxed args) {
         auto k = list_ref(args, 0);
         auto env = list_ref(args, 1);
         auto bnil = box(args->get_runtime());
-        return send(k,
-                    make_form(forms::lambda1,
-                              cons(params, cons(scanned, cons(env, bnil)))));
+        return sendv(k,
+                     make_form(forms::lambda1,
+                               cons(params, cons(scanned, cons(env, bnil)))));
     }, args->get_runtime());
 }
 
@@ -1230,9 +1233,9 @@ boxed improper_lambda0(boxed args) {
         auto k = list_ref(args, 0);
         auto env = list_ref(args, 1);
         auto bnil = box(args->get_runtime());
-        return send(k,
-                    make_form(forms::improper_lambda1,
-                              cons(params, cons(scanned, cons(env, bnil)))));
+        return sendv(k,
+                     make_form(forms::improper_lambda1,
+                               cons(params, cons(scanned, cons(env, bnil)))));
     }, args->get_runtime());
 }
 
@@ -1250,7 +1253,7 @@ boxed letcc0(boxed args) {
         auto k = list_ref(args, 0);
         auto env = list_ref(args, 1);
         auto bnil = box(args->get_runtime());
-        return (*scanned->cast<lambda>())(
+        return send(scanned,
             cons(k,
                  cons(extend_env(env,
                                  cons(name, bnil),
@@ -1267,7 +1270,7 @@ boxed define1(boxed args) {
     auto i = list_ref(args, 4);
     return make_lambda<boxed>([k, env, name, i](boxed args) -> boxed {
         auto v = list_ref(args, 0);
-        return send(k, ctenv_setvar(name, i, v, env));
+        return sendv(k, ctenv_setvar(name, i, v, env));
     }, args->get_runtime());
 }
 
@@ -1279,7 +1282,7 @@ boxed define0(boxed args) {
         auto k = list_ref(args, 0);
         auto env = list_ref(args, 1);
         auto bnil = box(args->get_runtime());
-        return (*scanned->cast<lambda>())(
+        return send(scanned,
             cons(make_form(forms::define1,
                            cons(k, cons(env, cons(name, cons(i, bnil))))),
                  cons(env, bnil)));
@@ -1301,7 +1304,7 @@ boxed application0(boxed args) {
         auto k = list_ref(args, 0);
         auto env = list_ref(args, 1);
         auto bnil = box(args->get_runtime());
-        return (*scanned->cast<lambda>())(
+        return send(scanned,
             cons(make_form(forms::application1, cons(k, cons(env, bnil))),
                  cons(env, bnil)));
     }, args->get_runtime());

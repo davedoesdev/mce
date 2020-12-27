@@ -11,7 +11,7 @@
         (start-stream runtime stream #!key (is_scan #f) (args '()))
         (start-string runtime s #!key (is_scan #f) (args '()))
         (start argv)
-        (send runtime k v)))
+        (send runtime k . v)))
 
 (define-struct runtime-ops
     get-config
@@ -136,7 +136,8 @@
 (define (step-contn-k exp) (cadr exp))
 (define (step-contn-args exp) (cddr exp))
 
-(define send cons)
+(define (send k . v)
+    (cons k v))
 
 (define (make-global-env) (list (cons '() '#())))
 
@@ -210,24 +211,24 @@
 (define-form if0
     (lambda (this scan0 scan1 scan2)
         (lambda (k env)
-            (scan0 (make-form if1 k env scan1 scan2) env))))
+            (send scan0 (make-form if1 k env scan1 scan2) env))))
 
 (define-form if1
     (lambda (this k env scan1 scan2)
         (lambda (v)
             (if v
-                (scan1 k env)
-                (scan2 k env)))))
+                (send scan1 k env)
+                (send scan2 k env)))))
 
 (define-form sclis0
     (lambda (this first rest)
         (lambda (k env)
-            (first (make-form sclis1 k env rest) env))))
+            (send first (make-form sclis1 k env rest) env))))
 
 (define-form sclis1
     (lambda (this k env rest)
         (lambda (v)
-            (rest (make-form sclis2 k v) env))))
+            (send rest (make-form sclis2 k v) env))))
 
 (define-form sclis2
     (lambda (this k v)
@@ -237,11 +238,11 @@
 (define-form scseq0
     (lambda (this first rest)
         (lambda (k env)
-            (first (make-form scseq1 k env rest) env))))
+            (send first (make-form scseq1 k env rest) env))))
 
 (define-form scseq1
     (lambda (this k env rest)
-        (lambda (v) (rest k env))))
+        (lambda (v) (send rest k env))))
 
 (define-form lambda0
     (lambda (this params scanned)
@@ -266,9 +267,9 @@
 (define-form let/cc0
     (lambda (this name scanned)
         (lambda (k env)
-            (scanned k (extend-env env
-                                   (list name)
-                                   (list (make-form let/cc1 k)))))))
+            (send scanned k (extend-env env
+                                        (list name)
+                                        (list (make-form let/cc1 k)))))))
 
 (define-form let/cc1
     (lambda (this k)
@@ -278,7 +279,7 @@
 (define-form define0
     (lambda (this name i scanned)
         (lambda (k env)
-            (scanned (make-form define1 k env name i) env))))
+            (send scanned (make-form define1 k env name i) env))))
 
 (define-form define1
     (lambda (this k env name i)
@@ -288,7 +289,7 @@
 (define-form application0
     (lambda (this scanned)
         (lambda (k env)
-            (scanned (make-form application1 k env) env))))
+            (send scanned (make-form application1 k env) env))))
 
 (define-form application1
     (lambda (this k env)
@@ -298,7 +299,7 @@
 (define-form evalx-initial
     (lambda (this k env scanned)
         (lambda (v)
-            (scanned k env))))
+            (send scanned k env))))
 
 (define (make-form n . args)
     (letrec*
@@ -433,7 +434,7 @@
         r))
 
 (define (step state)
-    ((car state) (cdr state)))
+    (apply (car state) (cdr state)))
 
 (define (result v)
     (vector 'MCE-RESULT v))
@@ -876,5 +877,5 @@
 (define (start argv)
     ((runtime-ops-start (make-runtime)) argv))
 
-(define (send runtime k v)
-    ((runtime-ops-send runtime) k v))
+(define (send runtime k . v)
+    (apply (runtime-ops-send runtime) (cons k v)))

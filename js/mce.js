@@ -544,7 +544,7 @@ function handle_global_lambda(args, fn, cf) {
         const sck = step_contn_k(args);
         const sca = step_contn_args(args);
         const eaa = env_args_args(sca);
-        return send(sck, globalize(call_global(fn, eaa), eaa, cf));
+        return sendv(sck, globalize(call_global(fn, eaa), eaa, cf));
     }
 
     const eaa = env_args_args(args);
@@ -651,16 +651,20 @@ function define_form(f) {
 
 const send = cons;
 
+function sendv(k, v) {
+    return send(k, cons(v, null));
+}
+
 const symbol_lookup = define_form((self, i) =>
     args => {
         const [k, env] = list_to_vector(args);
-        return send(k, ctenv_lookup(i, env));
+        return sendv(k, ctenv_lookup(i, env));
     });
 
 const send_value = define_form((self, exp) =>
     args => {
         const [k] = list_to_vector(args);
-        return send(k, exp);
+        return sendv(k, exp);
     });
 
 const constructed_function = define_form((self, args, cf) => {
@@ -677,51 +681,51 @@ const global_lambda = define_form((self, defn) =>
 const if0 = define_form((self, scan0, scan1, scan2) =>
     args => {
         const [k, env] = list_to_vector(args);
-        return scan0(cons(make_form(if1, k, env, scan1, scan2),
-                          cons(env, null)));
+        return send(scan0, cons(make_form(if1, k, env, scan1, scan2),
+                                cons(env, null)));
     });
 
 const if1 = define_form((self, k, env, scan1, scan2) =>
     args => {
         const [v] = list_to_vector(args);
         const f = v ? scan1 : scan2;
-        return f(cons(k, cons(env, null)));
+        return send(f, cons(k, cons(env, null)));
     });
 
 const sclis0 = define_form((self, first, rest) =>
     args => {
         const [k, env] = list_to_vector(args);
-        return first(cons(make_form(sclis1, k, env, rest),
-                          cons(env, null)));
+        return send(first, cons(make_form(sclis1, k, env, rest),
+                                cons(env, null)));
     });
 
 const sclis1 = define_form((self, k, env, rest) =>
     args => {
         const [v] = list_to_vector(args);
-        return rest(cons(make_form(sclis2, k, v),
-                         cons(env, null)));
+        return send(rest, cons(make_form(sclis2, k, v),
+                               cons(env, null)));
     });
 
 const sclis2 = define_form((self, k, v) =>
     args => {
         const [w] = list_to_vector(args);
-        return send(k, cons(v, w));
+        return sendv(k, cons(v, w));
     });
 
 const scseq0 = define_form((self, first, rest) =>
     args => {
         const [k, env] = list_to_vector(args);
-        return first(cons(make_form(scseq1, k, env, rest),
-                          cons(env, null)));
+        return send(first, cons(make_form(scseq1, k, env, rest),
+                                cons(env, null)));
     });
 
 const scseq1 = define_form((self, k, env, rest) =>
-    () => rest(cons(k, cons(env, null))));
+    () => send(rest, cons(k, cons(env, null))));
 
 const lambda0 = define_form((self, params, scanned) =>
     args => {
         const [k, env] = list_to_vector(args);
-        return send(k, make_form(lambda1, params, scanned, env));
+        return sendv(k, make_form(lambda1, params, scanned, env));
     });
 
 const lambda1 = define_form((self, params, scanned, env) =>
@@ -730,7 +734,7 @@ const lambda1 = define_form((self, params, scanned, env) =>
 const improper_lambda0 = define_form((self, params, scanned) =>
     args => {
         const [k, env] = list_to_vector(args);
-        return send(k, make_form(improper_lambda1, params, scanned, env));
+        return sendv(k, make_form(improper_lambda1, params, scanned, env));
     });
 
 const improper_lambda1 = define_form((self, params, scanned, env) =>
@@ -739,11 +743,12 @@ const improper_lambda1 = define_form((self, params, scanned, env) =>
 const letcc0 = define_form((self, name, scanned) =>
     args => {
         const [k, env] = list_to_vector(args);
-        return scanned(cons(k,
-                            cons(extend_env(env,
-                                            cons(name, null),
-                                            cons(make_form(letcc1, k), null)),
-                                 null)));
+        return send(scanned,
+           cons(k,
+                cons(extend_env(env,
+                                cons(name, null),
+                                cons(make_form(letcc1, k), null)),
+                     null)));
     });
 
 const letcc1 = define_form((self, k) =>
@@ -752,7 +757,7 @@ const letcc1 = define_form((self, k) =>
 const define0 = define_form((self, name, i, scanned) =>
     args => {
         const [k, env] = list_to_vector(args);
-        return scanned(
+        return send(scanned,
             cons(make_form(define1, k, env, name, i),
                  cons(env, null)));
     });
@@ -760,14 +765,14 @@ const define0 = define_form((self, name, i, scanned) =>
 const define1 = define_form((self, k, env, name, i) =>
     args => {
         const [v] = list_to_vector(args);
-        return send(k, ctenv_setvar(name, i, v, env));
+        return sendv(k, ctenv_setvar(name, i, v, env));
     });
 
 const application0 = define_form((self, scanned) =>
     args => {
         const [k, env] = list_to_vector(args);
-        return scanned(cons(make_form(application1, k, env),
-                            cons(env, null)));
+        return send(scanned, cons(make_form(application1, k, env),
+                                  cons(env, null)));
     });
 
 const application1 = define_form((self, k, env) =>
@@ -777,7 +782,7 @@ const application1 = define_form((self, k, env) =>
     });
 
 const evalx_initial = define_form((self, k, env, scanned) =>
-    () => scanned(cons(k, cons(env, null))));
+    () => send(scanned, cons(k, cons(env, null))));
 
 function make_form(n, ...args) {
     const defn = cons(n, vector_to_list(args));
@@ -1014,7 +1019,7 @@ function result_val(exp) {
 }
 
 async function step(state) {
-    return await state.car(cons(state.cdr, null));
+    return await state.car(state.cdr);
 }
 
 async function run(state) {
@@ -1077,6 +1082,7 @@ return {
     start_stream,
     start,
     send,
+    sendv,
     cons
 };
 

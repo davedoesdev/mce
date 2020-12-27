@@ -161,7 +161,8 @@ private:
     friend boxed wrap_global_lambda(boxed fn, boxed cf);
 };
 
-boxed send(boxed k, boxed v);
+boxed send(boxed k, boxed args);
+boxed sendv(boxed k, boxed v);
 boxed start(std::istream &stream, boxed args);
 boxed start(const std::string &s, boxed args);
 boxed start(int argc, char *argv[]);
