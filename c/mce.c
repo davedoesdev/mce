@@ -42,6 +42,8 @@
 #define application1_form           20
 #define evalx_initial_form          21
 
+unsigned char nil[] = { null_code };
+
 /*
 pair is:
 0: pair_code
@@ -128,6 +130,10 @@ unsigned char *cons(unsigned char *car, unsigned char *cdr) {
 
 #define send cons
 
+unsigned char *sendv(unsigned char *k, unsigned char *v) {
+    return send(k, cons(v, nil));
+}
+
 unsigned char *list_ref(unsigned char *initial_state, unsigned char *l, uint64_t i) {
     while (i > 0) {
         l = cdr(l);
@@ -210,7 +216,7 @@ unsigned char *ctenv_lookup(unsigned char *initial_state,
     if (second < vector_size(v)) {
         return vector_ref(initial_state, v, second);
     }
-    return NULL;
+    return nil;
 }
 
 unsigned char *symbol_lookup(unsigned char *initial_state,
@@ -219,7 +225,7 @@ unsigned char *symbol_lookup(unsigned char *initial_state,
     unsigned char *i = list_ref(initial_state, form_args, 0);
     unsigned char *k = list_ref(initial_state, args, 0);
     unsigned char *env = list_ref(initial_state, args, 1);
-    return send(k, ctenv_lookup(initial_state, i, env));
+    return sendv(k, ctenv_lookup(initial_state, i, env));
 }
 
 unsigned char *send_value(unsigned char *initial_state,
@@ -227,7 +233,7 @@ unsigned char *send_value(unsigned char *initial_state,
                           unsigned char *args) {
     unsigned char *exp = list_ref(initial_state, form_args, 0);
     unsigned char *k = list_ref(initial_state, args, 0);
-    return send(k, exp);
+    return sendv(k, exp);
 }
 
 unsigned char *handle_unmemoized(unsigned char *initial_state,
@@ -254,8 +260,9 @@ unsigned char *constructed_function(unsigned char *initial_state,
                                     unsigned char *args) {
     unsigned char *args2 = list_ref(initial_state, form_args, 0);
     unsigned char *cf = list_ref(initial_state, form_args, 1);
-    unsigned char *f = run(initial_state, cons(cf, cons(gresult, cons(NULL, args2))));
-    return handle_unmemoized(initial_state, f, args);
+    // TODO: Can we make this cps so we don't have to call on the stack?
+    unsigned char *f = run(initial_state, cons(cf, cons(gresult, cons(nil, args2))));
+    return send(f, args);
 }
 
 unsigned char *global_lambda(unsigned char *initial_state,
@@ -279,9 +286,9 @@ unsigned char *if0(unsigned char *initial_state,
     unsigned char *scan2 = list_ref(initial_state, form_args, 2);
     unsigned char *k = list_ref(initial_state, args, 0);
     unsigned char *env = list_ref(initial_state, args, 1);
-    return handle_unmemoized(initial_state, scan0,
-        cons(make_form(if1_form, cons(k, cons(env, cons(scan1, cons(scan2, NULL))))),
-             cons(env, NULL)));
+    return send(scan0,
+        cons(make_form(if1_form, cons(k, cons(env, cons(scan1, cons(scan2, nil))))),
+             cons(env, nil)));
 }
 
 unsigned char *if1(unsigned char *initial_state,
@@ -292,8 +299,7 @@ unsigned char *if1(unsigned char *initial_state,
     unsigned char *scan1 = list_ref(form_args, 2);
     unsigned char *scan2 = list_ref(form_args, 3);
     unsigned char *v = boolean_val(list_ref(args, 0));
-    return handle_unmemoized(initial_state, v ? scan1 : scan2,
-        cons(k, cons(env, NULL)));
+    return send(v ? scan1 : scan2, cons(k, cons(env, nil)));
 }
 
 unsigned char *handle_form(unsigned char *initial_state,
@@ -388,7 +394,7 @@ unsigned char *step(unsigned char *initial_state, unsigned char *state) {
     unsigned char *unmemoized = car(initial_state, state);
     return handle_unmemoized(initial_state,
                              unmemoized,
-                             cons(cdr(initial_state, state), NULL));
+                             cdr(initial_state, state));
 }
 
 unsigned char *run(unsigned char *initial_state, unsigned char *state) {
@@ -424,7 +430,7 @@ int main(void) {
     assert(fread(state, sizeof(*state), size, stdin) == size);
 
     /* Run state */
-    gresult = make_form(global_lambda_form, cons(make_symbol(name), NULL));
+    gresult = make_form(global_lambda_form, cons(make_symbol(name), nil));
     start(state);
 
     return 0;
