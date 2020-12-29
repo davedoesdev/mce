@@ -199,10 +199,7 @@
 
 (define-form constructed-function
     (lambda (this args cf)
-        (let ((r (apply cf args)))
-            (if (procedure? r)
-                (wrap-global-lambda r this)
-                r))))
+        (apply cf args)))
 
 (define-form global-lambda
     (lambda (this defn)
@@ -545,6 +542,11 @@
     (for-each (lambda (v) (display v (current-error-port))) args)
     (newline (current-error-port)))
 
+(define (cf-test n x)
+    (if (= n 0)
+        (lambda (n2) (cf-test n2 x))
+        (+ x n)))
+
 (table-set! global-table 'result result)
 (table-set! global-table 'print print)
 (table-set! global-table 'eprint eprint)
@@ -581,6 +583,7 @@
 (table-set! global-table 'cons cons)
 (table-set! global-table 'list->vector list->vector)
 (table-set! global-table 'get-config get-config)
+(table-set! global-table 'cf-test cf-test)
 
 (define (get-global-function name)
     (ref-value (table-ref global-table name)))

@@ -407,6 +407,18 @@ boxed ewrite(boxed args) {
     return xwrite(args, std::cerr);
 }
 
+boxed cf_test(boxed args) {
+    auto n = list_ref(args, 0)->cast<double>();
+    auto x = list_ref(args, 1);
+    if (n == 0) {
+        return make_lambda<boxed>([x](boxed args) {
+            return cf_test(cons(list_ref(args, 0), cons(x, box(args->get_runtime()))));
+        }, args->get_runtime());
+    } else {
+        return box<double>(x->cast<double>() + n, args->get_runtime());
+    }
+}
+
 boxed unmemoize(boxed exp);
 boxed serialize(boxed exp);
 
@@ -982,11 +994,7 @@ boxed constructed_function(boxed args) {
     auto self = list_ref(args, 0);
     auto args2 = list_ref(args, 1);
     auto cf = list_ref(args, 2);
-    auto r = (*cf->cast<lambda>())(args2);
-    if (r->contains<lambda>()) {
-        return wrap_global_lambda(r, self);
-    }
-    return r;
+    return (*cf->cast<lambda>())(args2);
 }
 
 boxed global_lambda(boxed args) {
@@ -1791,7 +1799,8 @@ Runtime::Runtime() :
         { "getpid", getpid },
         { "cons", gcons },
         { "list->vector", list_to_vector },
-        { "get-config", mce::get_config }
+        { "get-config", mce::get_config },
+        { "cf-test", mce::cf_test }
     },
     kenvfn_set({
         gapplyx,

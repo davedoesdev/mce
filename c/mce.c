@@ -261,6 +261,7 @@ unsigned char *constructed_function(unsigned char *initial_state,
     unsigned char *args2 = list_ref(initial_state, form_args, 0);
     unsigned char *cf = list_ref(initial_state, form_args, 1);
     // TODO: Can we make this cps so we don't have to call on the stack?
+    // we'll need to introduce a new form
     unsigned char *f = run(initial_state, cons(cf, cons(gresult, cons(nil, args2))));
     return send(f, args);
 }
@@ -407,8 +408,7 @@ unsigned char *run(unsigned char *initial_state, unsigned char *state) {
 
 unsigned char *start(unsigned char *state) {
     if (state[0] == unmemoized_code) {
-        // TODO: call lambda with args
-        return NULL;
+        return run(state, send(state, nil));
     }
     return run(state, state);
 }

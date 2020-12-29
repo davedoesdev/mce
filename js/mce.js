@@ -379,6 +379,14 @@ function getpid() {
     return process.pid;
 }
 
+function cf_test(n, x) {
+    if (n == 0) {
+        return n2 => cf_test(n2, x);
+    } else {
+        return x + n;
+    }
+}
+
 const config_table = new Map();
 
 function set_config(k, v) {
@@ -425,10 +433,9 @@ const global_table = new Map([
     ['transfer', transfer],
     ['getpid', getpid],
     ['list->vector', list_to_vector],
-    ['get-config', get_config]
+    ['get-config', get_config],
+    ['cf-test', cf_test]
 ]);
-
-const global_set = new Set(global_table.values());
 
 function get_global_function(name) {
     return global_table.get(name);
@@ -436,7 +443,6 @@ function get_global_function(name) {
 
 function register_global_function(name, f) {
     global_table.set(name, f);
-    global_set.add(f);
 }
 
 function unregister_global_function(name) {
@@ -529,10 +535,7 @@ function globalize(x, args, cf) {
 }
 
 function call_global(f, args) {
-    if (global_set.has(f)) {
-        return f(...list_to_vector(args));
-    }
-    return f(args);
+    return f(...list_to_vector(args));
 }
 
 function handle_global_lambda(args, fn, cf) {
@@ -668,11 +671,7 @@ const send_value = define_form((self, exp) =>
     });
 
 const constructed_function = define_form((self, args, cf) => {
-    const r = cf(args);
-    if (typeof r === 'function') {
-        return wrap_global_lambda(r, self);
-    }
-    return r;
+    return cf(args);
 });
 
 const global_lambda = define_form((self, defn) =>
