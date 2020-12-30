@@ -21,26 +21,27 @@
 
 #define symbol_lookup_form          0
 #define send_value_form             1
-#define constructed_function_form   2
-#define global_lambda_form          3
-#define if0_form                    4
-#define if1_form                    5
-#define sclis0_form                 6
-#define sclis1_form                 7
-#define sclis2_form                 8
-#define scseq0_form                 9
-#define scseq1_form                 10
-#define lambda0_form                11
-#define lambda1_form                12
-#define improper_lambda0_form       13
-#define improper_lambda1_form       14
-#define letcc0_form                 15
-#define letcc1_form                 16
-#define define0_form                17
-#define define1_form                18
-#define application0_form           19
-#define application1_form           20
-#define evalx_initial_form          21
+#define constructed_function0_form  2
+#define constructed_function1_form  3
+#define global_lambda_form          4
+#define if0_form                    5
+#define if1_form                    6
+#define sclis0_form                 7
+#define sclis1_form                 8
+#define sclis2_form                 9
+#define scseq0_form                 10
+#define scseq1_form                 11
+#define lambda0_form                12
+#define lambda1_form                13
+#define improper_lambda0_form       14
+#define improper_lambda1_form       15
+#define letcc0_form                 16
+#define letcc1_form                 17
+#define define0_form                18
+#define define1_form                19
+#define application0_form           20
+#define application1_form           21
+#define evalx_initial_form          22
 
 unsigned char nil[] = { null_code };
 
@@ -150,6 +151,21 @@ unsigned char *list_rest(unsigned char *initial_state, unsigned char *l, uint64_
     return cdr(l);
 }
 
+unsigned char *make_vector(uint64_t n) {
+    uint64_t null_index = 1 + 8 + n * 9;
+    unsigned char *state = (unsigned char*) malloc(null_index + 1);
+    assert(state);
+    state[0] = pair_code;
+    *(uint64_t*)&state[1] = n;
+    for (uint64_t i = 0; i < n; ++i) {
+        uint64_t eli = 9 + i * 9;
+        state[eli] = 1;
+        *(uint64_t*)&state[eli + 1] = &state[null_index];
+    }
+    state[null_index] = null_code;
+    return state;
+}
+
 uint64_t vector_size(unsigned char *v) {
     assert(state[0] == vector_code);
     return *(uint64_t*)&v[1];
@@ -255,15 +271,26 @@ unsigned char *make_form(double form, unsigned char *args) {
 
 unsigned char *gresult;
 
-unsigned char *constructed_function(unsigned char *initial_state,
-                                    unsigned char *form_args,
-                                    unsigned char *args) {
+unsigned char *make_global_env() {
+    return cons(cons(nil, make_vector(0)), nil);
+}
+
+unsigned char *constructed_function0(unsigned char *initial_state,
+                                     unsigned char *form_args,
+                                     unsigned char *args) {
     unsigned char *args2 = list_ref(initial_state, form_args, 0);
     unsigned char *cf = list_ref(initial_state, form_args, 1);
-    // TODO: Can we make this cps so we don't have to call on the stack?
-    // we'll need to introduce a new form
-    unsigned char *f = run(initial_state, cons(cf, cons(gresult, cons(nil, args2))));
-    return send(f, args);
+    return send(cf, 
+        cons(make_form(constructed_function1_form, cons(args, nil)),
+             cons(make_global_env(), args2)));
+}
+
+unsigned char *constructed_function1(unsigned char *initial_state,
+                                     unsigned char *form_args,
+                                     unsigned char *args) {
+    unsigned char *args2 = list_ref(initial_state, form_args, 0);
+    unsigned char *f = list_reF(initial_state, args, 0);
+    return send(f, args2);
 }
 
 unsigned char *global_lambda(unsigned char *initial_state,
@@ -314,8 +341,11 @@ unsigned char *handle_form(unsigned char *initial_state,
         case send_value_form:
             return send_value(initial_state, form_args, args);
 
-        case constructed_function_form:
-            return constructed_function(initial_state, form_args, args);
+        case constructed_function0_form:
+            return constructed_function0(initial_state, form_args, args);
+
+        case constructed_function1_form:
+            return constructed_function1(initial_state, form_args, args);
 
         case global_lambda_form:
             return global_lambda(initial_state, form_args, args);

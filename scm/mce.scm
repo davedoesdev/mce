@@ -206,7 +206,7 @@
 (define-form constructed-function1
     (lambda (this args)
         (lambda (f)
-            (apply f args))))
+            (apply send (cons f args)))))
 
 (define-form global-lambda
     (lambda (this defn)

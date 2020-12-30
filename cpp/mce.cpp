@@ -1127,7 +1127,7 @@ boxed constructed_function1(boxed args) {
     auto args2 = list_ref(args, 1);
     return make_lambda<boxed>([args2](boxed args3) -> boxed {
         auto f = list_ref(args3, 0);
-        return (*f->cast<lambda>())(args2);
+        return send(f, args2);
     }, args->get_runtime());
 }
 

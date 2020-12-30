@@ -680,7 +680,7 @@ const constructed_function0 = define_form((self, args, cf) =>
 const constructed_function1 = define_form((self, args) =>
     args2 => {
         const [f] = list_to_vector(args2);
-        return f(args);
+        return send(f, args);
     });
 
 const global_lambda = define_form((self, defn) =>
