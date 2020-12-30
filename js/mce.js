@@ -429,7 +429,7 @@ const global_table = new Map([
     ['serialize', serialize],
     ['apply', applyx],
     ['save', mce_save],
-    ['restore', mce_restore],
+    ['restore', grestore],
     ['transfer', transfer],
     ['getpid', getpid],
     ['list->vector', list_to_vector],
@@ -451,7 +451,8 @@ function unregister_global_function(name) {
 
 const kenvfn_set = new Set([
     applyx,
-    transfer
+    transfer,
+    grestore
 ]);
 
 function register_kenv_function(f) {
@@ -528,7 +529,7 @@ function globalize(x, args, cf) {
         return x;
     }
 
-    const defn = cons(constructed_function, cons(args, cons(cf, null)));
+    const defn = cons(constructed_function0, cons(args, cons(cf, null)));
     const f2 = memoize_lambda(args => f(args), defn);
     const f = memoize_lambda(wrap_global_lambda(x, f2), defn);
     return f;
@@ -670,9 +671,17 @@ const send_value = define_form((self, exp) =>
         return sendv(k, exp);
     });
 
-const constructed_function = define_form((self, args, cf) => {
-    return cf(args);
-});
+const constructed_function0 = define_form((self, args, cf) =>
+    args2 => {
+        return applyx(make_form(constructed_function1, args2),
+                      make_global_env(), cf, args);
+    });
+
+const constructed_function1 = define_form((self, args) =>
+    args2 => {
+        const [f] = list_to_vector(args2);
+        return f(args);
+    });
 
 const global_lambda = define_form((self, defn) =>
     wrap_global_lambda(find_global(defn), self));
@@ -1000,6 +1009,10 @@ function mce_save(exp) {
 
 function mce_restore(s) {
     return memoize(deserialize(unpickle(s)));
+}
+
+function grestore(k, env, s) {
+    return sendv(k, mce_restore(s));
 }
 
 function result(exp) {

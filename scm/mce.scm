@@ -197,9 +197,16 @@
         (lambda (k env)
             (send k exp))))
 
-(define-form constructed-function
+(define-form constructed-function0
     (lambda (this args cf)
-        (apply cf args)))
+        (lambda args2
+            (applyx (make-form constructed-function1 args2)
+                    (make-global-env) cf args))))
+
+(define-form constructed-function1
+    (lambda (this args)
+        (lambda (f)
+            (apply f args))))
 
 (define-form global-lambda
     (lambda (this defn)
@@ -477,7 +484,7 @@
 
 (define (globalize x args cf)
     (if (procedure? x)
-        (letrec* ((defn (list constructed-function args cf))
+        (letrec* ((defn (list constructed-function0 args cf))
                   (f2 (memoize-lambda (lambda args (apply f args)) defn))
                   (f (memoize-lambda (wrap-global-lambda x f2) defn)))
             f)
@@ -493,7 +500,7 @@
                (send sck (globalize (apply fn eaa) eaa cf))))
           (else
            (let ((eaa (env-args-args args)))
-            (globalize (apply fn eaa) eaa cf)))))
+               (globalize (apply fn eaa) eaa cf)))))
 
 (define (handle-global-lambda-kenv args fn)
     (if (step-contn? args)
@@ -561,7 +568,7 @@
 (table-set! global-table 'not not)
 (table-set! global-table 'procedure? procedure?)
 (table-set! global-table 'save mce-save)
-(table-set! global-table 'restore mce-restore)
+(table-set! global-table 'restore grestore)
 (table-set! global-table 'write write)
 (table-set! global-table 'newline newline)
 (table-set! global-table 'transfer transfer) 
@@ -598,6 +605,7 @@
 
 (table-set! kenvfn-table transfer #t)
 (table-set! kenvfn-table applyx #t)
+(table-set! kenvfn-table grestore #t)
 
 (define (register-kenv-function! f)
     (table-set! kenvfn-table f #t))
@@ -795,6 +803,12 @@
 
 (define (mce-restore s)
     (memoize (deserialize (unpickle s))))
+
+(define (grestore k env s)
+    ; We have to make restore a kenvfn because otherwise globalize will be
+    ; called on the result of mce-restore which means constructed-function0
+    ; won't get k and env to pass onto constructed-function1
+    (send k (mce-restore s)))
 
 (define (mce-eval exp)
     (evalx (lookup-global 'result) exp (make-global-env)))

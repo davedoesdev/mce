@@ -799,8 +799,9 @@ boxed save(boxed args) {
 }
 
 boxed restore(boxed args) {
-    auto a = list_ref(args, 0);
-    return mce_restore(*a->cast<std::string>(), args->get_runtime());
+    return sendv(list_ref(args, 0),
+                 mce_restore(*list_ref(args, 2)->cast<std::string>(),
+                             args->get_runtime()));
 }
 
 boxed getpid(boxed args) {
@@ -990,13 +991,6 @@ boxed handle_contn_lambda(boxed args, boxed k) {
     return run((*f)(env_args_args(args)));
 }
 
-boxed constructed_function(boxed args) {
-    auto self = list_ref(args, 0);
-    auto args2 = list_ref(args, 1);
-    auto cf = list_ref(args, 2);
-    return (*cf->cast<lambda>())(args2);
-}
-
 boxed global_lambda(boxed args) {
     auto self = list_ref(args, 0);
     auto defn = list_ref(args, 1)->cast<symbol>();
@@ -1012,6 +1006,8 @@ boxed evalx_initial(boxed args) {
     }, args->get_runtime());
 }
 
+boxed constructed_function0(boxed args);
+boxed constructed_function1(boxed args);
 boxed if0(boxed args);
 boxed if1(boxed args);
 boxed sclis0(boxed args);
@@ -1041,7 +1037,8 @@ enum class forms { \
 define_forms(
     symbol_lookup,
     send_value,
-    constructed_function,
+    constructed_function0,
+    constructed_function1,
     global_lambda,
     if0,
     if1,
@@ -1107,7 +1104,7 @@ boxed globalize(boxed x, boxed args, boxed cf) {
     }
 
     auto runtime = x->get_runtime();
-    auto defn = cons(aform(forms::constructed_function, runtime),
+    auto defn = cons(aform(forms::constructed_function0, runtime),
                      cons(args, cons(cf, box(runtime))));
     auto f = box(runtime);
     auto f2 = memoize_lambda(make_lambda<lambda>([f](boxed args) -> boxed {
@@ -1115,6 +1112,23 @@ boxed globalize(boxed x, boxed args, boxed cf) {
     }, runtime), defn);
     *f = *memoize_lambda(wrap_global_lambda(x, f2), defn);
     return f;
+}
+
+boxed constructed_function0(boxed args) {
+    auto args2 = list_ref(args, 1);
+    auto cf = list_ref(args, 2);
+    return make_lambda<boxed>([args2, cf](boxed args3) -> boxed {
+        return applyx(make_form(forms::constructed_function1, cons(args3, box(args3->get_runtime()))),
+                      make_global_env(args3->get_runtime()), cf, args2);
+    }, args->get_runtime());
+}
+
+boxed constructed_function1(boxed args) {
+    auto args2 = list_ref(args, 1);
+    return make_lambda<boxed>([args2](boxed args3) -> boxed {
+        auto f = list_ref(args3, 0);
+        return (*f->cast<lambda>())(args2);
+    }, args->get_runtime());
 }
 
 boxed if1(boxed args) {
@@ -1804,7 +1818,8 @@ Runtime::Runtime() :
     },
     kenvfn_set({
         gapplyx,
-        transfer
+        transfer,
+        restore
     }) {}
 
 void Runtime::set_gc_threshold(size_t v) {
