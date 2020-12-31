@@ -349,7 +349,7 @@ unsigned char *sclis1(unsigned char *initial_state,
                       unsigned char *args) {
     unsigned char *k = list_ref(initial_state, form_args, 0);
     unsigned char *env = list_ref(initial_state, form_args, 1);
-    unsigned char *rest = list_ref(initial_state, form_argsd, 2);
+    unsigned char *rest = list_ref(initial_state, form_args, 2);
     unsigned char *v = list_ref(initial_state, args, 0);
     return send(rest,
         cons(make_form(sclis2_form, cons(k, cons(v, nil))),
@@ -363,6 +363,28 @@ unsigned char *sclis2(unsigned char *initial_state,
     unsigned char *v = list_ref(initial_state, form_args, 1);
     unsigned char *w = list_ref(initial_state, args, 0);
     return sendv(k, cons(v, w));
+}
+
+unsigned char *scseq0(unsigned char *initial_state,
+                      unsigned char *form_args,
+                      unsigned char *args) {
+    unsigned char *first = list_ref(initial_state, form_args, 0);
+    unsigned char *rest = list_ref(initial_state, form_args, 1);
+    unsigned char *k = list_ref(initial_state, args, 0);
+    unsigned char *env = list_ref(initial_state, args, 1);
+    return send(first,
+        cons(make_form(scseq1_form,
+                       cons(k, cons(env, cons(rest, nil))))),
+             cons(env, nil));
+}
+
+unsigned char *scseq1(unsigned char *initial_state,
+                      unsigned char *form_args,
+                      unsigned char *args) {
+    unsigned char *k = list_ref(initial_state, form_args, 0);
+    unsigned char *env = list_ref(initial_state, form_args, 1);
+    unsigned char *rest = list_ref(initial_state, form_args, 2);
+    return send(rest, cons(k, cons(env, nil)));
 }
 
 unsigned char *handle_form(unsigned char *initial_state,
