@@ -1210,7 +1210,7 @@ boxed scseq0(boxed args) {
         auto k = list_ref(args, 0);
         auto env = list_ref(args, 1);
         auto bnil = box(args->get_runtime());
-        return (*first->cast<lambda>())(
+        return send(first,
             cons(make_form(forms::scseq1,
                            cons(k, cons(env, cons(rest, bnil)))),
                  cons(env, bnil)));
