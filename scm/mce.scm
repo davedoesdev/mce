@@ -136,8 +136,11 @@
 (define (step-contn-k exp) (cadr exp))
 (define (step-contn-args exp) (cddr exp))
 
+(define (sendl k args)
+    (cons k args))
+
 (define (send k . v)
-    (cons k v))
+    (sendl k v))
 
 (define (make-global-env) (list (cons '() '#())))
 
@@ -206,7 +209,7 @@
 (define-form constructed-function1
     (lambda (this args)
         (lambda (f)
-            (apply send (cons f args)))))
+            (sendl f args))))
 
 (define-form global-lambda
     (lambda (this defn)
@@ -462,23 +465,23 @@
         (send (make-form evalx-initial k env scanned) '())))
 
 (define (applyx k env fn args)
-    (apply fn (make-step-contn k (make-env-args env args))))
+    (sendl fn (make-step-contn k (make-env-args env args))))
 
 (define (handle-lambda args params fn env extend-env)
     (if (step-contn? args)
         (let ((sca (step-contn-args args)))
-            (fn (step-contn-k args)
-                (extend-env env params (env-args-args sca))))
-        (run (fn (lookup-global 'result)
-                 (extend-env env params (env-args-args args))))))
+            (send fn (step-contn-k args)
+                     (extend-env env params (env-args-args sca))))
+        (run (send fn (lookup-global 'result)
+                      (extend-env env params (env-args-args args))))))
 
 (define (handle-contn-lambda args k)
     (cond ((transfer? args)
-           (apply k (env-args-args (transfer-args args))))
+           (sendl k (env-args-args (transfer-args args))))
           ((step-contn? args)
-           (apply k (env-args-args (step-contn-args args))))
+           (sendl k (env-args-args (step-contn-args args))))
           (else
-           (run (apply k (env-args-args args))))))
+           (run (sendl k (env-args-args args))))))
 
 (define global-table (make-equal-table))
 
@@ -492,7 +495,7 @@
 
 (define (handle-global-lambda args fn cf)
     (cond ((transfer? args)
-           (apply fn args))
+           (apply fn (env-args-args (transfer-args args))))
           ((step-contn? args)
            (let* ((sck (step-contn-k args))
                   (sca (step-contn-args args))
@@ -521,7 +524,7 @@
 (define (transfer-args exp) (cdr exp))
 
 (define (transfer k env fn . args)
-    (apply fn (cons 'MCE-TRANSFER args)))
+    (sendl fn (cons 'MCE-TRANSFER args)))
 
 (define (find-global sym #!optional (err #t))
     (let ((r (table-ref global-table sym)))
@@ -553,6 +556,9 @@
     (if (= n 0)
         (lambda (n2) (cf-test n2 x))
         (+ x n)))
+
+(define (transfer-test k . args)
+    (applyx (lookup-global 'result) (make-global-env) k args))
 
 (table-set! global-table 'result result)
 (table-set! global-table 'print print)
@@ -591,6 +597,7 @@
 (table-set! global-table 'list->vector list->vector)
 (table-set! global-table 'get-config get-config)
 (table-set! global-table 'cf-test cf-test)
+(table-set! global-table 'transfer-test transfer-test)
 
 (define (get-global-function name)
     (ref-value (table-ref global-table name)))
