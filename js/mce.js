@@ -387,6 +387,11 @@ function cf_test(n, x) {
     }
 }
 
+function transfer_test(k, ...args) {
+    return applyx(lookup_global(new Symbol('result')),
+                  make_global_env(), k, vector_to_list(args));
+}
+
 const config_table = new Map();
 
 function set_config(k, v) {
@@ -434,7 +439,8 @@ const global_table = new Map([
     ['getpid', getpid],
     ['list->vector', list_to_vector],
     ['get-config', get_config],
-    ['cf-test', cf_test]
+    ['cf-test', cf_test],
+    ['transfer-test', transfer_test]
 ]);
 
 function get_global_function(name) {
@@ -521,7 +527,7 @@ function transfer_args(args) {
 }
 
 function transfer(k, env, fn, ...args) {
-    return fn(cons(new Symbol('MCE-TRANSFER'), vector_to_list(args)));
+    return send(fn, cons(new Symbol('MCE-TRANSFER'), vector_to_list(args)));
 }
 
 function globalize(x, args, cf) {
@@ -541,7 +547,7 @@ function call_global(f, args) {
 
 function handle_global_lambda(args, fn, cf) {
     if (is_transfer(args)) {
-        return fn(args);
+        return call_global(fn, env_args_args(transfer_args(args)));
     }
 
     if (is_step_contn(args)) {
@@ -619,30 +625,30 @@ function improper_extend_env(env, syms, values) {
 function handle_lambda(args, params, fn, env, extend_env) {
     if (is_step_contn(args)) {
         const sca = step_contn_args(args);
-        return fn(cons(step_contn_k(args),
-                       cons(extend_env(env, params, env_args_args(sca)),
-                            null)));
+        return send(fn, cons(step_contn_k(args),
+                             cons(extend_env(env, params, env_args_args(sca)),
+                                  null)));
     }
 
-    return run(fn(cons(lookup_global(new Symbol('result')),
-                       cons(extend_env(env, params, env_args_args(args)),
-                            null))));
+    return run(send(fn, cons(lookup_global(new Symbol('result')),
+                             cons(extend_env(env, params, env_args_args(args)),
+                                  null))));
 }
 
 function handle_contn_lambda(args, k) {
     if (is_transfer(args)) {
-        return k(env_args_args(transfer_args(args)));
+        return send(k, env_args_args(transfer_args(args)));
     }
 
     if (is_step_contn(args)) {
-        return k(env_args_args(step_contn_args(args)));
+        return send(k, env_args_args(step_contn_args(args)));
     }
 
-    return run(k(env_args_args(args)));
+    return run(send(k, env_args_args(args)));
 }
 
 function applyx(k, env, fn, args) {
-    return fn(make_step_contn(k, make_env_args(env, args)));
+    return send(fn, make_step_contn(k, make_env_args(env, args)));
 }
 
 const forms = []
