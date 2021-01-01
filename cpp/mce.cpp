@@ -407,18 +407,6 @@ boxed ewrite(boxed args) {
     return xwrite(args, std::cerr);
 }
 
-boxed cf_test(boxed args) {
-    auto n = list_ref(args, 0)->cast<double>();
-    auto x = list_ref(args, 1);
-    if (n == 0) {
-        return make_lambda<boxed>([x](boxed args) {
-            return cf_test(cons(list_ref(args, 0), cons(x, box(args->get_runtime()))));
-        }, args->get_runtime());
-    } else {
-        return box<double>(x->cast<double>() + n, args->get_runtime());
-    }
-}
-
 boxed unmemoize(boxed exp);
 boxed serialize(boxed exp);
 
@@ -541,7 +529,7 @@ boxed transfer_args(boxed args) {
 
 boxed transfer(boxed args) {
     auto fn = list_ref(args, 2);
-    return (*fn->cast<lambda>())(
+    return send(fn,
         cons(box<symbol>("MCE-TRANSFER", args->get_runtime()), list_rest(args, 2)));
 }
 
@@ -574,8 +562,7 @@ boxed env_args_args(boxed args) {
 }
 
 boxed applyx(boxed k, boxed env, boxed fn, boxed args) {
-    return (*fn->cast<lambda>())(
-        make_step_contn(k, make_env_args(env, args)));
+    return send(fn, make_step_contn(k, make_env_args(env, args)));
 }
 
 boxed result(boxed exp) {
@@ -875,7 +862,7 @@ boxed handle_global_lambda(boxed args, boxed fn, boxed cf) {
     auto f = fn->cast<lambda>();
 
     if (is_transfer(args)) {
-        return (*f)(args);
+        return (*f)(env_args_args(transfer_args(args)));
     }
 
     if (is_step_contn(args)) {
@@ -961,34 +948,31 @@ boxed handle_lambda(boxed args,
                     boxed fn,
                     boxed env,
                     extend_env_fn extend_env) {
-    auto f = fn->cast<lambda>();
     auto runtime = args->get_runtime();
     auto bnil = box(runtime);
 
     if (is_step_contn(args)) {
         auto sca = step_contn_args(args);
-        return (*f)(cons(step_contn_k(args),
-                         cons(extend_env(env, params, env_args_args(sca)),
-                              bnil)));
+        return send(fn, cons(step_contn_k(args),
+                             cons(extend_env(env, params, env_args_args(sca)),
+                                  bnil)));
     }
 
-    return run((*f)(cons(lookup_global(symbol("result"), runtime),
-                         cons(extend_env(env, params, env_args_args(args)),
-                              bnil))));
+    return run(send(fn, cons(lookup_global(symbol("result"), runtime),
+                             cons(extend_env(env, params, env_args_args(args)),
+                                  bnil))));
 }
 
 boxed handle_contn_lambda(boxed args, boxed k) {
-    auto f = k->cast<lambda>();
-
     if (is_transfer(args)) {
-        return (*f)(env_args_args(transfer_args(args)));
+        return send(k, env_args_args(transfer_args(args)));
     }
 
     if (is_step_contn(args)) {
-        return (*f)(env_args_args(step_contn_args(args)));
+        return send(k, env_args_args(step_contn_args(args)));
     }
 
-    return run((*f)(env_args_args(args)));
+    return run(send(k, env_args_args(args)));
 }
 
 boxed global_lambda(boxed args) {
@@ -1776,6 +1760,26 @@ boxed start(int argc, char *argv[]) {
     return start(std::cin, box(runtime));
 }
 
+boxed cf_test(boxed args) {
+    auto n = list_ref(args, 0)->cast<double>();
+    auto x = list_ref(args, 1);
+    if (n == 0) {
+        return make_lambda<boxed>([x](boxed args) {
+            return cf_test(cons(list_ref(args, 0), cons(x, box(args->get_runtime()))));
+        }, args->get_runtime());
+    } else {
+        return box<double>(x->cast<double>() + n, args->get_runtime());
+    }
+}
+
+boxed transfer_test(boxed args) {
+    auto runtime = args->get_runtime();
+    return applyx(lookup_global(symbol("result"), runtime),
+                  make_global_env(args->get_runtime()),
+                  list_ref(args, 0),
+                  list_rest(args, 0));
+}
+
 Runtime::Runtime() :
     gc_threshold(10000),
     global_table {
@@ -1814,7 +1818,8 @@ Runtime::Runtime() :
         { "cons", gcons },
         { "list->vector", list_to_vector },
         { "get-config", mce::get_config },
-        { "cf-test", mce::cf_test }
+        { "cf-test", mce::cf_test },
+        { "transfer-test", mce::transfer_test }
     },
     kenvfn_set({
         gapplyx,
