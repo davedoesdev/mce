@@ -273,6 +273,22 @@ unsigned char *step_contn_args(unsigned char *initial_state,
     return state[19] ? (unsigned char*) i : &initial_state[i];
 }
 
+unsigned char *transfer(unsigned char *args) {
+    unsigned char *state = (unsigned char*) malloc(1 + 1 + 8);
+    assert(state);
+    state[0] = transfer_code;
+    state[1] = 1;
+    *(uint64_t*)&state[2] = (uint64_t) cdr(args);
+    return send(car(args), state);
+}
+
+unsigned char *transfer_args(unsigned char *initial_state,
+                             unsigned char *state) {
+    assert(state[0] == transfer_code);
+    uint64_t i = *(uint64_t*)&state[2];
+    return state[1] ? (unsigned char*) i : &initial_state[i];
+}
+
 unsigned char *symbol_lookup(unsigned char *initial_state,
                              unsigned char *form_args,
                              unsigned char *args) {
@@ -343,11 +359,10 @@ unsigned char *global_lambda(unsigned char *initial_state,
     unsigned char *defn = list_ref(initial_state, form_args, 0);
 
     if (args[0] == transfer_code) {
-    TODO we need to implement transfer_args
         args = transfer_args(args);
 
         if (symbol_equals(defn, "transfer_test")) {
-            return applyx(result, TODO how do we lookup global
+            return applyx(gresult,
                           make_global_env(),
                           list_ref(initial_state, args, 0),
                           list_rest(initial_state, args, 0));
@@ -355,40 +370,19 @@ unsigned char *global_lambda(unsigned char *initial_state,
 
         assert_perror(EINVAL);
         return NULL;
-    } 
-
-    if (args[0] != step_contn_code) {
-        /* direct call not supported */
-        assert_perror(EINVAL);        
-        return NULL;
     }
 
-TODO
-k and env in step_contn
+    unsigned char *k = step_contn_k(args);
+    unsigned char *env = step_contn_env(args);
+    args = step_contn_args(args);
 
     if (symbol_equals(defn, "result")) {
         return sendv(k, make_result(list_ref(initial_state, args, 2)));
     }
 
     if (symbol_equals(defn, "transfer")) {
-TODO make transfer state
+        return transfer(args);
     }
-
-
-unsigned char *transfer(unsigned char *k,
-                        unsigned char *env,
-                        unsigned char *args) {
-    unsigned char *state = (unsigned char*) malloc(1 + 1 + 8);
-    assert(state);
-    state[0] = step_contn_code;
-    state[1] = 1;
-    *(uint64_t*)&state[2] = (uint64_t)args;
-    return state;
-}
-
-
-
-
 
     assert_perror(EINVAL);        
     return NULL;
