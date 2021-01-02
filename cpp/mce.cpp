@@ -22,6 +22,8 @@ const char vector_code     = 'h';
 const char unmemoized_code = '0';
 const char redirect_code   = '1';
 const char result_code     = '2';
+const char step_contn_code = '3';
+const char transfer_code   = '4';
 
 symbol::symbol(const std::string& s) : std::string(s) {}
 
@@ -1648,6 +1650,28 @@ void bpickle(boxed exp, std::vector<uint64_t>& refs, std::vector<unsigned char>&
             auto pos = bpickle_aux(static_cast<uint64_t>(0), v);
             bpickle_aux(v, pos);
             return bpickle(result_val(exp), refs, v);
+        }
+        if (is_step_contn(exp)) {
+            v.push_back(step_contn_code);
+            v.push_back(0);
+            auto pos_k = bpickle_aux(static_cast<uint64_t>(0), v);
+            v.push_back(0);
+            auto pos_env = bpickle_aux(static_cast<uint64_t>(0), v);
+            v.push_back(0);
+            auto pos_args = bpickle_aux(static_cast<uint64_t>(0), v);
+            bpickle_aux(v, pos_k);
+            bpickle(step_contn_k(exp), refs, v);
+            bpickle_aux(v, pos_env);
+            bpickle(step_contn_env(exp), refs, v);
+            bpickle_aux(v, pos_args);
+            return bpickle(step_contn_args(exp), refs, v);
+        }
+        if (is_transfer(exp)) {
+            v.push_back(transfer_code);
+            v.push_back(0);
+            auto pos = bpickle_aux(static_cast<uint64_t>(0), v);
+            bpickle_aux(v, pos);
+            return bpickle(transfer_args(exp), refs, v);
         }
         v.push_back(vector_code);
         // Add size of vector

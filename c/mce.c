@@ -18,6 +18,8 @@
 #define unmemoized_code             '0'
 #define redirect_code               '1'
 #define result_code                 '2'
+#define step_contn_code             '3'
+#define transfer_code               '4'
 
 #define symbol_lookup_form          0
 #define send_value_form             1
@@ -235,6 +237,42 @@ unsigned char *ctenv_lookup(unsigned char *initial_state,
     return nil;
 }
 
+unsigned char *make_step_contn(unsigned char *k,
+                               unsigned char *env,
+                               unsigned char *args) {
+    unsigned char *state = (unsigned char*) malloc(1 + 1 + 8 + 1 + 8 + 1 + 8);
+    assert(state);
+    state[0] = step_contn_code;
+    state[1] = 1;
+    *(uint64_t*)&state[2] = (uint64_t)k;
+    state[10] = 1;
+    *(uint64_t*)&state[11] = (uint64_t)env;
+    state[19] = 1;
+    *(uint64_t*)&state[20] = (uint64_t)args;
+    return state;
+}
+
+unsigned char *step_contn_k(unsigned char *initial_state,
+                            unsigned char *state) {
+    assert(state[0] == step_contn_code);
+    uint64_t i = *(uint64_t*)&state[2];
+    return state[1] ? (unsigned char*) i : &initial_state[i];
+}
+
+unsigned char *step_contn_env(unsigned char *initial_state,
+                              unsigned char *state) {
+    assert(state[0] == step_contn_code);
+    uint64_t i = *(uint64_t*)&state[11];
+    return state[10] ? (unsigned char*) i : &initial_state[i];
+}
+
+unsigned char *step_contn_args(unsigned char *initial_state,
+                               unsigned char *state) {
+    assert(state[0] == step_contn_code);
+    uint64_t i = *(uint64_t*)&state[20];
+    return state[19] ? (unsigned char*) i : &initial_state[i];
+}
+
 unsigned char *symbol_lookup(unsigned char *initial_state,
                              unsigned char *form_args,
                              unsigned char *args) {
@@ -275,21 +313,27 @@ unsigned char *make_global_env() {
     return cons(cons(nil, make_vector(0)), nil);
 }
 
+unsigned char *applyx(unsigned char *k,
+                      unsigned char *env,
+                      unsigned char *fn,
+                      unsigned char *args) {
+    return send(fn, make_step_contn(k, env, args));
+}
+
 unsigned char *constructed_function0(unsigned char *initial_state,
                                      unsigned char *form_args,
                                      unsigned char *args) {
     unsigned char *args2 = list_ref(initial_state, form_args, 0);
     unsigned char *cf = list_ref(initial_state, form_args, 1);
-    return send(cf, 
-        cons(make_form(constructed_function1_form, cons(args, nil)),
-             cons(make_global_env(), args2)));
+    return applyx(make_form(constructed_function1_form, cons(args, nil)),
+                  make_global_env(), cf, args2);
 }
 
 unsigned char *constructed_function1(unsigned char *initial_state,
                                      unsigned char *form_args,
                                      unsigned char *args) {
     unsigned char *args2 = list_ref(initial_state, form_args, 0);
-    unsigned char *f = list_reF(initial_state, args, 0);
+    unsigned char *f = list_ref(initial_state, args, 0);
     return send(f, args2);
 }
 
@@ -298,9 +342,53 @@ unsigned char *global_lambda(unsigned char *initial_state,
                              unsigned char *args) {
     unsigned char *defn = list_ref(initial_state, form_args, 0);
 
-    if (symbol_equals(defn, "result")) {
-        return make_result(list_ref(initial_state, args, 2));
+    if (args[0] == transfer_code) {
+    TODO we need to implement transfer_args
+        args = transfer_args(args);
+
+        if (symbol_equals(defn, "transfer_test")) {
+            return applyx(result, TODO how do we lookup global
+                          make_global_env(),
+                          list_ref(initial_state, args, 0),
+                          list_rest(initial_state, args, 0));
+        }
+
+        assert_perror(EINVAL);
+        return NULL;
+    } 
+
+    if (args[0] != step_contn_code) {
+        /* direct call not supported */
+        assert_perror(EINVAL);        
+        return NULL;
     }
+
+TODO
+k and env in step_contn
+
+    if (symbol_equals(defn, "result")) {
+        return sendv(k, make_result(list_ref(initial_state, args, 2)));
+    }
+
+    if (symbol_equals(defn, "transfer")) {
+TODO make transfer state
+    }
+
+
+unsigned char *transfer(unsigned char *k,
+                        unsigned char *env,
+                        unsigned char *args) {
+    unsigned char *state = (unsigned char*) malloc(1 + 1 + 8);
+    assert(state);
+    state[0] = step_contn_code;
+    state[1] = 1;
+    *(uint64_t*)&state[2] = (uint64_t)args;
+    return state;
+}
+
+
+
+
 
     assert_perror(EINVAL);        
     return NULL;
@@ -385,6 +473,18 @@ unsigned char *scseq1(unsigned char *initial_state,
     unsigned char *env = list_ref(initial_state, form_args, 1);
     unsigned char *rest = list_ref(initial_state, form_args, 2);
     return send(rest, cons(k, cons(env, nil)));
+}
+
+unsigned char *lambda0(unsigned char *initial_state,
+                       unsigned char *form_args,
+                       unsigned char *args) {
+    unsigned char *params = list_ref(initial_state, form_args, 0);
+    unsigned char *scanned = list_ref(initial_state, form_args, 1);
+    unsigned char *k = list_ref(initial_state, args, 0);
+    unsigned char *env = list_ref(initial_state, args, 1);
+    return sendv(k,
+                 make_form(lambda1_form,
+                           cons(params, cons(scanned, cons(env, nil)))));
 }
 
 unsigned char *handle_form(unsigned char *initial_state,
