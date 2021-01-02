@@ -493,8 +493,8 @@ boxed send_value(boxed args) {
     }, args->get_runtime());
 }
 
-boxed make_step_contn(boxed k, boxed args) {
-    return cons(box<symbol>("MCE-STEP-CONTN", k->get_runtime()), cons(k, args));
+boxed make_step_contn(boxed k, boxed env, boxed args) {
+    return cons(box<symbol>("MCE-STEP-CONTN", k->get_runtime()), cons(k, cons(env, args)));
 }
 
 bool is_step_contn(boxed args) {
@@ -510,8 +510,12 @@ boxed step_contn_k(boxed args) {
     return list_ref(args, 1);
 }
 
+boxed step_contn_env(boxed args) {
+    return list_ref(args, 2);
+}
+
 boxed step_contn_args(boxed args) {
-    return list_rest(args, 1);
+    return list_rest(args, 2);
 }
 
 bool is_transfer(boxed args) {
@@ -540,29 +544,8 @@ boxed make_global_env(std::shared_ptr<Runtime> runtime) {
     return cons(bindings, bnil);
 }
 
-boxed make_env_args(boxed env, boxed args) {
-    return cons(box<symbol>("MCE-ENV-ARGS", env->get_runtime()), cons(env, args));
-}
-
-bool is_env_args(boxed args) {
-    if (!args->contains<pair>()) {
-        return false;
-    }
-    auto first = list_ref(args, 0);
-    return first->contains<symbol>() &&
-           (*first->cast<symbol>() == "MCE-ENV-ARGS");
-}
-
-boxed env_args_env(boxed args) {
-    return is_env_args(args) ? list_ref(args, 1) : make_global_env(args->get_runtime());
-}
-
-boxed env_args_args(boxed args) {
-    return is_env_args(args) ? list_rest(args, 1) : args;
-}
-
 boxed applyx(boxed k, boxed env, boxed fn, boxed args) {
-    return send(fn, make_step_contn(k, make_env_args(env, args)));
+    return send(fn, make_step_contn(k, env, args));
 }
 
 boxed result(boxed exp) {
@@ -862,18 +845,16 @@ boxed handle_global_lambda(boxed args, boxed fn, boxed cf) {
     auto f = fn->cast<lambda>();
 
     if (is_transfer(args)) {
-        return (*f)(env_args_args(transfer_args(args)));
+        return (*f)(transfer_args(args));
     }
 
     if (is_step_contn(args)) {
         auto sck = step_contn_k(args);
         auto sca = step_contn_args(args);
-        auto eaa = env_args_args(sca);
-        return sendv(sck, globalize((*f)(eaa), eaa, cf));
+        return sendv(sck, globalize((*f)(sca), sca, cf));
     }
 
-    auto eaa = env_args_args(args);
-    return globalize((*f)(eaa), eaa, cf);
+    return globalize((*f)(args), args, cf);
 }
 
 boxed lookup_global(const symbol& sym, std::shared_ptr<Runtime> runtime);
@@ -882,15 +863,14 @@ boxed handle_global_lambda_kenv(boxed args, boxed fn) {
     auto f = fn->cast<lambda>();
 
     if (is_step_contn(args)) {
-        auto sca = step_contn_args(args);
         return (*f)(cons(step_contn_k(args),
-                         cons(env_args_env(sca),
-                              env_args_args(sca))));
+                         cons(step_contn_env(args),
+                              step_contn_args(args))));
     }
 
     return run((*f)(cons(lookup_global(symbol("result"), args->get_runtime()),
-                         cons(env_args_env(args),
-                              env_args_args(args)))));
+                         cons(make_global_env(args->get_runtime()),
+                              args))));
 }
 
 boxed wrap_global_lambda(boxed fn, boxed cf) {
@@ -952,27 +932,26 @@ boxed handle_lambda(boxed args,
     auto bnil = box(runtime);
 
     if (is_step_contn(args)) {
-        auto sca = step_contn_args(args);
         return send(fn, cons(step_contn_k(args),
-                             cons(extend_env(env, params, env_args_args(sca)),
+                             cons(extend_env(env, params, step_contn_args(args)),
                                   bnil)));
     }
 
     return run(send(fn, cons(lookup_global(symbol("result"), runtime),
-                             cons(extend_env(env, params, env_args_args(args)),
+                             cons(extend_env(env, params, args),
                                   bnil))));
 }
 
 boxed handle_contn_lambda(boxed args, boxed k) {
     if (is_transfer(args)) {
-        return send(k, env_args_args(transfer_args(args)));
+        return send(k, transfer_args(args));
     }
 
     if (is_step_contn(args)) {
-        return send(k, env_args_args(step_contn_args(args)));
+        return send(k, step_contn_args(args));
     }
 
-    return run(send(k, env_args_args(args)));
+    return run(send(k, args));
 }
 
 boxed global_lambda(boxed args) {

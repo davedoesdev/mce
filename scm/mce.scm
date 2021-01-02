@@ -131,10 +131,11 @@
                             (list->vector (reverse done-values)))
                       env)))))
 
-(define (make-step-contn k args) (cons 'MCE-STEP-CONTN (cons k args)))
+(define (make-step-contn k env args) (cons 'MCE-STEP-CONTN (cons k (cons env args))))
 (define (step-contn? exp) (and (pair? exp) (equal? (car exp) 'MCE-STEP-CONTN)))
 (define (step-contn-k exp) (cadr exp))
-(define (step-contn-args exp) (cddr exp))
+(define (step-contn-env exp) (caddr exp))
+(define (step-contn-args exp) (cdddr exp))
 
 (define (sendl k args)
     (cons k args))
@@ -143,17 +144,6 @@
     (sendl k v))
 
 (define (make-global-env) (list (cons '() '#())))
-
-(define (make-env-args env args)
-    (cons 'MCE-ENV-ARGS (cons env args)))
-
-(define (env-args? exp) (and (pair? exp) (equal? (car exp) 'MCE-ENV-ARGS)))
-
-(define (env-args-env env-args)
-    (if (env-args? env-args) (cadr env-args) (make-global-env)))
-
-(define (env-args-args env-args)
-    (if (env-args? env-args) (cddr env-args) env-args))
 
 (define (yield-defn? args)
     (and (not (null? args)) (equal? (car args) 'MCE-YIELD-DEFINITION)))
@@ -465,23 +455,22 @@
         (send (make-form evalx-initial k env scanned) '())))
 
 (define (applyx k env fn args)
-    (sendl fn (make-step-contn k (make-env-args env args))))
+    (sendl fn (make-step-contn k env args)))
 
 (define (handle-lambda args params fn env extend-env)
     (if (step-contn? args)
-        (let ((sca (step-contn-args args)))
-            (send fn (step-contn-k args)
-                     (extend-env env params (env-args-args sca))))
+        (send fn (step-contn-k args)
+                 (extend-env env params (step-contn-args args)))
         (run (send fn (lookup-global 'result)
-                      (extend-env env params (env-args-args args))))))
+                      (extend-env env params args)))))
 
 (define (handle-contn-lambda args k)
     (cond ((transfer? args)
-           (sendl k (env-args-args (transfer-args args))))
+           (sendl k (transfer-args args)))
           ((step-contn? args)
-           (sendl k (env-args-args (step-contn-args args))))
+           (sendl k (step-contn-args args)))
           (else
-           (run (sendl k (env-args-args args))))))
+           (run (sendl k args)))))
 
 (define global-table (make-equal-table))
 
@@ -495,25 +484,22 @@
 
 (define (handle-global-lambda args fn cf)
     (cond ((transfer? args)
-           (apply fn (env-args-args (transfer-args args))))
+           (apply fn (transfer-args args)))
           ((step-contn? args)
-           (let* ((sck (step-contn-k args))
-                  (sca (step-contn-args args))
-                  (eaa (env-args-args sca)))
-               (send sck (globalize (apply fn eaa) eaa cf))))
+           (let ((sck (step-contn-k args))
+                 (sca (step-contn-args args)))
+               (send sck (globalize (apply fn sca) sca cf))))
           (else
-           (let ((eaa (env-args-args args)))
-               (globalize (apply fn eaa) eaa cf)))))
+           (globalize (apply fn args) args cf))))
 
 (define (handle-global-lambda-kenv args fn)
     (if (step-contn? args)
-        (let ((sca (step-contn-args args)))
-            (apply fn (cons (step-contn-k args)
-                            (cons (env-args-env sca)
-                                  (env-args-args sca)))))
+        (apply fn (cons (step-contn-k args)
+                        (cons (step-contn-env args)
+                              (step-contn-args args))))
         (run (apply fn (cons (lookup-global 'result)
-                             (cons (env-args-env args)
-                                   (env-args-args args)))))))
+                             (cons (make-global-env)
+                                   args))))))
 
 (define (wrap-global-lambda fn cf)
     (if (table-ref kenvfn-table fn)

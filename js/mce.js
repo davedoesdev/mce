@@ -474,8 +474,8 @@ function find_global(sym) {
     return r;
 }
 
-function make_step_contn(k, args) {
-    return cons(new Symbol('MCE-STEP-CONTN'), cons(k, args));
+function make_step_contn(k, env, args) {
+    return cons(new Symbol('MCE-STEP-CONTN'), cons(k, cons(env, args)));
 }
 
 function is_step_contn(args) {
@@ -488,32 +488,18 @@ function step_contn_k(args) {
     return list_ref(args, 1);
 }
 
+function step_contn_env(args) {
+    return list_ref(args, 2);
+}
+
 function step_contn_args(args) {
-    return list_rest(args, 1);
+    return list_rest(args, 2);
 }
 
 function make_global_env() {
     const values = [];
     const bindings = cons(null, values);
     return cons(bindings, null);
-}
-
-function make_env_args(env, args) {
-    return cons(new Symbol('MCE-ENV-ARGS'), cons(env, args));
-}
-
-function is_env_args(args) {
-    return args &&
-           (args.car instanceof Symbol) &&
-           (args.car.toString() === 'MCE-ENV-ARGS');
-}
-
-function env_args_env(args) {
-    return is_env_args(args) ? list_ref(args, 1) : make_global_env();
-}
-
-function env_args_args(args) {
-    return is_env_args(args) ? list_rest(args, 1) : args;
 }
 
 function is_transfer(args) {
@@ -547,31 +533,28 @@ function call_global(f, args) {
 
 function handle_global_lambda(args, fn, cf) {
     if (is_transfer(args)) {
-        return call_global(fn, env_args_args(transfer_args(args)));
+        return call_global(fn, transfer_args(args));
     }
 
     if (is_step_contn(args)) {
         const sck = step_contn_k(args);
         const sca = step_contn_args(args);
-        const eaa = env_args_args(sca);
-        return sendv(sck, globalize(call_global(fn, eaa), eaa, cf));
+        return sendv(sck, globalize(call_global(fn, sca), sca, cf));
     }
 
-    const eaa = env_args_args(args);
-    return globalize(call_global(fn, eaa), eaa, cf);
+    return globalize(call_global(fn, args), args, cf);
 }
 
 function handle_global_lambda_kenv(args, fn) {
     if (is_step_contn(args)) {
-        const sca = step_contn_args(args);
         return call_global(fn, cons(step_contn_k(args),
-                                    cons(env_args_env(sca),
-                                         env_args_args(sca))));
+                                    cons(step_contn_env(args),
+                                         step_contn_args(args))));
     }
 
     return run(call_global(fn, cons(lookup_global(new Symbol('result')),
-                                    cons(env_args_env(args),
-                                         env_args_args(args)))));
+                                    cons(make_global_env(),
+                                         args))));
 }
 
 function wrap_global_lambda(fn, cf) {
@@ -624,31 +607,30 @@ function improper_extend_env(env, syms, values) {
 
 function handle_lambda(args, params, fn, env, extend_env) {
     if (is_step_contn(args)) {
-        const sca = step_contn_args(args);
         return send(fn, cons(step_contn_k(args),
-                             cons(extend_env(env, params, env_args_args(sca)),
+                             cons(extend_env(env, params, step_contn_args(args)),
                                   null)));
     }
 
     return run(send(fn, cons(lookup_global(new Symbol('result')),
-                             cons(extend_env(env, params, env_args_args(args)),
+                             cons(extend_env(env, params, args),
                                   null))));
 }
 
 function handle_contn_lambda(args, k) {
     if (is_transfer(args)) {
-        return send(k, env_args_args(transfer_args(args)));
+        return send(k, transfer_args(args));
     }
 
     if (is_step_contn(args)) {
-        return send(k, env_args_args(step_contn_args(args)));
+        return send(k, step_contn_args(args));
     }
 
-    return run(send(k, env_args_args(args)));
+    return run(send(k, args));
 }
 
 function applyx(k, env, fn, args) {
-    return send(fn, make_step_contn(k, make_env_args(env, args)));
+    return send(fn, make_step_contn(k, env, args));
 }
 
 const forms = []
