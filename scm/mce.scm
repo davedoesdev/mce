@@ -242,19 +242,19 @@
         (lambda (v) (send rest k env))))
 
 (define-form lambda0
-    (lambda (this params scanned)
+    (lambda (this params len scanned)
         (lambda (k env)
-            (send k (make-form lambda1 params scanned env)))))
+            (send k (make-form lambda1 params len scanned env)))))
 
 (define-form lambda1
-    (lambda (this params scanned env)
+    (lambda (this params len scanned env)
         (lambda args
             (handle-lambda args params scanned env extend-env))))
 
 (define-form improper-lambda0
-    (lambda (this params scanned)
+    (lambda (this params len scanned)
         (lambda (k env)
-            (send k (make-form improper-lambda1 params scanned env)))))
+            (send k (make-form improper-lambda1 params len scanned env)))))
 
 (define-form improper-lambda1
     (lambda (this params scanned env)
@@ -375,12 +375,12 @@
                                (scseq (cddr exp)
                                       (extend-ctenv ctenv (->proper params))
                                       fixups)))
-                            (make-form improper-lambda0 params scanned))
+                            (make-form improper-lambda0 params (length params) scanned))
                         (let ((scanned
                                (scseq (cddr exp)
                                       (extend-ctenv ctenv params)
                                       fixups)))
-                            (make-form lambda0 params scanned)))))
+                            (make-form lambda0 params (length params) scanned)))))
                ((let/cc)
                 (let* ((name (cadr exp))
                        (scanned (scseq (cddr exp)

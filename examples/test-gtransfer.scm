@@ -1,0 +1,6 @@
+(let ((k (let/cc k k)))
+    (print "ONE " k)
+    (if (procedure? k)
+        (transfer transfer-test k 90)
+        (print "TWO " k))
+    (print "THREE"))

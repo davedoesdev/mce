@@ -1184,8 +1184,8 @@ boxed scseq0(boxed args) {
 
 boxed lambda1(boxed args) {
     auto params = list_ref(args, 1);
-    auto scanned = list_ref(args, 2);
-    auto env = list_ref(args, 3);
+    auto scanned = list_ref(args, 3);
+    auto env = list_ref(args, 4);
     return make_lambda<boxed>([params, scanned, env](boxed args) -> boxed {
         return handle_lambda(args, params, scanned, env, extend_env);
     }, args->get_runtime());
@@ -1193,21 +1193,22 @@ boxed lambda1(boxed args) {
 
 boxed lambda0(boxed args) {
     auto params = list_ref(args, 1);
-    auto scanned = list_ref(args, 2);
-    return make_lambda<boxed>([params, scanned](boxed args) -> boxed {
+    auto len = list_ref(args, 2);
+    auto scanned = list_ref(args, 3);
+    return make_lambda<boxed>([params, len, scanned](boxed args) -> boxed {
         auto k = list_ref(args, 0);
         auto env = list_ref(args, 1);
         auto bnil = box(args->get_runtime());
         return sendv(k,
                      make_form(forms::lambda1,
-                               cons(params, cons(scanned, cons(env, bnil)))));
+                               cons(params, cons(len, cons(scanned, cons(env, bnil))))));
     }, args->get_runtime());
 }
 
 boxed improper_lambda1(boxed args) {
     auto params = list_ref(args, 1);
-    auto scanned = list_ref(args, 2);
-    auto env = list_ref(args, 3);
+    auto scanned = list_ref(args, 3);
+    auto env = list_ref(args, 4);
     return make_lambda<boxed>([params, scanned, env](boxed args) -> boxed {
         return handle_lambda(args, params, scanned, env, improper_extend_env);
     }, args->get_runtime());
@@ -1215,14 +1216,15 @@ boxed improper_lambda1(boxed args) {
 
 boxed improper_lambda0(boxed args) {
     auto params = list_ref(args, 1);
-    auto scanned = list_ref(args, 2);
-    return make_lambda<boxed>([params, scanned](boxed args) -> boxed {
+    auto len = list_ref(args, 2);
+    auto scanned = list_ref(args, 3);
+    return make_lambda<boxed>([params, len, scanned](boxed args) -> boxed {
         auto k = list_ref(args, 0);
         auto env = list_ref(args, 1);
         auto bnil = box(args->get_runtime());
         return sendv(k,
                      make_form(forms::improper_lambda1,
-                               cons(params, cons(scanned, cons(env, bnil)))));
+                               cons(params, cons(len, cons(scanned, cons(env, bnil))))));
     }, args->get_runtime());
 }
 

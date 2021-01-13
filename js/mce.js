@@ -718,22 +718,22 @@ const scseq0 = define_form((self, first, rest) =>
 const scseq1 = define_form((self, k, env, rest) =>
     () => send(rest, cons(k, cons(env, null))));
 
-const lambda0 = define_form((self, params, scanned) =>
+const lambda0 = define_form((self, params, len, scanned) =>
     args => {
         const [k, env] = list_to_vector(args);
-        return sendv(k, make_form(lambda1, params, scanned, env));
+        return sendv(k, make_form(lambda1, params, len, scanned, env));
     });
 
-const lambda1 = define_form((self, params, scanned, env) =>
+const lambda1 = define_form((self, params, len, scanned, env) =>
     args => handle_lambda(args, params, scanned, env, extend_env));
 
-const improper_lambda0 = define_form((self, params, scanned) =>
+const improper_lambda0 = define_form((self, params, len, scanned) =>
     args => {
         const [k, env] = list_to_vector(args);
-        return sendv(k, make_form(improper_lambda1, params, scanned, env));
+        return sendv(k, make_form(improper_lambda1, params, len, scanned, env));
     });
 
-const improper_lambda1 = define_form((self, params, scanned, env) =>
+const improper_lambda1 = define_form((self, params, len, scanned, env) =>
     args => handle_lambda(args, params, scanned, env, improper_extend_env));
 
 const letcc0 = define_form((self, name, scanned) =>
