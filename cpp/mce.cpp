@@ -5,6 +5,7 @@
 #include "mce.hpp"
 #include "json.hpp"
 #include "cxxopts.hpp"
+#include "scope.h"
 
 using nlohmann::json;
 
@@ -130,15 +131,17 @@ typedef boxed extend_env_fn(boxed env, boxed syms, boxed values);
 std::string mce_save(boxed exp);
 boxed mce_restore(const std::string& s, std::shared_ptr<Runtime> runtime);
 
-boxed Runtime::maybe_gc(boxed state) {
-    if ((allocated_pairs.size() > gc_threshold) ||
-        (allocated_vectors.size() > gc_threshold) ||
-        (allocated_functions.size() > gc_threshold)) {
+void Runtime::maybe_gc(boxed& state) {
+    auto& allocated = allocations.back();
+
+    if ((allocated.pairs.size() > gc_threshold) ||
+        (allocated.vectors.size() > gc_threshold) ||
+        (allocated.functions.size() > gc_threshold)) {
         auto saved = mce_save(state);
 
         std::unordered_set<std::shared_ptr<pair>> ps;
-        for (auto const& entry : allocated_pairs) {
-            if (auto p = entry.second.lock()) {
+        for (auto const& entry : allocated.pairs) {
+            if (auto const& p = entry.second.lock()) {
                 ps.insert(p);
             }
         }
@@ -146,61 +149,69 @@ boxed Runtime::maybe_gc(boxed state) {
             p->first = nullptr;
             p->second = nullptr;
         }
-        allocated_pairs.clear();
+        ps.clear();
 
         std::unordered_set<std::shared_ptr<vector>> vs;
-        for (auto const& entry : allocated_vectors) {
-            if (auto v = entry.second.lock()) {
+        for (auto const& entry : allocated.vectors) {
+            if (auto const& v = entry.second.lock()) {
                 vs.insert(v);
             }
         }
         for (auto const& v : vs) {
             v->clear();
         }
-        allocated_vectors.clear();
+        vs.clear();
 
         std::unordered_set<lambda> fs;
-        for (auto const& entry : allocated_functions) {
-            if (auto f = entry.second.lock()) {
+        for (auto const& entry : allocated.functions) {
+            if (auto const& f = entry.second.lock()) {
                 fs.insert(f);
             }
         }
         for (auto const& f : fs) {
             *f = nullptr;
         }
-        allocated_functions.clear();
+        fs.clear();
 
-        state = mce_restore(saved, state->get_runtime());
+        const auto runtime = state->get_runtime();
+        state.reset();
+
+        std::cout << "END GC " << allocated.pairs.size() << " " << allocated.vectors.size() << " " << allocated.functions.size() << std::endl;
+
+        assert(allocated.pairs.size() == 0);
+        assert(allocated.vectors.size() == 0);
+        assert(allocated.functions.size() == 0);
+
+        state = mce_restore(saved, runtime);
     }
-    return state;
 }
 
 boxed cons(boxed car, boxed cdr) {
     auto runtime = car->get_runtime();
     auto p = std::shared_ptr<pair>(new pair(car, cdr), [runtime](auto pptr) {
-        runtime->allocated_pairs.erase(pptr);
+        runtime->allocations.back().pairs.erase(pptr);
         delete pptr;
     });
-    runtime->allocated_pairs[p.get()] = p;
+    runtime->allocations.back().pairs[p.get()] = p;
     return box<std::shared_ptr<pair>>(p, runtime);
 }
 
 boxed make_vector(std::shared_ptr<Runtime> runtime) {
     auto v = std::shared_ptr<vector>(new vector(), [runtime](auto vptr) {
-        runtime->allocated_vectors.erase(vptr);
+        runtime->allocations.back().vectors.erase(vptr);
         delete vptr;
     });
-    runtime->allocated_vectors[v.get()] = v;
+    runtime->allocations.back().vectors[v.get()] = v;
     return box<std::shared_ptr<vector>>(v, runtime);
 }
 
 template<>
 lambda make_lambda<lambda>(func fn, std::shared_ptr<Runtime> runtime) {
     auto f = std::shared_ptr<func>(new func(fn), [runtime](auto fptr) {
-        runtime->allocated_functions.erase(fptr);
+        runtime->allocations.back().functions.erase(fptr);
         delete fptr;
     });
-    runtime->allocated_functions[f.get()] = f;
+    runtime->allocations.back().functions[f.get()] = f;
     return f;
 }
 
@@ -834,11 +845,28 @@ boxed step(boxed state) {
 }
 
 boxed run(boxed state) {
-    while (!is_result(state)) {
-        state = state->get_runtime()->maybe_gc(step(state));
-    }
+    auto runtime = state->get_runtime();
+    runtime->allocations.resize(runtime->allocations.size() + 1);
 
-    return result_val(state);
+    {
+        sr::scope_exit guard([runtime]() {
+            auto& allocated = runtime->allocations[runtime->allocations.size() - 2];
+            auto& new_allocated = runtime->allocations.back();
+
+            allocated.pairs.merge(new_allocated.pairs);
+            allocated.vectors.merge(new_allocated.vectors);
+            allocated.functions.merge(new_allocated.functions);
+
+            runtime->allocations.pop_back();
+        });
+
+        while (!is_result(state)) {
+            state = step(state);
+            runtime->maybe_gc(state);
+        }
+
+        return result_val(state);
+    }
 }
 
 boxed globalize(boxed x, boxed args, boxed cf);
@@ -1830,7 +1858,9 @@ Runtime::Runtime() :
         gapplyx,
         transfer,
         restore
-    }) {}
+    }) {
+        allocations.resize(1);
+    }
 
 void Runtime::set_gc_threshold(size_t v) {
     gc_threshold = v;

@@ -132,7 +132,7 @@ public:
     Runtime();
 
     void set_gc_threshold(size_t v);
-    boxed maybe_gc(boxed state);
+    void maybe_gc(boxed& state);
 
     boxed get_config(const std::string& k);
     void set_config(const std::string& k, boxed v);
@@ -144,9 +144,12 @@ public:
     void register_kenv_function(function f);
 
 private:
-    std::unordered_map<pair*, std::weak_ptr<pair>> allocated_pairs;
-    std::unordered_map<vector*, std::weak_ptr<vector>> allocated_vectors;
-    std::unordered_map<func*, std::weak_ptr<func>> allocated_functions;
+    struct allocations {
+        std::unordered_map<pair*, std::weak_ptr<pair>> pairs;
+        std::unordered_map<vector*, std::weak_ptr<vector>> vectors;
+        std::unordered_map<func*, std::weak_ptr<func>> functions;
+    };
+    std::vector<allocations> allocations;
 
     size_t gc_threshold;
 
@@ -159,6 +162,7 @@ private:
     friend lambda make_lambda<lambda>(func fn, std::shared_ptr<Runtime> runtime);
     friend boxed find_global(const symbol& sym, std::shared_ptr<Runtime> runtime);
     friend boxed wrap_global_lambda(boxed fn, boxed cf);
+    friend boxed run(boxed state);
 };
 
 boxed send(boxed k, boxed args);
