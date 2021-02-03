@@ -5,7 +5,6 @@
 #include "mce.hpp"
 #include "json.hpp"
 #include "cxxopts.hpp"
-#include "scope.h"
 
 using nlohmann::json;
 
@@ -131,111 +130,255 @@ typedef boxed extend_env_fn(boxed env, boxed syms, boxed values);
 std::string mce_save(boxed exp);
 boxed mce_restore(const std::string& s, std::shared_ptr<Runtime> runtime);
 
-void Runtime::maybe_gc(boxed& state) {
-    auto& allocated = allocations.back();
+std::string pickle(boxed exp);
+boxed serialize(boxed exp);
+boxed unmemoize(boxed exp);
 
+void Runtime::break_cycles() {
+    // Get all the pairs we have now.
+    std::unordered_set<std::shared_ptr<pair>> ps;
+    for (auto const& entry : allocated.pairs) {
+        auto const& p = entry.second.lock();
+        assert(p); // deleter in cons should remove unreferenced pairs
+        ps.insert(p);
+    }
+
+    // Get all the vectors we have now.
+    std::unordered_set<std::shared_ptr<vector>> vs;
+    for (auto const& entry : allocated.vectors) {
+        auto const& v = entry.second.lock();
+        assert(v); // deleter in make_vector should remove unreferenced vectors
+        vs.insert(v);
+    }
+
+    // Get all the lambdas we have now.
+    std::unordered_set<lambda> fs;
+    for (auto const& entry : allocated.functions) {
+        auto const& f = entry.second.second.lock();
+        assert(f); // deleter in make_lambda should remove unreferenced lambdas
+        fs.insert(f);
+    }
+
+    // Break cycles. This modifies the objects but we've already saved them into a
+    // string above which we'll restore later. The other end of the cycle will be
+    // pointing to the outer shared pointer so when we reset the inner shared pointer
+    // the chain will be broken since the other end won't be keeping the inner
+    // object alive any more.
+    //
+    // e.g. for pairs:
+    //
+    //            +---------------------------------------+
+    //            |                                       |
+    //            v                                       |
+    //          outer1        +------------>outer2        |
+    //   CUT HERE |           |               | CUT HERE  |
+    //          inner1        |             inner2        |
+    //          /    \        |             /    \        |
+    //     inner1a inner1b----+         outer2a outer2b---+
+    //
+    for (auto const& p : ps) {
+        p->reset();
+    }
+    for (auto const& v : vs) {
+        v->reset();
+    }
+    for (auto const& f : fs) {
+        f->reset();
+    }
+}
+
+void Runtime::maybe_gc() {
     if ((allocated.pairs.size() > gc_threshold) ||
         (allocated.vectors.size() > gc_threshold) ||
         (allocated.functions.size() > gc_threshold)) {
-        auto saved = mce_save(state);
+        std::cout << "GC0 " << allocated.pairs.size() << " " << allocated.vectors.size() << " " << allocated.functions.size() << std::endl;
+        // First we need to find which objects are still pointed to.
+        // We only consider pairs, vectors and lambdas because they're the only
+        // object types that can form loops. The other types can be left to
+        // shared pointers only.
 
-        std::unordered_set<std::shared_ptr<pair>> ps;
+        // Make a big vector which will contain every object boxed.
+        auto saved_allocations = std::shared_ptr<vector>(new vector(new std::vector<boxed>()));
+        // Make a map which will remember where each object is in the boxed vector.
+        std::unordered_map<void*, size_t> saved_indices;
+
+        // For each pair, add it to the boxed vector and remember its position.
         for (auto const& entry : allocated.pairs) {
-            if (auto const& p = entry.second.lock()) {
-                ps.insert(p);
-            }
+            auto const& p = entry.second.lock();
+            assert(p); // deleter in cons should remove unreferenced pairs
+            saved_indices[p.get()] = (*saved_allocations)->size();
+            (*saved_allocations)->push_back(box<std::shared_ptr<pair>>(p, shared_from_this()));
         }
-        for (auto const& p : ps) {
-            p->first = nullptr;
-            p->second = nullptr;
-        }
-        ps.clear();
 
-        std::unordered_set<std::shared_ptr<vector>> vs;
+        // For each vector, add it to the boxed vector and remember its position.
         for (auto const& entry : allocated.vectors) {
-            if (auto const& v = entry.second.lock()) {
-                vs.insert(v);
-            }
+            auto const& v = entry.second.lock();
+            assert(v); // deleter in make_vector should remove unreferenced vectors
+            saved_indices[v.get()] = (*saved_allocations)->size();
+            (*saved_allocations)->push_back(box<std::shared_ptr<vector>>(v, shared_from_this()));
         }
-        for (auto const& v : vs) {
-            v->clear();
-        }
-        vs.clear();
 
-        std::unordered_set<lambda> fs;
+        // For each lambda, add it to the boxed vector and remember its position.
         for (auto const& entry : allocated.functions) {
-            if (auto const& f = entry.second.lock()) {
-                fs.insert(f);
+            auto const& f = entry.second.second.lock();
+            assert(f); // deleter in make_lambda should remove unreferenced lambdas
+            if (entry.second.first) {
+                saved_indices[f.get()] = (*saved_allocations)->size();
+                (*saved_allocations)->push_back(box<lambda>(f, shared_from_this()));
             }
         }
-        for (auto const& f : fs) {
-            *f = nullptr;
+
+        // Save the boxed vector into a string.
+        // Note: This process itself will have created more objects with cycles but
+        // they will all be destroyed when we break cycles since we know there will
+        // be nowhere else referencing them.
+        auto saved = mce_save(box<std::shared_ptr<vector>>(saved_allocations, shared_from_this()));
+        // We don't need the boxed vector any more.
+        saved_allocations.reset();
+
+        // Break cycles in objects.
+        break_cycles();
+
+// why are there two pairs still alive and not 1?
+// do we still need to add another shared_ptr to pair, vector and func when we deal with them?
+
+        std::cout << "GC1 " << allocated.pairs.size() << " " << allocated.vectors.size() << " " << allocated.functions.size() << std::endl;
+        //assert(allocated.pairs.size() == 0);
+        //assert(allocated.vectors.size() == 0);
+        //assert(allocated.functions.size() == 0);
+
+        // Remember which objects are still live.
+        std::unordered_set<std::shared_ptr<pair>> rps;
+        for (auto const& entry : allocated.pairs) {
+            auto const& p = entry.second.lock();
+            assert(p);
+            rps.insert(p);
         }
-        fs.clear();
+        std::unordered_set<std::shared_ptr<vector>> rvs;
+        for (auto const& entry : allocated.vectors) {
+            auto const& v = entry.second.lock();
+            assert(v);
+            rvs.insert(v);
+        }
+        std::unordered_set<lambda> rfs;
+        for (auto const& entry : allocated.functions) {
+            auto const& f = entry.second.second.lock();
+            assert(f);
+            rfs.insert(f);
+        }
 
-        const auto runtime = state->get_runtime();
-        state.reset();
+        // Now we restore the boxed vector. Note this will also have all the cycles restored.
+        auto restored = mce_restore(saved, shared_from_this())->cast<vector>();
 
-        std::cout << "END GC " << allocated.pairs.size() << " " << allocated.vectors.size() << " " << allocated.functions.size() << std::endl;
+        // Make another boxed vector.
+        saved_allocations = std::shared_ptr<vector>(new vector(new std::vector<boxed>()));
+        // And another map of indices.
+        std::unordered_map<void*, size_t> saved_indices2;
 
-        assert(allocated.pairs.size() == 0);
-        assert(allocated.vectors.size() == 0);
-        assert(allocated.functions.size() == 0);
+        // Go through the objects we remembered were live and add their corresponding object
+        // from the restored vector to the new boxed vector.
+        for (auto& p : rps) {
+            saved_indices2[p.get()] = (*saved_allocations)->size();
+            (*saved_allocations)->push_back(
+                (*restored)->at(saved_indices.at(p.get())));
+        }
+        for (auto& v : rvs) {
+            saved_indices2[v.get()] = (*saved_allocations)->size();
+            (*saved_allocations)->push_back(
+                (*restored)->at(saved_indices.at(v.get())));
+        }
+        for (auto& f : rfs) {
+            saved_indices2[f.get()] = (*saved_allocations)->size();
+            (*saved_allocations)->push_back(
+                (*restored)->at(saved_indices.at(f.get())));
+        }
+        restored.reset();
+        saved_indices.clear();
 
-        state = mce_restore(saved, runtime);
+        // Save the new boxed vector into a string.
+        saved = mce_save(box<std::shared_ptr<vector>>(saved_allocations, shared_from_this()));
+        saved_allocations.reset();
+
+        // Break the cycles again.
+        break_cycles();
+
+        // Restore again. This will only have what we remembered was live.
+        restored = mce_restore(saved, shared_from_this())->cast<vector>();
+
+        // Now we can fix up the live objects.
+        for (auto& p : rps) {
+            *p = *(*restored)->at(saved_indices2.at(p.get()))->cast<pair>();
+        }
+        for (auto& v : rvs) {
+            *v = *(*restored)->at(saved_indices.at(v.get()))->cast<vector>();
+        }
+        for (auto& f : rfs) {
+            *f = *(*restored)->at(saved_indices.at(f.get()))->cast<lambda>();
+        }
+        rps.clear();
+        rvs.clear();
+        rfs.clear();
+        restored.reset();
+        saved_indices2.clear();
+
+        std::cout << "GC2 " << allocated.pairs.size() << " " << allocated.vectors.size() << " " << allocated.functions.size() << std::endl;
     }
 }
 
 boxed cons(boxed car, boxed cdr) {
     auto runtime = car->get_runtime();
-    auto p = std::shared_ptr<pair>(new pair(car, cdr), [runtime](auto pptr) {
-        runtime->allocations.back().pairs.erase(pptr);
+    auto p = std::shared_ptr<pair>(new pair(new std::pair<boxed, boxed>(car, cdr)), [runtime](auto pptr) {
+        runtime->allocated.pairs.erase(pptr);
         delete pptr;
     });
-    runtime->allocations.back().pairs[p.get()] = p;
+    runtime->allocated.pairs[p.get()] = p;
     return box<std::shared_ptr<pair>>(p, runtime);
 }
 
 boxed make_vector(std::shared_ptr<Runtime> runtime) {
-    auto v = std::shared_ptr<vector>(new vector(), [runtime](auto vptr) {
-        runtime->allocations.back().vectors.erase(vptr);
+    auto v = std::shared_ptr<vector>(new vector(new std::vector<boxed>()), [runtime](auto vptr) {
+        runtime->allocated.vectors.erase(vptr);
         delete vptr;
     });
-    runtime->allocations.back().vectors[v.get()] = v;
+    runtime->allocated.vectors[v.get()] = v;
     return box<std::shared_ptr<vector>>(v, runtime);
 }
 
 template<>
-lambda make_lambda<lambda>(func fn, std::shared_ptr<Runtime> runtime) {
-    auto f = std::shared_ptr<func>(new func(fn), [runtime](auto fptr) {
-        runtime->allocations.back().functions.erase(fptr);
+lambda make_lambda<lambda>(std::function<function> fn,
+                           std::shared_ptr<Runtime> runtime,
+                           bool has_defn) {
+    auto f = std::shared_ptr<func>(new func(new std::function<function>(fn)), [runtime](auto fptr) {
+        runtime->allocated.functions.erase(fptr);
         delete fptr;
     });
-    runtime->allocations.back().functions[f.get()] = f;
+    runtime->allocated.functions[f.get()] = std::make_pair(has_defn, f);
     return f;
 }
 
 template<>
-boxed make_lambda<boxed>(func fn, std::shared_ptr<Runtime> runtime) {
-    return box<lambda>(make_lambda<lambda>(fn, runtime), runtime);
+boxed make_lambda<boxed>(std::function<function> fn,
+                         std::shared_ptr<Runtime> runtime,
+                         bool has_defn) {
+    return box<lambda>(make_lambda<lambda>(fn, runtime, has_defn), runtime);
 }
 
 boxed list_ref(boxed l, size_t i) {
     while (i > 0) {
-        l = l->cast<pair>()->second;
+        l = (*l->cast<pair>())->second;
         --i;
     }
 
-    return l->cast<pair>()->first;
+    return (*l->cast<pair>())->first;
 }
 
 boxed list_rest(boxed l, size_t i) {
     while (i > 0) {
-        l = l->cast<pair>()->second;
+        l = (*l->cast<pair>())->second;
         --i;
     }
 
-    return l->cast<pair>()->second;
+    return (*l->cast<pair>())->second;
 }
 
 boxed list_to_vector(boxed l) {
@@ -244,8 +387,8 @@ boxed list_to_vector(boxed l) {
 
     while (l->contains<pair>()) {
         auto p = l->cast<pair>();
-        v->push_back(p->first);
-        l = p->second;
+        (*v)->push_back((*p)->first);
+        l = (*p)->second;
     }
 
     return a;
@@ -254,7 +397,7 @@ boxed list_to_vector(boxed l) {
 boxed vector_to_list(boxed vec) {
     auto v = vec->cast<vector>();
     auto l = box(vec->get_runtime());
-    for (auto it = v->rbegin(); it != v->rend(); ++it) {
+    for (auto it = (*v)->rbegin(); it != (*v)->rend(); ++it) {
         l = cons(*it, l);
     }
     return l;
@@ -270,8 +413,8 @@ boxed cmap(map_fn f, boxed l, cmap_table& tab, set_entry_fn set_entry) {
     auto entry = set_entry(tab, l, cons(bnil, bnil));
     auto ep = entry->cast<pair>();
     auto lp = l->cast<pair>();
-    ep->first = f(lp->first);
-    ep->second = f(lp->second);
+    (*ep)->first = f((*lp)->first);
+    (*ep)->second = f((*lp)->second);
 
     return entry;
 }
@@ -286,8 +429,8 @@ boxed vector_cmap(map_fn f, boxed v, cmap_table& tab, set_entry_fn set_entry) {
     auto ev = entry->cast<vector>();
     auto vv = v->cast<vector>();
 
-    for (auto const& el : *vv) {
-        ev->push_back(f(el));
+    for (auto const& el : **vv) {
+        (*ev)->push_back(f(el));
     }
 
     return entry;
@@ -309,7 +452,7 @@ bool is_yield_defn(boxed args) {
 
 boxed get_procedure_defn(boxed proc) {
     auto runtime = proc->get_runtime();
-    return (*proc->cast<lambda>())(
+    return (**proc->cast<lambda>())(
         cons(box<symbol>("MCE-YIELD-DEFINITION", runtime), box(runtime)));
 }
 
@@ -349,8 +492,8 @@ boxed xdisplay(boxed args, std::ostream& out, bool is_write) {
                 }
                 first = false;
                 auto p = exp->cast<pair>();
-                xdisplay(cons(p->first, bnil), out, is_write);
-                exp = p->second;
+                xdisplay(cons((*p)->first, bnil), out, is_write);
+                exp = (*p)->second;
             }
             if (!exp->empty()) {
                 out << " . ";
@@ -362,7 +505,7 @@ boxed xdisplay(boxed args, std::ostream& out, bool is_write) {
             bool first = true;
             out << "#(";
             auto vec = exp->cast<vector>();
-            for (auto const& v : *vec) {
+            for (auto const& v : **vec) {
                 if (!first) {
                     out << " ";
                 }
@@ -384,9 +527,9 @@ boxed xprint(boxed args, std::ostream& out) {
     auto r = bnil;
     while (args->contains<pair>()) {
         auto p = args->cast<pair>();
-        r = p->first;
+        r = (*p)->first;
         xdisplay(cons(r, bnil), out, false);
-        args = p->second;
+        args = (*p)->second;
     }
     out << std::endl;
     return r;
@@ -405,9 +548,9 @@ boxed xwrite(boxed args, std::ostream& out) {
     auto r = bnil;
     while (args->contains<pair>()) {
         auto p = args->cast<pair>();
-        r = p->first;
+        r = (*p)->first;
         xdisplay(cons(r, bnil), out, true);
-        args = p->second;
+        args = (*p)->second;
     }
     return r;
 }
@@ -425,15 +568,16 @@ boxed serialize(boxed exp);
 
 boxed memoize_lambda(lambda proc, boxed defn) {
     return make_lambda<boxed>([proc, defn](boxed args) -> boxed {
+        //print(cons(serialize(unmemoize(args)), box(args->get_runtime())));
         if (is_yield_defn(args)) {
             if (defn->contains<lambda>()) {
-                return (*defn->cast<lambda>())(box(args->get_runtime()));
+                return (**defn->cast<lambda>())(box(args->get_runtime()));
             }
             return defn;
         }
-        //print(cons(serialize(unmemoize(defn)), bnil));
-        return (*proc)(args);
-    }, defn->get_runtime());
+        //print(cons(serialize(unmemoize(defn)), box(defn->get_runtime())));
+        return (**proc)(args);
+    }, defn->get_runtime(), true);
 }
 
 boxed memoize_lambda(boxed proc, boxed defn) {
@@ -450,41 +594,41 @@ boxed sendv(boxed k, boxed v) {
 
 boxed ctenv_lookup(boxed i, boxed env) {
     auto ip = i->cast<pair>();
-    auto first = ip->first->cast<double>();
-    auto second = ip->second->cast<double>();
+    auto first = (*ip)->first->cast<double>();
+    auto second = (*ip)->second->cast<double>();
     auto bindings = list_ref(env, first)->cast<pair>();
-    auto v = bindings->second->cast<vector>();
-    if (second < v->size()) {
-        return (*v)[second];
+    auto v = (*bindings)->second->cast<vector>();
+    if (second < (*v)->size()) {
+        return (**v)[second];
     }
     return box(i->get_runtime());
 }
 
 boxed ctenv_setvar(boxed name, boxed i, boxed val, boxed env) {
     auto ip = i->cast<pair>();
-    auto first = ip->first->cast<double>();
-    auto second = ip->second->cast<double>();
+    auto first = (*ip)->first->cast<double>();
+    auto second = (*ip)->second->cast<double>();
     auto bindings = list_ref(env, first)->cast<pair>();
-    auto v = bindings->second->cast<vector>();
+    auto v = (*bindings)->second->cast<vector>();
     auto bnil = box(i->get_runtime());
 
-    if (second >= v->size()) {
-        v->resize(second + 1, bnil);
+    if (second >= (*v)->size()) {
+        (*v)->resize(second + 1, bnil);
     }
-    (*v)[second] = val;
+    (**v)[second] = val;
 
-    if (bindings->first->empty()) {
-        bindings->first = cons(bnil, bnil);
+    if ((*bindings)->first->empty()) {
+        (*bindings)->first = cons(bnil, bnil);
     }
-    auto p = bindings->first->cast<pair>();
+    auto p = (*bindings)->first->cast<pair>();
     while (second > 0) {
-        if (p->second->empty()) {
-            p->second = cons(bnil, bnil);
+        if ((*p)->second->empty()) {
+            (*p)->second = cons(bnil, bnil);
         }
-        p = p->second->cast<pair>();
+        p = (*p)->second->cast<pair>();
         --second;
     }
-    p->first = name;
+    (*p)->first = name;
 
     return val;
 }
@@ -565,8 +709,8 @@ boxed result(boxed exp) {
     auto runtime = exp->get_runtime();
     auto a = make_vector(runtime);
     auto v = a->cast<vector>();
-    v->push_back(box<symbol>("MCE-RESULT", runtime));
-    v->push_back(exp);
+    (*v)->push_back(box<symbol>("MCE-RESULT", runtime));
+    (*v)->push_back(exp);
     return a;
 }
 
@@ -575,13 +719,13 @@ bool is_result(boxed exp) {
         return false;
     }
     auto v = exp->cast<vector>();
-    return (v->size() == 2) &&
-           (*v)[0]->contains<symbol>() &&
-           (*(*v)[0]->cast<symbol>() == "MCE-RESULT");
+    return ((*v)->size() == 2) &&
+           (**v)[0]->contains<symbol>() &&
+           (*(**v)[0]->cast<symbol>() == "MCE-RESULT");
 }
 
 boxed result_val(boxed exp) {
-    return (*exp->cast<vector>())[1];
+    return (**exp->cast<vector>())[1];
 }
 
 boxed less_than(boxed args) {
@@ -600,18 +744,18 @@ boxed plus(boxed args) {
     double r = 0;
     while (args->contains<pair>()) {
         auto p = args->cast<pair>();
-        r += p->first->cast<double>();
-        args = p->second;
+        r += (*p)->first->cast<double>();
+        args = (*p)->second;
     }
     return box<double>(r, args->get_runtime());
 }
 
 boxed minus(boxed args) {
     auto p = args->cast<pair>();
-    double r = p->first->cast<double>();
-    while ((args = p->second)->contains<pair>()) {
+    double r = (*p)->first->cast<double>();
+    while ((args = (*p)->second)->contains<pair>()) {
         p = args->cast<pair>();
-        r -= p->first->cast<double>();
+        r -= (*p)->first->cast<double>();
     }
     return box<double>(r, args->get_runtime());
 }
@@ -620,18 +764,18 @@ boxed multiply(boxed args) {
     double r = 1;
     while (args->contains<pair>()) {
         auto p = args->cast<pair>();
-        r *= p->first->cast<double>();
-        args = p->second;
+        r *= (*p)->first->cast<double>();
+        args = (*p)->second;
     }
     return box<double>(r, args->get_runtime());
 }
 
 boxed divide(boxed args) {
     auto p = args->cast<pair>();
-    double r = p->first->cast<double>();
-    while ((args = p->second)->contains<pair>()) {
+    double r = (*p)->first->cast<double>();
+    while ((args = (*p)->second)->contains<pair>()) {
         p = args->cast<pair>();
-        r /= p->first->cast<double>();
+        r /= (*p)->first->cast<double>();
     }
     return box<double>(r, args->get_runtime());
 }
@@ -662,14 +806,14 @@ boxed is_vector(boxed args) {
 
 boxed vector_length(boxed args) {
     auto a = list_ref(args, 0);
-    return box<double>(static_cast<double>(a->cast<vector>()->size()),
+    return box<double>(static_cast<double>((*a->cast<vector>())->size()),
                        args->get_runtime());
 }
 
 boxed vector_ref(boxed args) {
     auto a = list_ref(args, 0);
     auto i = list_ref(args, 1);
-    return a->cast<vector>()->at(i->cast<double>());
+    return (*a->cast<vector>())->at(i->cast<double>());
 }
 
 boxed is_string_equal(boxed args) {
@@ -697,14 +841,14 @@ boxed cdr(boxed args) {
 boxed set_car(boxed args) {
     auto p = list_ref(args, 0);
     auto v = list_ref(args, 1);
-    p->cast<pair>()->first = v;
+    (*p->cast<pair>())->first = v;
     return p;
 }
 
 boxed set_cdr(boxed args) {
     auto p = list_ref(args, 0);
     auto v = list_ref(args, 1);
-    p->cast<pair>()->second = v;
+    (*p->cast<pair>())->second = v;
     return p;
 }
 
@@ -841,32 +985,18 @@ boxed find_global(const symbol& sym, std::shared_ptr<Runtime> runtime) {
 }
 
 boxed step(boxed state) {
-    return (*list_ref(state, 0)->cast<lambda>())(list_rest(state, 0));
+    return (**list_ref(state, 0)->cast<lambda>())(list_rest(state, 0));
 }
 
 boxed run(boxed state) {
     auto runtime = state->get_runtime();
-    runtime->allocations.resize(runtime->allocations.size() + 1);
 
-    {
-        sr::scope_exit guard([runtime]() {
-            auto& allocated = runtime->allocations[runtime->allocations.size() - 2];
-            auto& new_allocated = runtime->allocations.back();
-
-            allocated.pairs.merge(new_allocated.pairs);
-            allocated.vectors.merge(new_allocated.vectors);
-            allocated.functions.merge(new_allocated.functions);
-
-            runtime->allocations.pop_back();
-        });
-
-        while (!is_result(state)) {
-            state = step(state);
-            runtime->maybe_gc(state);
-        }
-
-        return result_val(state);
+    while (!is_result(state)) {
+        state = step(state);
+        runtime->maybe_gc();
     }
+
+    return result_val(state);
 }
 
 boxed globalize(boxed x, boxed args, boxed cf);
@@ -875,37 +1005,35 @@ boxed handle_global_lambda(boxed args, boxed fn, boxed cf) {
     auto f = fn->cast<lambda>();
 
     if (is_transfer(args)) {
-        return (*f)(transfer_args(args));
+        return (**f)(transfer_args(args));
     }
 
     if (is_step_contn(args)) {
         auto sck = step_contn_k(args);
         auto sca = step_contn_args(args);
-        return sendv(sck, globalize((*f)(sca), sca, cf));
+        return sendv(sck, globalize((**f)(sca), sca, cf));
     }
 
-    return globalize((*f)(args), args, cf);
+    return globalize((**f)(args), args, cf);
 }
 
 boxed lookup_global(const symbol& sym, std::shared_ptr<Runtime> runtime);
 
 boxed handle_global_lambda_kenv(boxed args, boxed fn) {
-    auto f = fn->cast<lambda>();
-
     if (is_step_contn(args)) {
-        return (*f)(cons(step_contn_k(args),
-                         cons(step_contn_env(args),
-                              step_contn_args(args))));
+        return send(fn, cons(step_contn_k(args),
+                             cons(step_contn_env(args),
+                                  step_contn_args(args))));
     }
 
-    return run((*f)(cons(lookup_global(symbol("result"), args->get_runtime()),
-                         cons(make_global_env(args->get_runtime()),
-                              args))));
+    return run(send(fn, cons(lookup_global(symbol("result"), args->get_runtime()),
+                             cons(make_global_env(args->get_runtime()),
+                                  args))));
 }
 
 boxed wrap_global_lambda(boxed fn, boxed cf) {
     const lambda l = fn->cast<lambda>();
-    auto p = l->target<function*>();
+    auto p = (*l)->target<function*>();
     auto runtime = fn->get_runtime();
 
     if (p && (runtime->kenvfn_set.find(*p) != runtime->kenvfn_set.end())) {
@@ -924,14 +1052,14 @@ boxed extend_env(boxed env, boxed syms, boxed values) {
 }
 
 boxed improper_extend_env(boxed env, boxed syms, boxed values) {
-    vector s;
+    std::vector<boxed> s;
     auto av = make_vector(env->get_runtime());
     auto v = av->cast<vector>();
 
     while (!syms->empty()) {
         if (syms->contains<symbol>()) {
             s.push_back(syms);
-            v->push_back(values);
+            (*v)->push_back(values);
             break;
         }
         if (values->empty()) {
@@ -939,7 +1067,7 @@ boxed improper_extend_env(boxed env, boxed syms, boxed values) {
         }
 
         s.push_back(list_ref(syms, 0));
-        v->push_back(list_ref(values, 0));
+        (*v)->push_back(list_ref(values, 0));
         
         syms = list_rest(syms, 0);
         values = list_rest(values, 0);
@@ -1059,7 +1187,7 @@ boxed make_form(boxed n, boxed args) {
 
     auto f = box(runtime);
     auto f2 = memoize_lambda(make_lambda<lambda>([f](boxed args) -> boxed {
-        return (*f->cast<lambda>())(args);
+        return (**f->cast<lambda>())(args);
     }, runtime), defn);
     *f = *memoize_lambda(forms[n->cast<double>()](cons(f2, args)), defn);
 
@@ -1072,7 +1200,7 @@ boxed make_form(enum forms n, boxed args) {
 
 boxed make_form(boxed args) {
     auto p = args->cast<pair>();
-    return make_form(p->first, p->second);
+    return make_form((*p)->first, (*p)->second);
 }
 
 boxed aform(enum forms n, std::shared_ptr<Runtime> runtime) {
@@ -1085,7 +1213,7 @@ boxed lookup_global(const symbol& sym, std::shared_ptr<Runtime> runtime) {
                      cons(box<symbol>(sym, runtime), box(runtime)));
     auto f = box(runtime);
     auto f2 = memoize_lambda(make_lambda<lambda>([f](boxed args) -> boxed {
-        return (*f->cast<lambda>())(args);
+        return (**f->cast<lambda>())(args);
     }, runtime), defn);
     *f = *memoize_lambda(wrap_global_lambda(r, f2), defn);
     return f;
@@ -1101,7 +1229,7 @@ boxed globalize(boxed x, boxed args, boxed cf) {
                      cons(args, cons(cf, box(runtime))));
     auto f = box(runtime);
     auto f2 = memoize_lambda(make_lambda<lambda>([f](boxed args) -> boxed {
-        return (*f->cast<lambda>())(args);
+        return (**f->cast<lambda>())(args);
     }, runtime), defn);
     *f = *memoize_lambda(wrap_global_lambda(x, f2), defn);
     return f;
@@ -1328,13 +1456,13 @@ boxed application0(boxed args) {
 }
 
 bool is_unmemoized(std::shared_ptr<vector> v) {
-    return (v->size() == 2) &&
-           (*v)[0]->contains<symbol>() &&
-           (*(*v)[0]->cast<symbol>() == "MCE-UNMEMOIZED");
+    return ((*v)->size() == 2) &&
+           (**v)[0]->contains<symbol>() &&
+           (*(**v)[0]->cast<symbol>() == "MCE-UNMEMOIZED");
 }
 
 boxed unmemoized_repexp(std::shared_ptr<vector> v) {
-    return (*v)[1];
+    return (**v)[1];
 }
 
 boxed memoize_aux(boxed exp, cmap_table& tab, map_fn fn) {
@@ -1351,7 +1479,7 @@ boxed memoize_aux(boxed exp, cmap_table& tab, map_fn fn) {
             auto f = box(runtime);
             auto entry = table_set(tab, exp, memoize_lambda(
                 make_lambda<lambda>([f](boxed args) -> boxed {
-                    return (*f->cast<lambda>())(args);
+                    return (**f->cast<lambda>())(args);
                 }, runtime),
                 make_lambda<boxed>([r](boxed) -> boxed {
                     return r;
@@ -1359,7 +1487,7 @@ boxed memoize_aux(boxed exp, cmap_table& tab, map_fn fn) {
             *r = *fn(repexp);
             *f = Box(make_lambda<lambda>([r, f](boxed args) -> boxed {
                     *f = *make_form(r);
-                    return (*f->cast<lambda>())(args);
+                    return (**f->cast<lambda>())(args);
                 }, runtime), runtime);
             return entry;
         }
@@ -1396,8 +1524,8 @@ boxed unmemoize_aux(boxed exp, cmap_table& tab, map_fn fn) {
         auto entry = table_set(tab, exp, make_vector(runtime));
         auto v = entry->cast<vector>();
 
-        v->push_back(box<symbol>("MCE-UNMEMOIZED", runtime));
-        v->push_back(fn(get_procedure_defn(exp)));
+        (*v)->push_back(box<symbol>("MCE-UNMEMOIZED", runtime));
+        (*v)->push_back(fn(get_procedure_defn(exp)));
 
         return entry;
     }
@@ -1417,20 +1545,20 @@ boxed make_serialized(size_t n, std::shared_ptr<Runtime> runtime) {
     auto a = make_vector(runtime);
     auto v = a->cast<vector>();
 
-    v->push_back(box<symbol>("MCE-SERIALIZED", runtime));
-    v->push_back(box<double>(static_cast<double>(n), runtime));
+    (*v)->push_back(box<symbol>("MCE-SERIALIZED", runtime));
+    (*v)->push_back(box<double>(static_cast<double>(n), runtime));
 
     return a;
 }
 
 bool is_serialized(std::shared_ptr<vector> v) {
-    return (v->size() == 2) &&
-           (*v)[0]->contains<symbol>() &&
-           (*(*v)[0]->cast<symbol>() == "MCE-SERIALIZED");
+    return ((*v)->size() == 2) &&
+           (**v)[0]->contains<symbol>() &&
+           (*(**v)[0]->cast<symbol>() == "MCE-SERIALIZED");
 }
 
 boxed serialized_n(std::shared_ptr<vector> v) {
-    return (*v)[1];
+    return (**v)[1];
 }
 
 boxed serialize_aux(boxed exp,
@@ -1493,7 +1621,7 @@ boxed deserialize(boxed exp) {
     map_fn fn = [&tab, &fn, &set_entry](boxed x) -> boxed {
         return deserialize_aux(x, tab, fn, set_entry);
     };
-    return fn(exp->cast<pair>()->first);
+    return fn((*exp->cast<pair>())->first);
 }
 
 json pickle_aux(boxed exp) {
@@ -1518,13 +1646,13 @@ json pickle_aux(boxed exp) {
     } else if (exp->contains<pair>()) {
         auto p = exp->cast<pair>();
         j.push_back(std::string(1, pair_code));
-        j.push_back(pickle_aux(p->first));
-        j.push_back(pickle_aux(p->second));
+        j.push_back(pickle_aux((*p)->first));
+        j.push_back(pickle_aux((*p)->second));
     } else if (exp->contains<vector>()) {
         j.push_back(std::string(1, vector_code));
         auto vec = exp->cast<vector>();
-        j.push_back(vec->size());
-        for (auto const& v : *vec) {
+        j.push_back((*vec)->size());
+        for (auto const& v : **vec) {
             j.push_back(pickle_aux(v));
         }
     } else {
@@ -1555,9 +1683,9 @@ boxed unpickle_aux(const json& j, std::shared_ptr<Runtime> runtime) {
         auto a = make_vector(runtime);
         auto v = a->cast<vector>();
         auto size = j.size();
-        v->resize(size - 2);
+        (*v)->resize(size - 2);
         for (json::size_type i = 2; i < size; ++i) {
-            v->at(i - 2) = unpickle_aux(j[i], runtime);
+            (*v)->at(i - 2) = unpickle_aux(j[i], runtime);
         }
         return a;
     }
@@ -1582,7 +1710,7 @@ boxed start(const std::string& s, boxed args) {
     auto runtime = args->get_runtime();
     auto r = mce_restore(s, runtime);
     if (r->contains<lambda>()) {
-        return (*r->cast<lambda>())(args);
+        return (**r->cast<lambda>())(args);
     }
     return run(r);
 }
@@ -1659,9 +1787,9 @@ void bpickle(boxed exp, std::vector<uint64_t>& refs, std::vector<unsigned char>&
         v.push_back(0);
         auto pos2 = bpickle_aux(static_cast<uint64_t>(0), v);
         bpickle_aux(v, pos1);
-        bpickle(p->first, refs, v);
+        bpickle((*p)->first, refs, v);
         bpickle_aux(v, pos2);
-        bpickle(p->second, refs, v);
+        bpickle((*p)->second, refs, v);
     } else if (exp->contains<vector>()) {
         auto vec = exp->cast<vector>();
         if (is_serialized(vec)) {
@@ -1705,7 +1833,7 @@ void bpickle(boxed exp, std::vector<uint64_t>& refs, std::vector<unsigned char>&
         }
         v.push_back(vector_code);
         // Add size of vector
-        auto size = vec->size();
+        auto size = (*vec)->size();
         bpickle_aux(static_cast<uint64_t>(size), v);
         std::vector<size_t> posv;
         for (size_t i = 0; i < size; ++i) {
@@ -1716,7 +1844,7 @@ void bpickle(boxed exp, std::vector<uint64_t>& refs, std::vector<unsigned char>&
         }
         for (size_t i = 0; i < size; ++i) {
             bpickle_aux(v, posv[i]);        
-            bpickle(vec->at(i), refs, v);
+            bpickle((*vec)->at(i), refs, v);
         }
     } else {
         throw std::range_error("unknown pickle expression");
@@ -1728,9 +1856,9 @@ void bconvert(const std::string& s, std::shared_ptr<Runtime> runtime) {
 
     std::vector<uint64_t> refs;
     std::vector<unsigned char> v;
-    bpickle(exp->first, refs, v);
+    bpickle((*exp)->first, refs, v);
 
-    if (refs.size() != exp->second->cast<double>()) {
+    if (refs.size() != (*exp)->second->cast<double>()) {
         throw std::length_error("unexpected number of references");
     }
 
@@ -1858,9 +1986,7 @@ Runtime::Runtime() :
         gapplyx,
         transfer,
         restore
-    }) {
-        allocations.resize(1);
-    }
+    }) {}
 
 void Runtime::set_gc_threshold(size_t v) {
     gc_threshold = v;

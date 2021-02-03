@@ -113,14 +113,16 @@ private:
 };
 
 typedef std::shared_ptr<Box> boxed;
-typedef std::pair<boxed, boxed> pair;
-typedef std::vector<boxed> vector;
+typedef std::shared_ptr<std::pair<boxed, boxed>> pair;
+typedef std::shared_ptr<std::vector<boxed>> vector;
 typedef boxed function(boxed);
-typedef std::function<function> func;
+typedef std::shared_ptr<std::function<function>> func;
 typedef std::shared_ptr<func> lambda;
 
 template<typename R>
-R make_lambda(func fn, std::shared_ptr<Runtime> runtime);
+R make_lambda(std::function<function> fn,
+              std::shared_ptr<Runtime> runtime,
+              bool has_defn = false);
 
 class symbol : public std::string {
 public:
@@ -132,7 +134,7 @@ public:
     Runtime();
 
     void set_gc_threshold(size_t v);
-    void maybe_gc(boxed& state);
+    void maybe_gc();
 
     boxed get_config(const std::string& k);
     void set_config(const std::string& k, boxed v);
@@ -143,13 +145,12 @@ public:
 
     void register_kenv_function(function f);
 
-private:
-    struct allocations {
+    struct {
         std::unordered_map<pair*, std::weak_ptr<pair>> pairs;
         std::unordered_map<vector*, std::weak_ptr<vector>> vectors;
-        std::unordered_map<func*, std::weak_ptr<func>> functions;
-    };
-    std::vector<allocations> allocations;
+        std::unordered_map<func*, std::pair<bool, std::weak_ptr<func>>> functions;
+    } allocated;
+private:
 
     size_t gc_threshold;
 
@@ -157,9 +158,13 @@ private:
     std::unordered_set<function*> kenvfn_set;
     std::unordered_map<std::string, boxed> config_table;
 
+    void break_cycles();
+
     friend boxed cons(boxed car, boxed cdr);
     friend boxed make_vector(std::shared_ptr<Runtime> runtime);
-    friend lambda make_lambda<lambda>(func fn, std::shared_ptr<Runtime> runtime);
+    friend lambda make_lambda<lambda>(std::function<function> fn,
+                                      std::shared_ptr<Runtime> runtime,
+                                      bool has_defn);
     friend boxed find_global(const symbol& sym, std::shared_ptr<Runtime> runtime);
     friend boxed wrap_global_lambda(boxed fn, boxed cf);
     friend boxed run(boxed state);
