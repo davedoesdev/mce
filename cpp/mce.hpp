@@ -57,6 +57,9 @@ public:
 
     template<typename T>
     typename box_type<T>::type cast() {
+        if (empty()) {
+            throw std::range_error("bad box cast");
+        }
         return *static_cast<typename box_type<T>::type*>(
             content->address(typeid(typename box_type<T>::type)));
     }
@@ -139,26 +142,29 @@ public:
     boxed get_config(const std::string& k);
     void set_config(const std::string& k, boxed v);
 
+    void set_gc_callback(boxed v);
+
     function* get_global_function(const std::string& name);
     void register_global_function(const std::string& name, function f);
     void unregister_global_function(const std::string& name);
 
     void register_kenv_function(function f);
 
+private:
+    size_t gc_threshold;
+    void break_cycles();
+    void add_stats(std::vector<std::vector<size_t>>& stats);
+    boxed gc_callback;
+
     struct {
         std::unordered_map<pair*, std::weak_ptr<pair>> pairs;
         std::unordered_map<vector*, std::weak_ptr<vector>> vectors;
         std::unordered_map<func*, std::pair<bool, std::weak_ptr<func>>> functions;
     } allocated;
-private:
-
-    size_t gc_threshold;
 
     std::unordered_map<std::string, function*> global_table;
     std::unordered_set<function*> kenvfn_set;
     std::unordered_map<std::string, boxed> config_table;
-
-    void break_cycles();
 
     friend boxed cons(boxed car, boxed cdr);
     friend boxed make_vector(std::shared_ptr<Runtime> runtime);
@@ -167,7 +173,6 @@ private:
                                       bool has_defn);
     friend boxed find_global(const symbol& sym, std::shared_ptr<Runtime> runtime);
     friend boxed wrap_global_lambda(boxed fn, boxed cf);
-    friend boxed run(boxed state);
 };
 
 boxed send(boxed k, boxed args);

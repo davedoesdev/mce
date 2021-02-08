@@ -584,6 +584,7 @@
 (table-set! global-table 'get-config get-config)
 (table-set! global-table 'cf-test cf-test)
 (table-set! global-table 'transfer-test transfer-test)
+(table-set! global-table 'set-gc-callback! (lambda (v) '()))
 
 (define (get-global-function name)
     (ref-value (table-ref global-table name)))

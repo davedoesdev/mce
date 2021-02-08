@@ -127,12 +127,43 @@ typedef std::function<boxed(boxed)> map_fn;
 typedef std::function<boxed(cmap_table&, boxed, boxed)> set_entry_fn;
 typedef boxed extend_env_fn(boxed env, boxed syms, boxed values);
 
-std::string mce_save(boxed exp);
-boxed mce_restore(const std::string& s, std::shared_ptr<Runtime> runtime);
+boxed cons(boxed car, boxed cdr) {
+    auto runtime = car->get_runtime();
+    auto p = std::shared_ptr<pair>(new pair(new std::pair<boxed, boxed>(car, cdr)), [runtime](auto pptr) {
+        runtime->allocated.pairs.erase(pptr);
+        delete pptr;
+    });
+    runtime->allocated.pairs[p.get()] = p;
+    return box<std::shared_ptr<pair>>(p, runtime);
+}
 
-std::string pickle(boxed exp);
-boxed serialize(boxed exp);
-boxed unmemoize(boxed exp);
+boxed make_vector(std::shared_ptr<Runtime> runtime) {
+    auto v = std::shared_ptr<vector>(new vector(new std::vector<boxed>()), [runtime](auto vptr) {
+        runtime->allocated.vectors.erase(vptr);
+        delete vptr;
+    });
+    runtime->allocated.vectors[v.get()] = v;
+    return box<std::shared_ptr<vector>>(v, runtime);
+}
+
+template<>
+lambda make_lambda<lambda>(std::function<function> fn,
+                           std::shared_ptr<Runtime> runtime,
+                           bool has_defn) {
+    auto f = std::shared_ptr<func>(new func(new std::function<function>(fn)), [runtime](auto fptr) {
+        runtime->allocated.functions.erase(fptr);
+        delete fptr;
+    });
+    runtime->allocated.functions[f.get()] = std::make_pair(has_defn, f);
+    return f;
+}
+
+template<>
+boxed make_lambda<boxed>(std::function<function> fn,
+                         std::shared_ptr<Runtime> runtime,
+                         bool has_defn) {
+    return box<lambda>(make_lambda<lambda>(fn, runtime, has_defn), runtime);
+}
 
 void Runtime::break_cycles() {
     // Get all the pairs we have now.
@@ -187,11 +218,25 @@ void Runtime::break_cycles() {
     }
 }
 
+void Runtime::add_stats(std::vector<std::vector<size_t>>& stats) {
+    if (gc_callback) {
+        stats.emplace_back(std::vector<size_t> {
+            allocated.pairs.size(),
+            allocated.vectors.size(),
+            allocated.functions.size()
+        });
+    }
+}
+
+std::string mce_save(boxed exp);
+boxed mce_restore(const std::string& s, std::shared_ptr<Runtime> runtime);
+
 void Runtime::maybe_gc() {
     if ((allocated.pairs.size() > gc_threshold) ||
         (allocated.vectors.size() > gc_threshold) ||
         (allocated.functions.size() > gc_threshold)) {
-        std::cout << "GC0 " << allocated.pairs.size() << " " << allocated.vectors.size() << " " << allocated.functions.size() << std::endl;
+        std::vector<std::vector<size_t>> stats;
+        add_stats(stats);
         // First we need to find which objects are still pointed to.
         // We only consider pairs, vectors and lambdas because they're the only
         // object types that can form loops. The other types can be left to
@@ -239,13 +284,7 @@ void Runtime::maybe_gc() {
         // Break cycles in objects.
         break_cycles();
 
-// why are there two pairs still alive and not 1?
-// do we still need to add another shared_ptr to pair, vector and func when we deal with them?
-
-        std::cout << "GC1 " << allocated.pairs.size() << " " << allocated.vectors.size() << " " << allocated.functions.size() << std::endl;
-        //assert(allocated.pairs.size() == 0);
-        //assert(allocated.vectors.size() == 0);
-        //assert(allocated.functions.size() == 0);
+        add_stats(stats);
 
         // Remember which objects are still live.
         std::unordered_set<std::shared_ptr<pair>> rps;
@@ -310,10 +349,10 @@ void Runtime::maybe_gc() {
             *p = *(*restored)->at(saved_indices2.at(p.get()))->cast<pair>();
         }
         for (auto& v : rvs) {
-            *v = *(*restored)->at(saved_indices.at(v.get()))->cast<vector>();
+            *v = *(*restored)->at(saved_indices2.at(v.get()))->cast<vector>();
         }
         for (auto& f : rfs) {
-            *f = *(*restored)->at(saved_indices.at(f.get()))->cast<lambda>();
+            *f = *(*restored)->at(saved_indices2.at(f.get()))->cast<lambda>();
         }
         rps.clear();
         rvs.clear();
@@ -321,46 +360,23 @@ void Runtime::maybe_gc() {
         restored.reset();
         saved_indices2.clear();
 
-        std::cout << "GC2 " << allocated.pairs.size() << " " << allocated.vectors.size() << " " << allocated.functions.size() << std::endl;
+        add_stats(stats);
+
+        if (gc_callback && gc_callback->contains<lambda>()) {
+            auto a = make_vector(shared_from_this());
+            auto v = a->cast<vector>();
+            for (auto s : stats) {
+                auto b = make_vector(shared_from_this());
+                auto w = b->cast<vector>();
+                for (auto t : s) {
+                    (*w)->push_back(box<double>(t, shared_from_this()));
+                }
+                (*v)->push_back(b);
+            }
+            auto r = (**gc_callback->cast<lambda>())(cons(a, box(shared_from_this())));
+            assert(!r->contains<bool>() || r->cast<bool>());
+        }
     }
-}
-
-boxed cons(boxed car, boxed cdr) {
-    auto runtime = car->get_runtime();
-    auto p = std::shared_ptr<pair>(new pair(new std::pair<boxed, boxed>(car, cdr)), [runtime](auto pptr) {
-        runtime->allocated.pairs.erase(pptr);
-        delete pptr;
-    });
-    runtime->allocated.pairs[p.get()] = p;
-    return box<std::shared_ptr<pair>>(p, runtime);
-}
-
-boxed make_vector(std::shared_ptr<Runtime> runtime) {
-    auto v = std::shared_ptr<vector>(new vector(new std::vector<boxed>()), [runtime](auto vptr) {
-        runtime->allocated.vectors.erase(vptr);
-        delete vptr;
-    });
-    runtime->allocated.vectors[v.get()] = v;
-    return box<std::shared_ptr<vector>>(v, runtime);
-}
-
-template<>
-lambda make_lambda<lambda>(std::function<function> fn,
-                           std::shared_ptr<Runtime> runtime,
-                           bool has_defn) {
-    auto f = std::shared_ptr<func>(new func(new std::function<function>(fn)), [runtime](auto fptr) {
-        runtime->allocated.functions.erase(fptr);
-        delete fptr;
-    });
-    runtime->allocated.functions[f.get()] = std::make_pair(has_defn, f);
-    return f;
-}
-
-template<>
-boxed make_lambda<boxed>(std::function<function> fn,
-                         std::shared_ptr<Runtime> runtime,
-                         bool has_defn) {
-    return box<lambda>(make_lambda<lambda>(fn, runtime, has_defn), runtime);
 }
 
 boxed list_ref(boxed l, size_t i) {
@@ -710,7 +726,7 @@ boxed result(boxed exp) {
     auto a = make_vector(runtime);
     auto v = a->cast<vector>();
     (*v)->push_back(box<symbol>("MCE-RESULT", runtime));
-    (*v)->push_back(exp);
+    (*v)->push_back(list_ref(exp, 0));
     return a;
 }
 
@@ -953,6 +969,16 @@ boxed get_config(boxed args) {
 
 void Runtime::set_config(const std::string& k, boxed v) {
     config_table[k] = v;
+}
+
+void Runtime::set_gc_callback(boxed v) {
+    gc_callback = v;
+}
+
+boxed set_gc_callback(boxed args) {
+    auto runtime = args->get_runtime();
+    runtime->set_gc_callback(list_ref(args, 0));
+    return box(runtime);
 }
 
 function* Runtime::get_global_function(const std::string& name) {
@@ -1979,8 +2005,9 @@ Runtime::Runtime() :
         { "cons", gcons },
         { "list->vector", list_to_vector },
         { "get-config", mce::get_config },
-        { "cf-test", mce::cf_test },
-        { "transfer-test", mce::transfer_test }
+        { "cf-test", cf_test },
+        { "transfer-test", transfer_test },
+        { "set-gc-callback!", mce::set_gc_callback }
     },
     kenvfn_set({
         gapplyx,
