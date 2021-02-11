@@ -577,12 +577,18 @@ function extend_env(env, syms, values) {
 }
 
 function improper_extend_env(env, syms, values) {
-    const s = [];
+    let s = null;
+    let ps = s;
     const v = [];
 
     while (syms) {
         if (syms instanceof Symbol) {
-            s.push(syms);
+            const ns = cons(syms, null);
+            if (s) {
+                ps.cdr = ns;
+            } else {
+                s = ns;
+            }
             v.push(values);
             break;
         }
@@ -590,19 +596,19 @@ function improper_extend_env(env, syms, values) {
             break;
         }
 
-        s.push(syms.car);
+        const ns = cons(syms.car, null);
+        if (s) {
+            ps = ps.cdr = ns;
+        } else {
+            s = ps = ns;
+        }
         v.push(values.car);
 
         syms = syms.cdr;
         values = values.cdr;
     }
 
-    let sl = null;
-    for (let sym of s) {
-        sl = cons(sym, sl);
-    }
-
-    return cons(cons(sl, v), env);
+    return cons(cons(s, v), env);
 }
 
 function handle_lambda(args, params, fn, env, extend_env) {

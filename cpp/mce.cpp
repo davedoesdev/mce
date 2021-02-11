@@ -1078,13 +1078,21 @@ boxed extend_env(boxed env, boxed syms, boxed values) {
 }
 
 boxed improper_extend_env(boxed env, boxed syms, boxed values) {
-    std::vector<boxed> s;
-    auto av = make_vector(env->get_runtime());
+    auto runtime = env->get_runtime();
+    auto bnil = box(runtime);
+    auto s = bnil;
+    auto ps = s;
+    auto av = make_vector(runtime);
     auto v = av->cast<vector>();
 
     while (!syms->empty()) {
         if (syms->contains<symbol>()) {
-            s.push_back(syms);
+            auto ns = cons(syms, bnil);
+            if (s->empty()) {
+                s = ns;
+            } else {
+                (*ps->cast<pair>())->second = ns;
+            }
             (*v)->push_back(values);
             break;
         }
@@ -1092,19 +1100,19 @@ boxed improper_extend_env(boxed env, boxed syms, boxed values) {
             break;
         }
 
-        s.push_back(list_ref(syms, 0));
+        auto ns = cons(list_ref(syms, 0), bnil);
+        if (s->empty()) {
+            s = ps = ns;
+        } else {
+            ps = (*ps->cast<pair>())->second = ns;
+        }
         (*v)->push_back(list_ref(values, 0));
         
         syms = list_rest(syms, 0);
         values = list_rest(values, 0);
     }
 
-    auto as = box(env->get_runtime());
-    for (auto it = s.rbegin(); it != s.rend(); ++it) {
-        as = cons(*it, as);
-    }
-
-    return cons(cons(as, av), env);
+    return cons(cons(s, av), env);
 }
 
 boxed handle_lambda(boxed args,

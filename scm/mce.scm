@@ -113,23 +113,29 @@
             (set-car! senv (extend-list syms index name))))
     val)
 
-(define (extend-env env syms values)
+(define (extend-env env syms len values)
     (cons (cons syms (list->vector values)) env))
 
-(define (improper-extend-env env syms values)
-    (let loop ((syms syms) (values values) (done-syms '()) (done-values '()))
-        (if (symbol? syms)
-            (cons (cons (reverse (cons syms done-syms))
-                        (list->vector (reverse (cons values done-values))))
-                  env)
-            (if (and (not (null? syms)) (not (null? values)))
-                (loop (cdr syms)
-                      (cdr values)
-                      (cons (car syms) done-syms)
-                      (cons (car values) done-values))
-                (cons (cons (reverse done-syms)
-                            (list->vector (reverse done-values)))
-                      env)))))
+(define (improper-extend-env env syms len values)
+    (let ((s '())
+          (ps '())
+          (v (make-vector len)))
+        (let loop ((syms syms) (i 0) (values values))
+            (if (< i len)
+                (if (symbol? syms)
+                    (let ((ns (cons syms '())))
+                        (if (null? s)
+                            (set! s ns)
+                            (set-cdr! ps ns))
+                        (vector-set! v i values))
+                (if (and (not (null? syms)) (not (null? values)))
+                    (let ((ns (cons (car syms) '())))
+                        (if (null? s)
+                            (begin (set! ps ns) (set! s ns))
+                            (begin (set-cdr! ps ns) (set! ps ns)))
+                        (vector-set! v i (car values))
+                        (loop (cdr syms) (+ 1 ) (cdr values)))))))
+        (cons (cons s v) env)))
 
 (define (make-step-contn k env args) (cons 'MCE-STEP-CONTN (cons k (cons env args))))
 (define (step-contn? exp) (and (pair? exp) (equal? (car exp) 'MCE-STEP-CONTN)))
@@ -249,7 +255,7 @@
 (define-form lambda1
     (lambda (this params len scanned env)
         (lambda args
-            (handle-lambda args params scanned env extend-env))))
+            (handle-lambda args params len scanned env extend-env))))
 
 (define-form improper-lambda0
     (lambda (this params len scanned)
@@ -257,15 +263,16 @@
             (send k (make-form improper-lambda1 params len scanned env)))))
 
 (define-form improper-lambda1
-    (lambda (this params scanned env)
+    (lambda (this params len scanned env)
         (lambda args
-            (handle-lambda args params scanned env improper-extend-env))))
+            (handle-lambda args params len scanned env improper-extend-env))))
 
 (define-form let/cc0
     (lambda (this name scanned)
         (lambda (k env)
             (send scanned k (extend-env env
                                         (list name)
+                                        1
                                         (list (make-form let/cc1 k)))))))
 
 (define-form let/cc1
@@ -371,11 +378,12 @@
                ((lambda)
                 (let ((params (cadr exp)))
                     (if (improper? params)
-                        (let ((scanned
-                               (scseq (cddr exp)
-                                      (extend-ctenv ctenv (->proper params))
-                                      fixups)))
-                            (make-form improper-lambda0 params (length params) scanned))
+                        (let* ((iparams (->proper params))
+                               (scanned
+                                (scseq (cddr exp)
+                                       (extend-ctenv ctenv iparams)
+                                       fixups)))
+                            (make-form improper-lambda0 params (length iparams) scanned))
                         (let ((scanned
                                (scseq (cddr exp)
                                       (extend-ctenv ctenv params)
@@ -457,12 +465,12 @@
 (define (applyx k env fn args)
     (sendl fn (make-step-contn k env args)))
 
-(define (handle-lambda args params fn env extend-env)
+(define (handle-lambda args params len fn env extend-env)
     (if (step-contn? args)
         (send fn (step-contn-k args)
-                 (extend-env env params (step-contn-args args)))
+                 (extend-env env params len (step-contn-args args)))
         (run (send fn (lookup-global 'result)
-                      (extend-env env params args)))))
+                      (extend-env env params len args)))))
 
 (define (handle-contn-lambda args k)
     (cond ((transfer? args)
