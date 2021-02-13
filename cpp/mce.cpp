@@ -1085,8 +1085,8 @@ boxed improper_extend_env(boxed env, boxed syms, boxed values) {
     auto av = make_vector(runtime);
     auto v = av->cast<vector>();
 
-    while (!syms->empty()) {
-        if (syms->contains<symbol>()) {
+    while (!syms->empty() && !values->empty()) {
+        if (!syms->contains<pair>()) {
             auto ns = cons(syms, bnil);
             if (s->empty()) {
                 s = ns;
@@ -1094,9 +1094,6 @@ boxed improper_extend_env(boxed env, boxed syms, boxed values) {
                 (*ps->cast<pair>())->second = ns;
             }
             (*v)->push_back(values);
-            break;
-        }
-        if (values->empty()) {
             break;
         }
 

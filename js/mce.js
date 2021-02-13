@@ -581,8 +581,8 @@ function improper_extend_env(env, syms, values) {
     let ps = s;
     const v = [];
 
-    while (syms) {
-        if (syms instanceof Symbol) {
+    while (syms && values) {
+        if (!(syms instanceof Pair)) {
             const ns = cons(syms, null);
             if (s) {
                 ps.cdr = ns;
@@ -590,9 +590,6 @@ function improper_extend_env(env, syms, values) {
                 s = ns;
             }
             v.push(values);
-            break;
-        }
-        if (!values) {
             break;
         }
 
