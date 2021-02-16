@@ -120,6 +120,18 @@ unsigned char *cdr(unsigned char *initial_state, unsigned char *state) {
     return state[10] ? (unsigned char*) i : &initial_state[i];
 }
 
+void set_car(unsigned char *state, unsigned char *val) {
+    assert(state[0] == pair_code);
+    state[1] = 1;
+    *(uint64_t*)&state[2] = val;
+}
+
+void set_cdr(unsigned char *state, unsigned char *val) {
+    assert(state[0] == pair_code);
+    state[10] = 1;
+    *(uint64_t*)&state[11] = val;
+}
+
 unsigned char *cons(unsigned char *car, unsigned char *cdr) {
     unsigned char *state = (unsigned char*) malloc(1 + 1 + 8 + 1 + 8);
     assert(state);
@@ -154,7 +166,7 @@ unsigned char *list_rest(unsigned char *initial_state, unsigned char *l, uint64_
 }
 
 unsigned char *make_uninitialised_vector(uint64_t n) {
-    unsigned char *state = (unsigned char*) malloc(1 + 8);
+    unsigned char *state = (unsigned char*) malloc(1 + 8 + n * 9);
     assert(state);
     state[0] = vector_code;
     *(uint64_t*)&state[1] = n;
@@ -162,20 +174,12 @@ unsigned char *make_uninitialised_vector(uint64_t n) {
 }
 
 unsigned char *make_vector(uint64_t n) {
-    if (n == 0) {
-        return make_uninitialized_vector(0);
-    }
-    uint64_t null_index = 1 + 8 + n * 9;
-    unsigned char *state = (unsigned char*) malloc(null_index + 1);
-    assert(state);
-    state[0] = vector_code;
-    *(uint64_t*)&state[1] = n;
+    unsigned char *state = make_uninitialised_vector(n);
     for (uint64_t i = 0; i < n; ++i) {
         uint64_t eli = 9 + i * 9;
         state[eli] = 1;
-        *(uint64_t*)&state[eli + 1] = &state[null_index];
+        *(uint64_t*)&state[eli + 1] = nil;
     }
-    state[null_index] = null_code;
     return state;
 }
 
@@ -191,7 +195,7 @@ unsigned char *vector_ref(unsigned char *initial_state, unsigned char *v, uint64
     return el[0] ? (unsigned char*) eli : &initial_state[eli];
 }
 
-void vector_set(unsigned char *initial_state, unsigned char *v, uint64_t i, unsigned char *val) {
+void vector_set(unsigned char *v, uint64_t i, unsigned char *val) {
     assert(v[0] == vector_code);
     unsigned char *el = &v[9 + i * 9];
     el[0] = 1;
@@ -255,12 +259,53 @@ unsigned char *ctenv_lookup(unsigned char *initial_state,
     return nil;
 }
 
+unsigned char *ctenv_setvar(unsigned char *initial_state,
+                            unsigned char *name,
+                            unsigned char *i,
+                            unsigned char *val,
+                            unsigned char *env) {
+    uint64_t first = (uint64_t)double_val(car(initial_state, i));
+    uint64_t second = (uint64_t)double_val(cdr(initial_state, i));
+    unsigned char *bindings = list_ref(initial_state, env, first);
+    unsigned char *v = cdr(bindings);
+    uint64_t size = vector_size(v);
+
+    if (second >= size) {
+        unsigned char *v2 = make_uninitialised_vector(second + 1);
+        for (uint64_t i = 0; i < second; ++i) {
+            vector_set(v2, i < size ? vector_ref(initial_state, v, i) : nil);
+        }
+        set_cdr(bindings, v2);
+        v = v2;
+    }
+    vector_set(v, second, val);
+
+    if (car(initial_state, bindings)[0] == null_code) {
+        set_car(bindings, cons(nil, nil));
+    }
+    unsigned char *p = car(initial_state, bindings);
+    while (second > 0) {
+        if (cdr(initial_state, p)[0] == null_code) {
+            set_cdr(p, cons(nil, nil));
+        }
+        p = cdr(initial_state, p);
+        --second;
+    }
+    set_car(p, name);
+    
+    return val;
+}
+
 unsigned char *list_to_vector(unsigned char *initial_state,
                               unsigned char *l,
                               uint64_t len) {
-make uninitialize vector (len)
-loop through l calling vector_set
-check we don't go past len
+    unsigned char *v = make_uninitialised_vector(len);
+    uint64_t i = 0;
+    while ((l[0] == pair_code) && (i < len)) {
+        vector_set(v, i, car(l));
+        l = cdr(l);
+    }
+    return v;
 }
 
 unsigned char *extend_env(unsigned char *initial_state,
@@ -269,6 +314,43 @@ unsigned char *extend_env(unsigned char *initial_state,
                           uint64_t len,
                           unsigned char *values) {
     return cons(cons(syms, list_to_vector(initial_state, values, len)), env);
+}
+
+unsigned char *improper_extend_env(unsigned char *initial_state,
+                                   unsigned char *env,
+                                   unsigned char *syms,
+                                   uint64_t len,
+                                   unsigned char *values) {
+    unsigned char *s = nil;
+    unsigned char *ps = nil;
+    unsigned char *v = make_uninitialised_vector(len);
+    uint64_t i = 0;
+
+    while ((i < len) && (syms[0] != null_code) && (values[0] != null_code)) {
+        if (syms[0] != pair_code) {
+            unsigned char *ns = cons(syms, nil);
+            if (s[0] == null_code) {
+                s = ns;
+            } else {
+                set_cdr(ps, ns);
+            }
+            vector_set(v, i, values);
+            break;
+        }
+
+        unsigned char *ns = cons(car(syms), nil);
+        if (s[0] == null_code) {
+            s = ps = ns;
+        } else {
+            set_cdr(ps, ns);
+            ps = ns;
+        }
+        vector_set(v, i++, car(values));
+        syms = cdr(syms);
+        values = cdr(values);
+    }
+
+    return cons(cons(s, v), env);
 }
 
 unsigned char *make_step_contn(unsigned char *k,
@@ -528,6 +610,88 @@ unsigned char *lambda1(unsigned char *initial_state,
         cons(step_contn_k(args),
              cons(extend_env(initial_state, env, params, len, step_contn_args(args)),
                   nil)));
+}
+
+unsigned char *improper_lambda0(unsigned char *initial_state,
+                                unsigned char *form_args,
+                                unsigned char *args) {
+    unsigned char *params = list_ref(initial_state, form_args, 0);
+    unsigned char *len = list_ref(initial_state, form_args, 1);
+    unsigned char *scanned = list_ref(initial_state, form_args, 2);
+    unsigned char *k = list_ref(initial_state, args, 0);
+    unsigned char *env = list_ref(initial_state, args, 1);
+    return sendv(k,
+                 make_form(improper_lambda1_form,
+                           cons(params, cons(len, cons(scanned, cons(env, nil))))));
+}
+
+unsigned char *improper_lambda1(unsigned char *initial_state,
+                                unsigned char *form_args,
+                                unsigned char *args) {
+    unsigned char *params = list_ref(initial_state, form_args, 0);
+    unsigned char *len = (uint64_t)double_val(list_ref(initial_state, form_args, 1));
+    unsigned char *scanned = list_ref(initial_state, form_args, 2);
+    unsigned char *env = list_ref(initial_state, form_args, 3);
+
+    return send(scanned,
+        cons(step_contn_k(args),
+             cons(improper_extend_env(initial_state, env, params, len, step_contn_args(args)),
+                  nil)));
+}
+
+unsigned char *letcc0(unsigned char *initial_state,
+                      unsigned char *form_args,
+                      unsigned char *args) {
+    unsigned char *name = list_ref(initial_state, form_args, 0);
+    unsigned char *scanned = list_ref(initial_state, form_args, 1); 
+    unsigned char *k = list_ref(initial_state, args, 0);
+    unsigned char *env = list_ref(initial_state, args, 1);
+    return send(scanned,
+        cons(k,
+             cons(extend_env(initial_state,
+                             env,
+                             cons(name, nil),
+                             1,
+                             cons(make_form(letcc1_form, cons(k, nil)),
+                                  nil)),
+                  nil)));
+}
+
+unsigned char *letcc1(unsigned char *initial_state,
+                      unsigned char *form_args,
+                      unsigned char *args) {
+    unsigned char *k = list_ref(initial_state, form_args, 0);
+
+    if (args[0] == transfer_code) {
+        return send(k, transfer_args(args));
+    }
+
+    return send(k, step_contn_args(args));
+}
+
+unsigned char *define0(unsigned char *initial_state,
+                       unsigned char *form_args,
+                       unsigned char *args) {
+    unsigned char *name = list_ref(initial_state, form_args, 0);
+    unsigned char *i = list_ref(initial_state, form_args, 1);
+    unsigned char *scanned = list_ref(initial_state, form_args, 2);
+    unsigned char *k = list_ref(initial_state, args, 0);
+    unsigned char *env = list_ref(initial_state, args, 1);
+    return send(scanned,
+        cons(make_form(define1_form,
+                       cons(k, cons(env, cons(name, cons(i, nil)))),
+             cons(env, nil))));
+}
+
+unsigned char *define1(unsigned char *initial_state,
+                       unsigned char *form_args,
+                       unsigned char *args) {
+    unsigned char *k = list_ref(args, 0);
+    unsigned char *env = list_ref(args, 1);
+    unsigned char *name = list_ref(args, 2);
+    unsigned char *i = list_ref(args, 3);
+    unsigned char *v = list_ref(args, 0);
+    return sendv(k, ctenv_setvar(initial_state, name, i, v, env));
 }
 
 unsigned char *handle_form(unsigned char *initial_state,
