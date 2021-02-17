@@ -686,12 +686,41 @@ unsigned char *define0(unsigned char *initial_state,
 unsigned char *define1(unsigned char *initial_state,
                        unsigned char *form_args,
                        unsigned char *args) {
-    unsigned char *k = list_ref(args, 0);
-    unsigned char *env = list_ref(args, 1);
-    unsigned char *name = list_ref(args, 2);
-    unsigned char *i = list_ref(args, 3);
+    unsigned char *k = list_ref(form_args, 0);
+    unsigned char *env = list_ref(form_args, 1);
+    unsigned char *name = list_ref(form_args, 2);
+    unsigned char *i = list_ref(form_args, 3);
     unsigned char *v = list_ref(args, 0);
     return sendv(k, ctenv_setvar(initial_state, name, i, v, env));
+}
+
+unsigned char *application0(unsigned char *initial_state,
+                            unsigned char *form_args,
+                            unsigned char *args) {
+    unsigned char *scanned = list_ref(initial_state, form_args, 0);
+    unsigned char *k = list_ref(initial_state, args, 0);
+    unsigned char *env = list_ref(initial_state, args,  1);
+    return send(scanned,
+        cons(make_form(application1_form, cons(k, cons(env, nil))),
+             cons(env, nil)));
+}
+
+unsigned char *application1(unsigned char *initial_state,
+                            unsigned char *form_args,
+                            unsigned char *args) {
+    unsigned char *k = list_ref(initial_state, form_args, 0);
+    unsigned char *env = list_ref(initial_state, form_args, 1);
+    unsigned char *v = list_ref(initial_state, args, 0);
+    return applyx(k, env, car(initial_state, v), cdr(initial_state, v));
+}
+
+unsigned char *evalx_initial(unsigned char *initial_state,
+                             unsigned char *form_args,
+                             unsigned char *args) {
+    unsigned char *k = list_ref(initial_state, form_args, 0);
+    unsigned char *env = list_ref(initial_state, form_args, 1);
+    unsigned char *scanned = list_ref(initial_state, form_args, 2);
+    return send(scanned, cons(k, cons(env, nil)));
 }
 
 unsigned char *handle_form(unsigned char *initial_state,
