@@ -6,6 +6,7 @@
 #include <assert.h>
 #include <errno.h>
 #include <string.h>
+#include <quotearg.h>
 
 #define null_code                   'a'
 #define boolean_code                'b'
@@ -221,6 +222,14 @@ bool boolean_val(unsigned char *state) {
     return state[1] == 1;
 }
 
+unsigned char *make_boolean(bool v) {
+    unsigned char *state = (unsigned char*) malloc(1 + 1);
+    assert(state);
+    state[0] = boolean_code;
+    state[1] = v ? 1 : 0;
+    return state;
+}
+
 unsigned char *make_symbol(char *s) {
     size_t len = strlen(s);
     unsigned char *state = (unsigned char*) malloc(1 + 8 + len);
@@ -407,6 +416,127 @@ unsigned char *transfer_args(unsigned char *initial_state,
     return state[1] ? (unsigned char*) i : &initial_state[i];
 }
 
+unsigned char *less_than(unsigned char *initial_state,
+                         unsigned char *args) {
+    return make_boolean(double_val(list_ref(initial_state, args, 0)) <
+                        double_val(list_ref(initial_state, args, 1)));
+}
+
+unsigned char *plus(unsigned char *initial_state,
+                    unsigned char *args) {
+    double r = 0;
+    while (args[0] == pair_code) {
+        r += double_val(car(initial_state, args));
+        args = cdr(initial_state, args);
+    }
+    return make_double(r);
+}
+
+unsigned char *xdisplay(unsigned char *initial_state,
+                        unsigned char *exp,
+                        FILE *out,
+                        bool is_write)
+{
+    switch (exp[0]) {
+        case null_code:
+            fprintf(out, "()");
+            break;
+
+        case boolean_code:
+            fprintf(out, exp[1] == 1 ? "#t" : "#f");
+            break;
+
+        case number_code:
+            fprintf(out, "%g", double_val(exp));
+            break;
+
+        case char_code:
+            if (is_write) {
+                fprintf(out, "#\\x%x", exp[1]);
+            } else {
+                fprintf(out, "%c", exp[1]);
+            }
+            break;
+
+        case string_code:
+            if (is_write) {
+                struct quoting_options *options = clone_quoting_options(NULL);
+                char *quoted = quotearg_alloc((char*)&exp[9], *(uint64_t*)&exp[1], options);
+                fprintf(out, "\"%s\"", quoted);
+                free(quoted);
+                free(options);
+            } else {
+                fwrite(&exp[9], 1, *(uint64_t*)&exp[1], out);
+            }
+            break;
+
+        case symbol_code:
+            fwrite(&exp[9], 1, *(uint64_t*)&exp[1], out);
+            break;
+
+        case pair_code: {
+            bool first = true;
+            fprintf(out, "(");
+            while (exp[0] == pair_code) {
+                if (!first) {
+                    fprintf(out, " ");
+                }
+                first = false;
+                xdisplay(initial_state, car(initial_state, exp), out, is_write);
+                exp = cdr(initial_state, exp);
+            }
+            if (exp[0] != null_code) {
+                fprintf(out, " . ");
+                xdisplay(initial_state, exp, out, is_write);
+            }
+            fprintf(out, ")");
+            break;
+        }
+        case vector_code: {
+            bool first = true;
+            fprintf(out, "#(");
+            uint64_t size = vector_size(exp);
+            for (uint64_t i = 0; i < size; ++i) {
+                if (!first) {
+                    fprintf(out, " ");
+                }
+                first = false;
+                xdisplay(initial_state, vector_ref(initial_state, exp, i), out, is_write);
+            }
+            fprintf(out, ")");
+            break;
+        }
+        case unmemoized_code:
+            fprintf(out, "#<procedure>");
+            break;
+
+        default:
+            assert_perror(EINVAL);        
+    }
+
+    return exp;
+}
+
+unsigned char *xdisplay_args(unsigned char *initial_state,
+                             unsigned char *args,
+                             FILE *out,
+                             bool is_write) {
+    unsigned char *r = nil;
+    while (args[0] == pair_code) {
+        r = xdisplay(initial_state, car(initial_state, args), out, is_write);
+        args = cdr(initial_state, args);
+    }
+    if (!is_write) {
+        fprintf(out, "\n");
+    }
+    return r; 
+}
+
+unsigned char *print(unsigned char *initial_state,
+                     unsigned char *args) {
+    return xdisplay_args(initial_state, args, stdout, false);
+}
+
 unsigned char *symbol_lookup(unsigned char *initial_state,
                              unsigned char *form_args,
                              unsigned char *args) {
@@ -486,6 +616,7 @@ unsigned char *global_lambda(unsigned char *initial_state,
                           list_rest(initial_state, args, 0));
         }
 
+        xdisplay(initial_state, defn, stderr, false); fprintf(stderr, " ");
         assert_perror(EINVAL);
         return NULL;
     }
@@ -502,6 +633,19 @@ unsigned char *global_lambda(unsigned char *initial_state,
         return transfer(initial_state, args);
     }
 
+    if (symbol_equals(defn, "<")) {
+        return sendv(k, less_than(initial_state, args));
+    }
+
+    if (symbol_equals(defn, "+")) {
+        return sendv(k, plus(initial_state, args));
+    }
+
+    if (symbol_equals(defn, "print")) {
+        return sendv(k, print(initial_state, args));
+    }
+
+    xdisplay(initial_state, defn, stderr, false); fprintf(stderr, " ");
     assert_perror(EINVAL);        
     return NULL;
 }

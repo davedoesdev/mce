@@ -472,8 +472,7 @@ boxed get_procedure_defn(boxed proc) {
         cons(box<symbol>("MCE-YIELD-DEFINITION", runtime), box(runtime)));
 }
 
-boxed xdisplay(boxed args, std::ostream& out, bool is_write) {
-    auto exp = list_ref(args, 0);
+boxed xdisplay(boxed exp, std::ostream& out, bool is_write) {
     if (exp->empty()) {
         out << "()";
     } else {
@@ -508,12 +507,12 @@ boxed xdisplay(boxed args, std::ostream& out, bool is_write) {
                 }
                 first = false;
                 auto p = exp->cast<pair>();
-                xdisplay(cons((*p)->first, bnil), out, is_write);
+                xdisplay((*p)->first, out, is_write);
                 exp = (*p)->second;
             }
             if (!exp->empty()) {
                 out << " . ";
-                xdisplay(cons(exp, bnil), out, is_write);
+                xdisplay(exp, out, is_write);
             }
             out << ")";
         } else if (exp->contains<vector>()) {
@@ -526,7 +525,7 @@ boxed xdisplay(boxed args, std::ostream& out, bool is_write) {
                     out << " ";
                 }
                 first = false;
-                xdisplay(cons(v, bnil), out, is_write);
+                xdisplay(v, out, is_write);
             }
             out << ")";
         } else if (exp->contains<lambda>()) {
@@ -538,45 +537,34 @@ boxed xdisplay(boxed args, std::ostream& out, bool is_write) {
     return exp;
 }
 
-boxed xprint(boxed args, std::ostream& out) {
+boxed xdisplay_args(boxed args, std::ostream& out, bool is_write) {
     auto bnil = box(args->get_runtime());
     auto r = bnil;
     while (args->contains<pair>()) {
         auto p = args->cast<pair>();
-        r = (*p)->first;
-        xdisplay(cons(r, bnil), out, false);
+        r = xdisplay((*p)->first, out, is_write);
         args = (*p)->second;
     }
-    out << std::endl;
+    if (!is_write) {
+        out << std::endl;
+    }
     return r;
 }
 
 boxed print(boxed args) {
-    return xprint(args, std::cout);
+    return xdisplay_args(args, std::cout, false);
 }
 
 boxed eprint(boxed args) {
-    return xprint(args, std::cerr);
-}
-
-boxed xwrite(boxed args, std::ostream& out) {
-    auto bnil = box(args->get_runtime());
-    auto r = bnil;
-    while (args->contains<pair>()) {
-        auto p = args->cast<pair>();
-        r = (*p)->first;
-        xdisplay(cons(r, bnil), out, true);
-        args = (*p)->second;
-    }
-    return r;
+    return xdisplay_args(args, std::cerr, false);
 }
 
 boxed write(boxed args) {
-    return xwrite(args, std::cout);
+    return xdisplay_args(args, std::cout, true);
 }
 
 boxed ewrite(boxed args) {
-    return xwrite(args, std::cerr);
+    return xdisplay_args(args, std::cerr, true);
 }
 
 boxed unmemoize(boxed exp);
