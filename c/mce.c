@@ -621,13 +621,13 @@ unsigned char *global_lambda(unsigned char *initial_state,
         return NULL;
     }
 
+    if (symbol_equals(defn, "result")) {
+        return make_result(car(initial_state, args));
+    }
+
     unsigned char *k = step_contn_k(initial_state, args);
     //unsigned char *env = step_contn_env(initial_state, args);
     args = step_contn_args(initial_state, args);
-
-    if (symbol_equals(defn, "result")) {
-        return sendv(k, make_result(list_ref(initial_state, args, 2)));
-    }
 
     if (symbol_equals(defn, "transfer")) {
         return transfer(initial_state, args);
