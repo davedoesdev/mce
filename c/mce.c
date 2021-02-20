@@ -230,6 +230,11 @@ unsigned char *make_boolean(bool v) {
     return state;
 }
 
+char char_val(unsigned char *state) {
+    assert(state[0] == char_code);
+    return state[1];
+}
+
 unsigned char *make_symbol(char *s) {
     size_t len = strlen(s);
     unsigned char *state = (unsigned char*) malloc(1 + 8 + len);
@@ -312,7 +317,7 @@ unsigned char *list_to_vector(unsigned char *initial_state,
     unsigned char *v = make_uninitialised_vector(len);
     uint64_t i = 0;
     while ((l[0] == pair_code) && (i < len)) {
-        vector_set(v, i, car(initial_state, l));
+        vector_set(v, i++, car(initial_state, l));
         l = cdr(initial_state, l);
     }
     return v;
@@ -430,6 +435,60 @@ unsigned char *plus(unsigned char *initial_state,
         args = cdr(initial_state, args);
     }
     return make_double(r);
+}
+
+unsigned char *multiply(unsigned char *initial_state,
+                        unsigned char *args) {
+    double r = 1;
+    while (args[0] == pair_code) {
+        r *= double_val(car(initial_state, args));
+        args = cdr(initial_state, args);
+    }
+    return make_double(r);
+}
+
+unsigned char *is_null(unsigned char *initial_state,
+                       unsigned char *args) {
+    return make_boolean(car(initial_state, args)[0] == null_code);
+}
+
+unsigned char *is_eq(unsigned char *initial_state,
+                     unsigned char *args) {
+    unsigned char *x = list_ref(initial_state, args, 0);
+    unsigned char *y = list_ref(initial_state, args, 1);
+
+    if (x[0] == null_code) {
+        return make_boolean(y[0] == null_code);
+    }
+
+    if (y[0] == null_code) {
+        return make_boolean(false);
+    }
+
+    if (x[0] != y[0]) {
+        return make_boolean(false);
+    }
+
+    if (x[0] == boolean_code) {
+        return make_boolean(boolean_val(x) == boolean_val(y));
+    }
+
+    if (x[0] == char_code) {
+        return make_boolean(char_val(x) == char_val(y));
+    }
+
+    if (x[0] == number_code) {
+        return make_boolean(double_val(x) == double_val(y));
+    }
+
+    if ((x[0] == string_code) || (x[0] == symbol_code)) {
+        uint64_t len = *(uint64_t*)&x[1];
+        return make_boolean((*(uint64_t*)&y[1] == len) &&
+                            (memcmp(&x[9], &y[9], len) == 0));
+
+    }
+
+    return make_boolean(x == y);
 }
 
 unsigned char *xdisplay(unsigned char *initial_state,
@@ -639,6 +698,26 @@ unsigned char *global_lambda(unsigned char *initial_state,
 
     if (symbol_equals(defn, "+")) {
         return sendv(k, plus(initial_state, args));
+    }
+
+    if (symbol_equals(defn, "*")) {
+        return sendv(k, multiply(initial_state, args));
+    }
+
+    if (symbol_equals(defn, "null?")) {
+        return sendv(k, is_null(initial_state, args));
+    }
+
+    if (symbol_equals(defn, "car")) {
+        return sendv(k, car(initial_state, car(initial_state, args)));
+    }
+
+    if (symbol_equals(defn, "cdr")) {
+        return sendv(k, cdr(initial_state, car(initial_state, args)));
+    }
+
+    if (symbol_equals(defn, "eq?")) {
+        return sendv(k, is_eq(initial_state, args));
     }
 
     if (symbol_equals(defn, "print")) {
