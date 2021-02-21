@@ -427,6 +427,12 @@ unsigned char *less_than(unsigned char *initial_state,
                         double_val(list_ref(initial_state, args, 1)));
 }
 
+unsigned char *greater_than(unsigned char *initial_state,
+                            unsigned char *args) {
+    return make_boolean(double_val(list_ref(initial_state, args, 0)) >
+                        double_val(list_ref(initial_state, args, 1)));
+}
+
 unsigned char *plus(unsigned char *initial_state,
                     unsigned char *args) {
     double r = 0;
@@ -489,6 +495,32 @@ unsigned char *is_eq(unsigned char *initial_state,
     }
 
     return make_boolean(x == y);
+}
+
+unsigned char *is_string(unsigned char *initial_state,
+                         unsigned char *args) {
+    return make_boolean(car(initial_state, args)[0] == string_code);
+}
+
+unsigned char *is_pair(unsigned char *initial_state,
+                       unsigned char *args) {
+    return make_boolean(car(initial_state, args)[0] == pair_code);
+}
+
+unsigned char *is_vector(unsigned char *initial_state,
+                         unsigned char *args) {
+    return make_boolean(car(initial_state, args)[0] == vector_code);
+}
+
+unsigned char *is_procedure(unsigned char *initial_state,
+                            unsigned char *args) {
+    return make_boolean(car(initial_state, args)[0] == unmemoized_code);
+}
+
+unsigned char *is_number_equal(unsigned char *initial_state,
+                               unsigned char *args) {
+    return make_boolean(double_val(list_ref(initial_state, args, 0)) ==
+                        double_val(list_ref(initial_state, args, 1)));
 }
 
 unsigned char *xdisplay(unsigned char *initial_state,
@@ -643,6 +675,14 @@ unsigned char *applyx(unsigned char *k,
     return send(fn, make_step_contn(k, env, args));
 }
 
+unsigned char *transfer_test(unsigned char *initial_state,
+                             unsigned char *args) {
+    return applyx(make_form(global_lambda_form, cons(make_symbol("result"), nil)),
+                  make_global_env(),
+                  car(initial_state, args),
+                  cdr(initial_state, args));
+}
+
 unsigned char *constructed_function0(unsigned char *initial_state,
                                      unsigned char *form_args,
                                      unsigned char *args) {
@@ -668,7 +708,7 @@ unsigned char *global_lambda(unsigned char *initial_state,
     if (args[0] == transfer_code) {
         args = transfer_args(initial_state, args);
 
-        if (symbol_equals(defn, "transfer_test")) {
+        if (symbol_equals(defn, "transfer-test")) {
             return applyx(gresult,
                           make_global_env(),
                           list_ref(initial_state, args, 0),
@@ -685,7 +725,7 @@ unsigned char *global_lambda(unsigned char *initial_state,
     }
 
     unsigned char *k = step_contn_k(initial_state, args);
-    //unsigned char *env = step_contn_env(initial_state, args);
+    unsigned char *env = step_contn_env(initial_state, args);
     args = step_contn_args(initial_state, args);
 
     if (symbol_equals(defn, "transfer")) {
@@ -694,6 +734,10 @@ unsigned char *global_lambda(unsigned char *initial_state,
 
     if (symbol_equals(defn, "<")) {
         return sendv(k, less_than(initial_state, args));
+    }
+
+    if (symbol_equals(defn, ">")) {
+        return sendv(k, greater_than(initial_state, args));
     }
 
     if (symbol_equals(defn, "+")) {
@@ -716,12 +760,58 @@ unsigned char *global_lambda(unsigned char *initial_state,
         return sendv(k, cdr(initial_state, car(initial_state, args)));
     }
 
+    if (symbol_equals(defn, "cons")) {
+        return sendv(k, cons(list_ref(initial_state, args, 0),
+                             list_ref(initial_state, args, 1)));
+    }
+
     if (symbol_equals(defn, "eq?")) {
         return sendv(k, is_eq(initial_state, args));
     }
 
     if (symbol_equals(defn, "print")) {
         return sendv(k, print(initial_state, args));
+    }
+
+    if (symbol_equals(defn, "string?")) {
+        return sendv(k, is_string(initial_state, args));
+    }
+
+    if (symbol_equals(defn, "pair?")) {
+        return sendv(k, is_pair(initial_state, args));
+    }
+
+    if (symbol_equals(defn, "vector?")) {
+        return sendv(k, is_vector(initial_state, args));
+    }
+
+    if (symbol_equals(defn, "procedure?")) {
+        return sendv(k, is_procedure(initial_state, args));
+    }
+
+    if (symbol_equals(defn, "vector-length")) {
+        return sendv(k, make_double(vector_size(car(initial_state, args))));
+    }
+
+    if (symbol_equals(defn, "=")) {
+        return sendv(k, is_number_equal(initial_state, args));
+    }
+
+    if (symbol_equals(defn, "vector-ref")) {
+        return sendv(k, vector_ref(initial_state,
+                                   list_ref(initial_state, args, 0),
+                                   double_val(list_ref(initial_state, args, 1))));
+    }
+
+    if (symbol_equals(defn, "apply")) {
+        return applyx(k,
+                      env,
+                      list_ref(initial_state, args, 0),
+                      list_ref(initial_state, args, 1));
+    }
+
+    if (symbol_equals(defn, "transfer-test")) {
+        return sendv(k, transfer_test(initial_state, args));
     }
 
     xdisplay(initial_state, defn, stderr, false); fprintf(stderr, " ");

@@ -1947,9 +1947,8 @@ boxed cf_test(boxed args) {
         return make_lambda<boxed>([x](boxed args) {
             return cf_test(cons(list_ref(args, 0), cons(x, box(args->get_runtime()))));
         }, args->get_runtime());
-    } else {
-        return box<double>(x->cast<double>() + n, args->get_runtime());
     }
+    return box<double>(x->cast<double>() + n, args->get_runtime());
 }
 
 boxed transfer_test(boxed args) {
