@@ -18,10 +18,9 @@
 #define vector_code                 'h'
 
 #define unmemoized_code             '0'
-#define redirect_code               '1'
-#define result_code                 '2'
-#define step_contn_code             '3'
-#define transfer_code               '4'
+#define result_code                 '1'
+#define step_contn_code             '2'
+#define transfer_code               '3'
 
 #define symbol_lookup_form          0
 #define send_value_form             1

@@ -20,10 +20,9 @@ const char pair_code       = 'g';
 const char vector_code     = 'h';
 
 const char unmemoized_code = '0';
-const char redirect_code   = '1';
-const char result_code     = '2';
-const char step_contn_code = '3';
-const char transfer_code   = '4';
+const char result_code     = '1';
+const char step_contn_code = '2';
+const char transfer_code   = '3';
 
 symbol::symbol(const std::string& s) : std::string(s) {}
 
@@ -1576,8 +1575,16 @@ bool is_serialized(std::shared_ptr<vector> v) {
            (*(**v)[0]->cast<symbol>() == "MCE-SERIALIZED");
 }
 
+bool is_serialized(boxed exp) {
+    return exp->contains<vector>() && is_serialized(exp->cast<vector>());
+}
+
 boxed serialized_n(std::shared_ptr<vector> v) {
     return (**v)[1];
+}
+
+double serialized_n(boxed exp) {
+    return serialized_n(exp->cast<vector>())->cast<double>();
 }
 
 boxed serialize_aux(boxed exp,
@@ -1751,12 +1758,16 @@ size_t bpickle_aux(const T& data, std::vector<unsigned char>& v) {
     return r;
 }
 
+// Copy index to another given position in a vector
+void bpickle_aux(std::vector<unsigned char>& v, size_t pos, uint64_t ref) {
+    for (size_t i = 0; i < sizeof(ref); ++i) {
+        v[pos + i] = reinterpret_cast<const unsigned char*>(&ref)[i];
+    }
+}
+
 // Copy current size of vector to another given position in the vector
 void bpickle_aux(std::vector<unsigned char>& v, size_t pos) {
-    auto size = static_cast<uint64_t>(v.size());
-    for (size_t i = 0; i < sizeof(size); ++i) {
-        v[pos + i] = reinterpret_cast<const unsigned char*>(&size)[i];
-    }
+    bpickle_aux(v, pos, v.size());
 }
 
 void bpickle(boxed exp, std::vector<uint64_t>& refs, std::vector<unsigned char>& v) {
@@ -1805,17 +1816,20 @@ void bpickle(boxed exp, std::vector<uint64_t>& refs, std::vector<unsigned char>&
         auto pos1 = bpickle_aux(static_cast<uint64_t>(0), v);
         v.push_back(0);
         auto pos2 = bpickle_aux(static_cast<uint64_t>(0), v);
-        bpickle_aux(v, pos1);
-        bpickle((*p)->first, refs, v);
-        bpickle_aux(v, pos2);
-        bpickle((*p)->second, refs, v);
+        if (is_serialized((*p)->first)) {
+            bpickle_aux(v, pos1, refs[serialized_n((*p)->first)]);
+        } else {
+            bpickle_aux(v, pos1);
+            bpickle((*p)->first, refs, v);
+        }
+        if (is_serialized((*p)->second)) {
+            bpickle_aux(v, pos2, refs[serialized_n((*p)->second)]);
+        } else {
+            bpickle_aux(v, pos2);
+            bpickle((*p)->second, refs, v);
+        }
     } else if (exp->contains<vector>()) {
         auto vec = exp->cast<vector>();
-        if (is_serialized(vec)) {
-            v.push_back(redirect_code);
-            bpickle_aux(refs[serialized_n(vec)->cast<double>()], v);
-            return;
-        }
         refs.push_back(static_cast<uint64_t>(v.size()));
         if (is_unmemoized(vec)) {
             v.push_back(unmemoized_code);
@@ -1862,8 +1876,12 @@ void bpickle(boxed exp, std::vector<uint64_t>& refs, std::vector<unsigned char>&
             posv.push_back(bpickle_aux(static_cast<uint64_t>(0), v));
         }
         for (size_t i = 0; i < size; ++i) {
-            bpickle_aux(v, posv[i]);        
-            bpickle((*vec)->at(i), refs, v);
+            if (is_serialized((*vec)->at(i))) {
+                bpickle_aux(v, posv[i], refs[serialized_n((*vec)->at(i))]);
+            } else {
+                bpickle_aux(v, posv[i]);        
+                bpickle((*vec)->at(i), refs, v);
+            }
         }
     } else {
         throw std::range_error("unknown pickle expression");
