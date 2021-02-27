@@ -13,7 +13,7 @@ HEADERS = config.h
 CFLAGS = -Wno-misleading-indentation -Wno-unused-const-variable
 
 mce: $(SOURCES) $(HEADERS)
-	$(CC) $(CFLAGS) -g -Wall -Wextra -Werror -I. -I$(GNULIB_DIR) -o $@ $(SOURCES)
+	$(CC) $(CFLAGS) -g -Wall -Wextra -Werror -I. -idirafter $(GNULIB_DIR) -o $@ $(SOURCES)
 
 clean:
 	rm -f mce

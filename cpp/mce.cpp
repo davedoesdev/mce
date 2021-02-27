@@ -1800,21 +1800,9 @@ void bpickle(boxed exp, std::vector<uint64_t>& refs, std::vector<unsigned char>&
         refs.push_back(static_cast<uint64_t>(v.size()));
         v.push_back(pair_code);
         auto p = exp->cast<pair>();
-        // Leave space for index/address of first and second values.
+        // Leave space for 8-byte index of first and second values.
         // This means they can be found easily and changed (set-car!, set-cdr!).
-        //
-        // The index or address is 4 bytes (uint64) preceeded with a 0 byte
-        // indicating it's an index into the vector or 1 indicating it's
-        // an address.
-        //
-        // So the byte vector can be used to store the initial data but can
-        // accommodate dynamically allocated objects using their address in
-        // memory. An evaluator using malloc, for example, can allocate
-        // a new object and then use its address in set-car! to change the
-        // preceeding byte to 1.
-        v.push_back(0);
         auto pos1 = bpickle_aux(static_cast<uint64_t>(0), v);
-        v.push_back(0);
         auto pos2 = bpickle_aux(static_cast<uint64_t>(0), v);
         if (is_serialized((*p)->first)) {
             bpickle_aux(v, pos1, refs[serialized_n((*p)->first)]);
@@ -1837,18 +1825,14 @@ void bpickle(boxed exp, std::vector<uint64_t>& refs, std::vector<unsigned char>&
         }
         if (is_result(exp)) {
             v.push_back(result_code);
-            v.push_back(0);
             auto pos = bpickle_aux(static_cast<uint64_t>(0), v);
             bpickle_aux(v, pos);
             return bpickle(result_val(exp), refs, v);
         }
         if (is_step_contn(exp)) {
             v.push_back(step_contn_code);
-            v.push_back(0);
             auto pos_k = bpickle_aux(static_cast<uint64_t>(0), v);
-            v.push_back(0);
             auto pos_env = bpickle_aux(static_cast<uint64_t>(0), v);
-            v.push_back(0);
             auto pos_args = bpickle_aux(static_cast<uint64_t>(0), v);
             bpickle_aux(v, pos_k);
             bpickle(step_contn_k(exp), refs, v);
@@ -1859,7 +1843,6 @@ void bpickle(boxed exp, std::vector<uint64_t>& refs, std::vector<unsigned char>&
         }
         if (is_transfer(exp)) {
             v.push_back(transfer_code);
-            v.push_back(0);
             auto pos = bpickle_aux(static_cast<uint64_t>(0), v);
             bpickle_aux(v, pos);
             return bpickle(transfer_args(exp), refs, v);
@@ -1870,9 +1853,7 @@ void bpickle(boxed exp, std::vector<uint64_t>& refs, std::vector<unsigned char>&
         bpickle_aux(static_cast<uint64_t>(size), v);
         std::vector<size_t> posv;
         for (size_t i = 0; i < size; ++i) {
-            // Leave space for index/address of each element. See comment for
-            // pair above.
-            v.push_back(0);
+            // Leave space for index of each element. See comment for pair above.
             posv.push_back(bpickle_aux(static_cast<uint64_t>(0), v));
         }
         for (size_t i = 0; i < size; ++i) {
