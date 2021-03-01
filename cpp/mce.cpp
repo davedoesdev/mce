@@ -1770,7 +1770,10 @@ void bpickle_aux(std::vector<unsigned char>& v, size_t pos) {
     bpickle_aux(v, pos, v.size());
 }
 
-void bpickle(boxed exp, std::vector<uint64_t>& refs, std::vector<unsigned char>& v) {
+void bpickle(boxed exp,
+             std::vector<uint64_t>& refs,
+             std::vector<unsigned char>& v,
+             size_t vec_offset) {
     if (exp->empty()) {
         v.push_back(null_code);
     } else if (exp->contains<bool>()) {
@@ -1808,60 +1811,51 @@ void bpickle(boxed exp, std::vector<uint64_t>& refs, std::vector<unsigned char>&
             bpickle_aux(v, pos1, refs[serialized_n((*p)->first)]);
         } else {
             bpickle_aux(v, pos1);
-            bpickle((*p)->first, refs, v);
+            bpickle((*p)->first, refs, v, 0);
         }
         if (is_serialized((*p)->second)) {
             bpickle_aux(v, pos2, refs[serialized_n((*p)->second)]);
         } else {
             bpickle_aux(v, pos2);
-            bpickle((*p)->second, refs, v);
+            bpickle((*p)->second, refs, v, 0);
         }
     } else if (exp->contains<vector>()) {
         auto vec = exp->cast<vector>();
-        refs.push_back(static_cast<uint64_t>(v.size()));
-        if (is_unmemoized(vec)) {
-            v.push_back(unmemoized_code);
-            return bpickle(unmemoized_repexp(vec), refs, v);
-        }
-        if (is_result(exp)) {
-            v.push_back(result_code);
-            auto pos = bpickle_aux(static_cast<uint64_t>(0), v);
-            bpickle_aux(v, pos);
-            return bpickle(result_val(exp), refs, v);
-        }
-        if (is_step_contn(exp)) {
-            v.push_back(step_contn_code);
-            auto pos_k = bpickle_aux(static_cast<uint64_t>(0), v);
-            auto pos_env = bpickle_aux(static_cast<uint64_t>(0), v);
-            auto pos_args = bpickle_aux(static_cast<uint64_t>(0), v);
-            bpickle_aux(v, pos_k);
-            bpickle(step_contn_k(exp), refs, v);
-            bpickle_aux(v, pos_env);
-            bpickle(step_contn_env(exp), refs, v);
-            bpickle_aux(v, pos_args);
-            return bpickle(step_contn_args(exp), refs, v);
-        }
-        if (is_transfer(exp)) {
-            v.push_back(transfer_code);
-            auto pos = bpickle_aux(static_cast<uint64_t>(0), v);
-            bpickle_aux(v, pos);
-            return bpickle(transfer_args(exp), refs, v);
+        if (vec_offset == 0) {
+            refs.push_back(static_cast<uint64_t>(v.size()));
+            if (is_unmemoized(vec)) {
+                v.push_back(unmemoized_code);
+                return bpickle(exp, refs, v, 1);
+            }
+            if (is_result(exp)) {
+                v.push_back(result_code);
+                return bpickle(exp, refs, v, 1);
+            }
+            if (is_step_contn(exp)) {
+                v.push_back(step_contn_code);
+                return bpickle(exp, refs, v, 1);
+            }
+            if (is_transfer(exp)) {
+                v.push_back(transfer_code);
+                return bpickle(exp, refs, v, 1);
+            }
         }
         v.push_back(vector_code);
         // Add size of vector
         auto size = (*vec)->size();
-        bpickle_aux(static_cast<uint64_t>(size), v);
+        assert(vec_offset <= size);
+        bpickle_aux(static_cast<uint64_t>(size - vec_offset), v);
         std::vector<size_t> posv;
-        for (size_t i = 0; i < size; ++i) {
+        for (size_t i = vec_offset; i < size; ++i) {
             // Leave space for index of each element. See comment for pair above.
             posv.push_back(bpickle_aux(static_cast<uint64_t>(0), v));
         }
-        for (size_t i = 0; i < size; ++i) {
+        for (size_t i = vec_offset; i < size; ++i) {
             if (is_serialized((*vec)->at(i))) {
-                bpickle_aux(v, posv[i], refs[serialized_n((*vec)->at(i))]);
+                bpickle_aux(v, posv[i - vec_offset], refs[serialized_n((*vec)->at(i))]);
             } else {
-                bpickle_aux(v, posv[i]);        
-                bpickle((*vec)->at(i), refs, v);
+                bpickle_aux(v, posv[i - vec_offset]);
+                bpickle((*vec)->at(i), refs, v, 0);
             }
         }
     } else {
@@ -1874,7 +1868,7 @@ void bconvert(const std::string& s, std::shared_ptr<Runtime> runtime) {
 
     std::vector<uint64_t> refs;
     std::vector<unsigned char> v;
-    bpickle((*exp)->first, refs, v);
+    bpickle((*exp)->first, refs, v, 0);
 
     if (refs.size() != (*exp)->second->cast<double>()) {
         throw std::length_error("unexpected number of references");
