@@ -155,6 +155,7 @@ private:
     void break_cycles();
     void add_stats(std::vector<std::vector<size_t>>& stats);
     boxed gc_callback;
+    bool calling_gc_callback;
 
     struct {
         std::unordered_map<pair*, std::weak_ptr<pair>> pairs;

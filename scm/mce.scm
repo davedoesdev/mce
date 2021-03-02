@@ -577,6 +577,7 @@
 (table-set! global-table 'cdr cdr)
 (table-set! global-table 'set-car! set-car!)
 (table-set! global-table 'set-cdr! set-cdr!)
+(table-set! global-table 'length length)
 (table-set! global-table 'apply applyx)
 (table-set! global-table 'unmemoize unmemoize)
 (table-set! global-table 'serialize serialize)

@@ -231,9 +231,10 @@ std::string mce_save(boxed exp);
 boxed mce_restore(const std::string& s, std::shared_ptr<Runtime> runtime);
 
 void Runtime::maybe_gc() {
-    if ((allocated.pairs.size() > gc_threshold) ||
-        (allocated.vectors.size() > gc_threshold) ||
-        (allocated.functions.size() > gc_threshold)) {
+    if (((allocated.pairs.size() > gc_threshold) ||
+         (allocated.vectors.size() > gc_threshold) ||
+         (allocated.functions.size() > gc_threshold)) &&
+        !calling_gc_callback) {
         std::vector<std::vector<size_t>> stats;
         add_stats(stats);
         // First we need to find which objects are still pointed to.
@@ -372,6 +373,10 @@ void Runtime::maybe_gc() {
                 }
                 (*v)->push_back(b);
             }
+            calling_gc_callback = true;
+            std::unique_ptr<bool, void(*)(bool*)> cleanup(&calling_gc_callback, [](bool *p) {
+                *p = false;
+            });
             auto r = (**gc_callback->cast<lambda>())(cons(a, box(shared_from_this())));
             assert(!r->contains<bool>() || r->cast<bool>());
         }
@@ -394,6 +399,15 @@ boxed list_rest(boxed l, size_t i) {
     }
 
     return (*l->cast<pair>())->second;
+}
+
+size_t list_length(boxed l) {
+    size_t len = 0;
+    while (l->contains<pair>()) {
+        l = (*(l->cast<pair>()))->second;
+        ++len;
+    }
+    return len;
 }
 
 boxed list_to_vector(boxed l) {
@@ -853,6 +867,10 @@ boxed set_cdr(boxed args) {
     auto v = list_ref(args, 1);
     (*p->cast<pair>())->second = v;
     return p;
+}
+
+boxed length(boxed args) {
+    return box<double>(list_length(list_ref(args, 0)), args->get_runtime());
 }
 
 boxed is_eq(boxed args) {
@@ -1747,15 +1765,12 @@ boxed start(std::istream &stream, boxed args) {
     return start(j.get<std::string>(), args);
 }
 
-// Copy binary representation to vector and return index in vector
-// where it starts
+// Copy binary representation to vector
 template<typename T>
-size_t bpickle_aux(const T& data, std::vector<unsigned char>& v) {
-    size_t r = v.size();
+void bpickle_aux(const T& data, std::vector<unsigned char>& v) {
     for (size_t i = 0; i < sizeof(data); ++i) {
         v.push_back(reinterpret_cast<const unsigned char*>(&data)[i]);
     }
-    return r;
 }
 
 // Copy index to another given position in a vector
@@ -1805,18 +1820,19 @@ void bpickle(boxed exp,
         auto p = exp->cast<pair>();
         // Leave space for 8-byte index of first and second values.
         // This means they can be found easily and changed (set-car!, set-cdr!).
-        auto pos1 = bpickle_aux(static_cast<uint64_t>(0), v);
-        auto pos2 = bpickle_aux(static_cast<uint64_t>(0), v);
+        auto pos = v.size();
+        bpickle_aux(static_cast<uint64_t>(0), v);
+        bpickle_aux(static_cast<uint64_t>(0), v);
         if (is_serialized((*p)->first)) {
-            bpickle_aux(v, pos1, refs[serialized_n((*p)->first)]);
+            bpickle_aux(v, pos, refs[serialized_n((*p)->first)]);
         } else {
-            bpickle_aux(v, pos1);
+            bpickle_aux(v, pos);
             bpickle((*p)->first, refs, v, 0);
         }
         if (is_serialized((*p)->second)) {
-            bpickle_aux(v, pos2, refs[serialized_n((*p)->second)]);
+            bpickle_aux(v, pos + 8, refs[serialized_n((*p)->second)]);
         } else {
-            bpickle_aux(v, pos2);
+            bpickle_aux(v, pos + 8);
             bpickle((*p)->second, refs, v, 0);
         }
     } else if (exp->contains<vector>()) {
@@ -1825,18 +1841,22 @@ void bpickle(boxed exp,
             refs.push_back(static_cast<uint64_t>(v.size()));
             if (is_unmemoized(vec)) {
                 v.push_back(unmemoized_code);
+                bpickle_aux(static_cast<uint64_t>(v.size() + 8), v);
                 return bpickle(exp, refs, v, 1);
             }
             if (is_result(exp)) {
                 v.push_back(result_code);
+                bpickle_aux(static_cast<uint64_t>(v.size() + 8), v);
                 return bpickle(exp, refs, v, 1);
             }
             if (is_step_contn(exp)) {
                 v.push_back(step_contn_code);
+                bpickle_aux(static_cast<uint64_t>(v.size() + 8), v);
                 return bpickle(exp, refs, v, 1);
             }
             if (is_transfer(exp)) {
                 v.push_back(transfer_code);
+                bpickle_aux(static_cast<uint64_t>(v.size() + 8), v);
                 return bpickle(exp, refs, v, 1);
             }
         }
@@ -1845,16 +1865,16 @@ void bpickle(boxed exp,
         auto size = (*vec)->size();
         assert(vec_offset <= size);
         bpickle_aux(static_cast<uint64_t>(size - vec_offset), v);
-        std::vector<size_t> posv;
+        auto pos = v.size();
         for (size_t i = vec_offset; i < size; ++i) {
             // Leave space for index of each element. See comment for pair above.
-            posv.push_back(bpickle_aux(static_cast<uint64_t>(0), v));
+            bpickle_aux(static_cast<uint64_t>(0), v);
         }
         for (size_t i = vec_offset; i < size; ++i) {
             if (is_serialized((*vec)->at(i))) {
-                bpickle_aux(v, posv[i - vec_offset], refs[serialized_n((*vec)->at(i))]);
+                bpickle_aux(v, pos + (i - vec_offset) * 8, refs[serialized_n((*vec)->at(i))]);
             } else {
-                bpickle_aux(v, posv[i - vec_offset]);
+                bpickle_aux(v, pos + (i - vec_offset) * 8);
                 bpickle((*vec)->at(i), refs, v, 0);
             }
         }
@@ -1954,6 +1974,7 @@ boxed transfer_test(boxed args) {
 
 Runtime::Runtime() :
     gc_threshold(10000),
+    calling_gc_callback(false),
     global_table {
         { "result", result },
         { "<", less_than },
@@ -1971,6 +1992,7 @@ Runtime::Runtime() :
         { "cdr", cdr },
         { "set-car!", set_car },
         { "set-cdr!", set_cdr },
+        { "length", length },
         { "eq?", is_eq },
         { "=", is_number_equal },
         { "string?", is_string },

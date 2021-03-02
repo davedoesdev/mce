@@ -37,6 +37,15 @@ function list_rest(l, i) {
     return l.cdr;
 }
 
+function length(l) {
+    let len = 0;
+    while (l !== null) {
+        l = l.cdr;
+        ++len;
+    }
+    return len;
+}
+
 function list_to_vector(l) {
     let v = [];
     while (l !== null) {
@@ -427,6 +436,7 @@ const global_table = new Map([
     ['cdr', cdr],
     ['set-car!', set_car],
     ['set-cdr!', set_cdr],
+    ["length", length],
     ['cons', cons],
     ['eq?', is_eq],
     ['=', is_number_equal],
