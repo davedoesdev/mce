@@ -372,7 +372,7 @@
                ((if)
                 (let ((scan0 (scan-aux (cadr exp) ctenv fixups))
                       (scan1 (scan-aux (caddr exp) ctenv fixups))
-                      (scan2 (scan-aux (if (pair? (cdddr exp)) (cadddr exp) '())
+                      (scan2 (scan-aux (if (pair? (cdddr exp)) (cadddr exp) #f)
                                        ctenv
                                        fixups)))
                     (make-form if0 scan0 scan1 scan2)))
@@ -566,6 +566,7 @@
 (table-set! global-table '/ /)
 (table-set! global-table 'eq? eq?)
 (table-set! global-table '= =)
+(table-set! global-table 'abs abs)
 (table-set! global-table 'not not)
 (table-set! global-table 'procedure? procedure?)
 (table-set! global-table 'save mce-save)

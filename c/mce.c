@@ -3,6 +3,7 @@
 #include <stdint.h>
 #include <stdlib.h>
 #include <stdbool.h>
+#include <math.h>
 #include <assert.h>
 #include <errno.h>
 #include <string.h>
@@ -410,6 +411,14 @@ uint64_t plus(memory *mem, uint64_t args) {
     return make_double(mem, r);
 }
 
+uint64_t minus(memory *mem, uint64_t args) {
+    double r = double_val(mem, car(mem, args));
+    while (mem->bytes[args = cdr(mem, args)] == pair_code) {
+        r -= double_val(mem, car(mem, args));
+    }
+    return make_double(mem, r);
+}
+
 uint64_t multiply(memory *mem, uint64_t args) {
     double r = 1;
     while (mem->bytes[args] == pair_code) {
@@ -710,6 +719,10 @@ uint64_t global_lambda(memory *mem,
         return sendv(mem, k, plus(mem, args));
     }
 
+    if (symbol_equals(mem, defn, "-")) {
+        return sendv(mem, k, minus(mem, args));
+    }
+
     if (symbol_equals(mem, defn, "*")) {
         return sendv(mem, k, multiply(mem, args));
     }
@@ -799,6 +812,10 @@ uint64_t global_lambda(memory *mem,
         gc_callback = list_ref(mem, args, 0);
         gc_callback_set = true;
         return sendv(mem, k, mem->nil);
+    }
+
+    if (symbol_equals(mem, defn, "abs")) {
+        return sendv(mem, k, make_double(mem, fabs(double_val(mem, car(mem, args)))));
     }
 
     xdisplay(mem, defn, stderr, false); fprintf(stderr, " ");
@@ -1245,13 +1262,14 @@ uint64_t maybe_gc(memory *mem, uint64_t state) {
             state = car(mem, 0);
             gc_callback = cdr(mem, 0);
             calling_gc_callback = true;
-            run(mem, applyx(mem,
+            uint64_t r = run(mem, applyx(mem,
                make_form(mem, global_lambda_form,
                          cons(mem, make_symbol(mem, "result"), mem->nil)),
                make_global_env(mem),
                gc_callback,
                cons(mem, make_double(mem, mem->size), mem->nil)));
             calling_gc_callback = false;
+            assert((mem->bytes[r] != boolean_code) || boolean_val(mem, r));
         }
     }
     return state;

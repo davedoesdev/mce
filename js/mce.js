@@ -450,7 +450,8 @@ const global_table = new Map([
     ['list->vector', list_to_vector],
     ['get-config', get_config],
     ['cf-test', cf_test],
-    ['transfer-test', transfer_test]
+    ['transfer-test', transfer_test],
+    ['set-gc-callback!', () => null]
 ]);
 
 function get_global_function(name) {
