@@ -7,6 +7,7 @@
 #include <assert.h>
 #include <errno.h>
 #include <string.h>
+#include <unistd.h>
 #include <inttypes.h>
 #include <quotearg.h>
 #include <argp.h>
@@ -72,6 +73,117 @@ uint64_t allocate(memory *mem, uint64_t size) {
 bool gc_callback_set = false;
 uint64_t gc_callback;
 bool calling_gc_callback = false;
+
+/* Note: src is modified during gc() and gc_aux() */
+void gc_aux(memory *src, uint64_t state, memory *dest) {
+    unsigned char code = src->bytes[state];
+    dest->bytes[dest->size++] = code;
+
+    switch (code) {
+        case null_code:
+            dest->nil = dest->size - 1;
+            break;
+
+        case boolean_code:
+        case char_code:
+            dest->bytes[dest->size++] = src->bytes[state + 1];
+            break;
+
+        case number_code:
+            memcpy(&dest->bytes[dest->size], &src->bytes[state + 1], sizeof(double));
+            dest->size += sizeof(double);
+            break;
+
+        case string_code:
+        case symbol_code: {
+            uint64_t len = *(uint64_t*)&src->bytes[state + 1];
+            *(uint64_t*)&dest->bytes[dest->size] = len;
+            dest->size += 8;
+            memcpy(&dest->bytes[dest->size], &src->bytes[state + 9], len);
+            dest->size += len;
+            break;
+        }
+
+        case pair_code: {
+            uint64_t car_state = *(uint64_t*)&src->bytes[state + 1];
+            uint64_t cdr_state = *(uint64_t*)&src->bytes[state + 9];
+
+            src->bytes[state] = gc_code;
+            *(uint64_t*)&src->bytes[state + 1] = dest->size - 1;
+
+            uint64_t pos = dest->size;
+            dest->size += 2 * 8;
+
+            if (src->bytes[car_state] == gc_code) {
+                *(uint64_t*)&dest->bytes[pos] = *(uint64_t*)&src->bytes[car_state + 1];
+            } else {
+                *(uint64_t*)&dest->bytes[pos] = dest->size;
+                gc_aux(src, car_state, dest);
+            }
+
+            if (src->bytes[cdr_state] == gc_code) {
+                *(uint64_t*)&dest->bytes[pos + 8] = *(uint64_t*)&src->bytes[cdr_state + 1];
+            } else {
+                *(uint64_t*)&dest->bytes[pos + 8] = dest->size;
+                gc_aux(src, cdr_state, dest);
+            }
+            break;
+        }
+
+        case vector_code: {
+            uint64_t len = *(uint64_t*)&src->bytes[state + 1];
+
+            src->bytes[state] = gc_code;
+            *(uint64_t*)&src->bytes[state + 1] = dest->size - 1;
+
+            *(uint64_t*)&dest->bytes[dest->size] = len;
+            dest->size += 8;
+
+            uint64_t pos = dest->size;
+            dest->size += len * 8;
+
+            for (uint64_t i = 0; i < len; ++i) {
+                uint64_t el_state = *(uint64_t*)&src->bytes[state + 9 + i * 8];
+                if (src->bytes[el_state] == gc_code) {
+                    *(uint64_t*)&dest->bytes[pos + i * 8] = *(uint64_t*)&src->bytes[el_state + 1];
+                } else {
+                    *(uint64_t*)&dest->bytes[pos + i * 8] = dest->size;
+                    gc_aux(src, el_state, dest);
+                }
+            }
+            break;
+        }
+
+        case unmemoized_code:
+        case result_code:
+        case step_contn_code:
+        case transfer_code: {
+            uint64_t vec_state = *(uint64_t*)&src->bytes[state + 1];
+
+            src->bytes[state] = gc_code;
+            *(uint64_t*)&src->bytes[state + 1] = dest->size - 1;
+
+            /* Note references should not come back here since we break them above,
+               so we don't need to check for gc_code */
+            *(uint64_t*)&dest->bytes[dest->size] = dest->size + 8;
+            dest->size += 8;
+            gc_aux(src, vec_state, dest);
+            break;
+        }
+
+        default:
+            assert_perror(EINVAL);
+    }
+}
+
+void gc(memory *src, uint64_t state, memory *dest) {
+    gc_aux(src, state, dest);
+    if (dest->bytes[dest->nil] != null_code) {
+        assert(dest->size < dest->capacity);
+        dest->nil = dest->size++;
+        dest->bytes[dest->nil] = null_code;
+    }
+}
 
 /*
 pair is:
@@ -284,6 +396,52 @@ uint64_t ctenv_setvar(memory *mem,
     set_car(mem, p, name);
     
     return val;
+}
+
+uint64_t save(memory *mem, uint64_t state) {
+    memory copy = *mem;
+    copy.bytes = (unsigned char*) malloc(mem->size);
+    assert(copy.bytes);
+    memcpy(copy.bytes, mem->bytes, mem->size);
+
+    memory dest = {
+        mem->size + 1,
+        0,
+        0,
+        (unsigned char*) malloc(mem->size + 1),
+        0
+    };
+    assert(dest.bytes);
+
+    gc(&copy, state, &dest);
+    assert(dest.size > 0);
+    free(copy.bytes);
+
+    uint64_t v = make_uninitialised_vector(mem, dest.size);
+    for (uint64_t i = 0; i < dest.size; ++i) {
+        vector_set(mem, v, i, make_double(mem, dest.bytes[i]));
+    }
+
+    free(dest.bytes);
+    return v;
+}
+
+uint64_t restore(memory *mem, uint64_t v) {
+    uint64_t size = vector_size(mem, v); 
+    uint64_t state = allocate(mem, size);
+    for (uint64_t i = 0; i < size; ++i) {
+        mem->bytes[state + i] = double_val(mem, vector_ref(mem, v, i));
+    }
+    memory src = {
+        0,
+        0,
+        0,
+        &mem->bytes[state],
+        0
+    };
+    size = mem->size;
+    gc(&src, 0, mem);
+    return size;
 }
 
 uint64_t list_to_vector(memory *mem, uint64_t l, uint64_t len) {
@@ -607,6 +765,14 @@ uint64_t print(memory *mem, uint64_t args) {
     return xdisplay_args(mem, args, stdout, false);
 }
 
+uint64_t eprint(memory *mem, uint64_t args) {
+    return xdisplay_args(mem, args, stderr, false);
+}
+
+uint64_t gwrite(memory *mem, uint64_t args) {
+    return xdisplay_args(mem, args, stdout, true);
+}
+
 uint64_t symbol_lookup(memory *mem,
                        uint64_t form_args,
                        uint64_t args) {
@@ -766,6 +932,14 @@ uint64_t global_lambda(memory *mem,
         return sendv(mem, k, print(mem, args));
     }
 
+    if (symbol_equals(mem, defn, "eprint")) {
+        return sendv(mem, k, eprint(mem, args));
+    }
+
+    if (symbol_equals(mem, defn, "write")) {
+        return sendv(mem, k, gwrite(mem, args));
+    }
+
     if (symbol_equals(mem, defn, "string?")) {
         return sendv(mem, k, is_string(mem, args));
     }
@@ -816,6 +990,18 @@ uint64_t global_lambda(memory *mem,
 
     if (symbol_equals(mem, defn, "abs")) {
         return sendv(mem, k, make_double(mem, fabs(double_val(mem, car(mem, args)))));
+    }
+
+    if (symbol_equals(mem, defn, "save")) {
+        return sendv(mem, k, save(mem, car(mem, args)));
+    }
+
+    if (symbol_equals(mem, defn, "restore")) {
+        return sendv(mem, k, restore(mem, car(mem, args)));
+    }
+
+    if (symbol_equals(mem, defn, "getpid")) {
+        return sendv(mem, k, make_double(mem, getpid()));
     }
 
     xdisplay(mem, defn, stderr, false); fprintf(stderr, " ");
@@ -1131,108 +1317,6 @@ uint64_t handle_unmemoized(memory *mem, uint64_t state, uint64_t args) {
     return handle_form(mem, double_val(mem, car(mem, exp)), cdr(mem, exp), args);
 }
 
-/* Note: src is modified during gc() */
-void gc(memory *src, uint64_t state, memory *dest) {
-    unsigned char code = src->bytes[state];
-    dest->bytes[dest->size++] = code;
-
-    switch (code) {
-        case null_code:
-            dest->nil = dest->size - 1;
-            break;
-
-        case boolean_code:
-        case char_code:
-            dest->bytes[dest->size++] = src->bytes[state + 1];
-            break;
-
-        case number_code:
-            memcpy(&dest->bytes[dest->size], &src->bytes[state + 1], sizeof(double));
-            dest->size += sizeof(double);
-            break;
-
-        case string_code:
-        case symbol_code: {
-            uint64_t len = *(uint64_t*)&src->bytes[state + 1];
-            *(uint64_t*)&dest->bytes[dest->size] = len;
-            dest->size += 8;
-            memcpy(&dest->bytes[dest->size], &src->bytes[state + 9], len);
-            dest->size += len;
-            break;
-        }
-
-        case pair_code: {
-            uint64_t car_state = *(uint64_t*)&src->bytes[state + 1];
-            uint64_t cdr_state = *(uint64_t*)&src->bytes[state + 9];
-
-            src->bytes[state] = gc_code;
-            *(uint64_t*)&src->bytes[state + 1] = dest->size - 1;
-
-            uint64_t pos = dest->size;
-            dest->size += 2 * 8;
-
-            if (src->bytes[car_state] == gc_code) {
-                *(uint64_t*)&dest->bytes[pos] = *(uint64_t*)&src->bytes[car_state + 1];
-            } else {
-                *(uint64_t*)&dest->bytes[pos] = dest->size;
-                gc(src, car_state, dest);
-            }
-
-            if (src->bytes[cdr_state] == gc_code) {
-                *(uint64_t*)&dest->bytes[pos + 8] = *(uint64_t*)&src->bytes[cdr_state + 1];
-            } else {
-                *(uint64_t*)&dest->bytes[pos + 8] = dest->size;
-                gc(src, cdr_state, dest);
-            }
-            break;
-        }
-
-        case vector_code: {
-            uint64_t len = *(uint64_t*)&src->bytes[state + 1];
-
-            src->bytes[state] = gc_code;
-            *(uint64_t*)&src->bytes[state + 1] = dest->size - 1;
-
-            *(uint64_t*)&dest->bytes[dest->size] = len;
-            dest->size += 8;
-
-            uint64_t pos = dest->size;
-            dest->size += len * 8;
-
-            for (uint64_t i = 0; i < len; ++i) {
-                uint64_t el_state = *(uint64_t*)&src->bytes[state + 9 + i * 8];
-                if (src->bytes[el_state] == gc_code) {
-                    *(uint64_t*)&dest->bytes[pos + i * 8] = *(uint64_t*)&src->bytes[el_state + 1];
-                } else {
-                    *(uint64_t*)&dest->bytes[pos + i * 8] = dest->size;
-                    gc(src, el_state, dest);
-                }
-            }
-            break;
-        }
-
-        case unmemoized_code:
-        case result_code:
-        case step_contn_code:
-        case transfer_code: {
-            uint64_t vec_state = *(uint64_t*)&src->bytes[state + 1];
-
-            src->bytes[state] = gc_code;
-            *(uint64_t*)&src->bytes[state + 1] = dest->size - 1;
-
-            /* Note references should not come back here since we break them above,
-               so we don't need to check for gc_code */
-            *(uint64_t*)&dest->bytes[dest->size] = dest->size + 8;
-            dest->size += 8;
-            gc(src, vec_state, dest);
-            break;
-        }
-
-        default:
-            assert_perror(EINVAL);
-    }
-}
-
 uint64_t run(memory *mem, uint64_t state);
 
 uint64_t maybe_gc(memory *mem, uint64_t state) {
@@ -1240,24 +1324,18 @@ uint64_t maybe_gc(memory *mem, uint64_t state) {
         if (gc_callback_set) {
             state = cons(mem, state, gc_callback);
         }
-        unsigned char *bytes = (unsigned char*) malloc(mem->capacity);
-        assert(bytes);
         memory dest = {
             mem->capacity,
             0,
             mem->gc_threshold,
-            bytes,
+            (unsigned char*) malloc(mem->capacity),
             0
         };
+        assert(dest.bytes);
         gc(mem, state, &dest);
         assert(dest.size > 0);
-        if (bytes[dest.nil] != null_code) {
-            assert(dest.size < dest.capacity);
-            dest.nil = dest.size++;
-            bytes[dest.nil] = null_code;
-        }
         free(mem->bytes);
-        memcpy(mem, &dest, sizeof(memory));
+        *mem = dest;
         if (gc_callback_set) {
             state = car(mem, 0);
             gc_callback = cdr(mem, 0);
@@ -1270,6 +1348,8 @@ uint64_t maybe_gc(memory *mem, uint64_t state) {
                cons(mem, make_double(mem, mem->size), mem->nil)));
             calling_gc_callback = false;
             assert((mem->bytes[r] != boolean_code) || boolean_val(mem, r));
+        } else {
+            state = 0;
         }
     }
     return state;

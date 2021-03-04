@@ -927,14 +927,6 @@ boxed is_eq(boxed args) {
     return box<bool>(false, runtime);
 }
 
-boxed gunmemoize(boxed args) {
-    return unmemoize(list_ref(args, 0));
-}
-
-boxed gserialize(boxed args) {
-    return serialize(list_ref(args, 0));
-}
-
 boxed gapplyx(boxed args) {
     return applyx(list_ref(args, 0),
                   list_ref(args, 1),
@@ -2002,8 +1994,6 @@ Runtime::Runtime() :
         { "vector?", is_vector },
         { "vector-length", vector_length },
         { "vector-ref", vector_ref },
-        { "unmemoize", gunmemoize },
-        { "serialize", gserialize },
         { "apply", gapplyx },
         { "save", save },
         { "restore", restore },

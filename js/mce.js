@@ -440,8 +440,6 @@ const global_table = new Map([
     ['cons', cons],
     ['eq?', is_eq],
     ['=', is_number_equal],
-    ['unmemoize', unmemoize],
-    ['serialize', serialize],
     ['apply', applyx],
     ['save', mce_save],
     ['restore', grestore],
