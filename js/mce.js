@@ -423,6 +423,7 @@ const global_table = new Map([
     ['print', print],
     ['eprint', eprint],
     ['write', write],
+    ['write-state', write],
     ['ewrite', ewrite],
     ['null?', is_null],
     ['string?', is_string],

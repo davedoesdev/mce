@@ -178,11 +178,7 @@ void gc_aux(memory *src, uint64_t state, memory *dest) {
 
 void gc(memory *src, uint64_t state, memory *dest) {
     gc_aux(src, state, dest);
-    if (dest->bytes[dest->nil] != null_code) {
-        assert(dest->size < dest->capacity);
-        dest->nil = dest->size++;
-        dest->bytes[dest->nil] = null_code;
-    }
+    assert(dest->size > 0);
 }
 
 /*
@@ -338,6 +334,19 @@ bool symbol_equals(memory *mem, uint64_t state, char *s) {
             (memcmp(&mem->bytes[state + 9], s, len) == 0));
 }
 
+uint64_t make_string(memory *mem, void *s, size_t len) {
+    uint64_t state = allocate(mem, 1 + 8 + len);
+    mem->bytes[state] = string_code;
+    *(uint64_t*)&mem->bytes[state + 1] = len;
+    memcpy(&mem->bytes[state + 9], s, len);
+    return state;
+}
+
+uint64_t string_size(memory *mem, uint64_t state) {
+    assert(mem->bytes[state] == string_code);
+    return *(uint64_t*)&mem->bytes[state + 1];
+}
+
 uint64_t make_result(memory *mem, uint64_t val) {
     uint64_t state = allocate(mem, 1 + 8 + 1 + 8 + 8);
     mem->bytes[state] = result_code;
@@ -405,42 +414,39 @@ uint64_t save(memory *mem, uint64_t state) {
     memcpy(copy.bytes, mem->bytes, mem->size);
 
     memory dest = {
-        mem->size + 1,
+        mem->size,
         0,
         0,
-        (unsigned char*) malloc(mem->size + 1),
+        (unsigned char*) malloc(mem->size),
         0
     };
     assert(dest.bytes);
 
     gc(&copy, state, &dest);
-    assert(dest.size > 0);
     free(copy.bytes);
 
-    uint64_t v = make_uninitialised_vector(mem, dest.size);
-    for (uint64_t i = 0; i < dest.size; ++i) {
-        vector_set(mem, v, i, make_double(mem, dest.bytes[i]));
-    }
-
+    uint64_t s = make_string(mem, dest.bytes, dest.size);
     free(dest.bytes);
-    return v;
+    return s;
 }
 
-uint64_t restore(memory *mem, uint64_t v) {
-    uint64_t size = vector_size(mem, v); 
-    uint64_t state = allocate(mem, size);
-    for (uint64_t i = 0; i < size; ++i) {
-        mem->bytes[state + i] = double_val(mem, vector_ref(mem, v, i));
-    }
+uint64_t restore(memory *mem, uint64_t s) {
+    uint64_t size = string_size(mem, s); 
+    unsigned char *bytes = (unsigned char*) malloc(size);
+    assert(bytes);
+    memcpy(bytes, &mem->bytes[s + 9], size);
+
     memory src = {
         0,
         0,
         0,
-        &mem->bytes[state],
+        bytes,
         0
     };
+
     size = mem->size;
     gc(&src, 0, mem);
+
     return size;
 }
 
@@ -773,6 +779,13 @@ uint64_t gwrite(memory *mem, uint64_t args) {
     return xdisplay_args(mem, args, stdout, true);
 }
 
+uint64_t write_state(memory *mem, uint64_t args) {
+    uint64_t s = car(mem, args);
+    assert(mem->bytes[s] == string_code);
+    fwrite(&mem->bytes[s + 1], 1, *(uint64_t*)&mem->bytes[s + 1] + 8, stdout);
+    return s;
+}
+
 uint64_t symbol_lookup(memory *mem,
                        uint64_t form_args,
                        uint64_t args) {
@@ -938,6 +951,10 @@ uint64_t global_lambda(memory *mem,
 
     if (symbol_equals(mem, defn, "write")) {
         return sendv(mem, k, gwrite(mem, args));
+    }
+
+    if (symbol_equals(mem, defn, "write-state")) {
+        return sendv(mem, k, write_state(mem, args));
     }
 
     if (symbol_equals(mem, defn, "string?")) {
@@ -1333,7 +1350,11 @@ uint64_t maybe_gc(memory *mem, uint64_t state) {
         };
         assert(dest.bytes);
         gc(mem, state, &dest);
-        assert(dest.size > 0);
+        if (dest.bytes[dest.nil] != null_code) {
+            assert(dest.size < dest.capacity);
+            dest.nil = dest.size++;
+            dest.bytes[dest.nil] = null_code;
+        }
         free(mem->bytes);
         *mem = dest;
         if (gc_callback_set) {
@@ -1368,7 +1389,12 @@ uint64_t run(memory *mem, uint64_t state) {
 
 uint64_t start(memory *mem, uint64_t state) {
     if (mem->bytes[state] == unmemoized_code) {
-        return run(mem, send(mem, state, mem->nil));
+        return run(mem, applyx(mem,
+            make_form(mem, global_lambda_form,
+                      cons(mem, make_symbol(mem, "result"), mem->nil)),
+            make_global_env(mem),
+            state,
+            mem->nil));
     }
     return run(mem, state);
 }

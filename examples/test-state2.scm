@@ -4,7 +4,7 @@
         (if (= i 5)
             (begin (let/cc k
                        (eprint "save " (getpid))
-                       (write (save (lambda () (k #t))))
+                       (write-state (save (lambda () (k #t))))
                        (stop #f))
                    (eprint "restore " (getpid))))
         (if (< i 10)

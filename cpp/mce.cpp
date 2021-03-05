@@ -1974,6 +1974,7 @@ Runtime::Runtime() :
         { "print", print },
         { "eprint", eprint },
         { "write", write },
+        { "write-state", write },
         { "ewrite", write },
         { "+", plus },
         { "-", minus },

@@ -572,6 +572,7 @@
 (table-set! global-table 'save mce-save)
 (table-set! global-table 'restore grestore)
 (table-set! global-table 'write write)
+(table-set! global-table 'write-state write)
 (table-set! global-table 'newline newline)
 (table-set! global-table 'transfer transfer) 
 (table-set! global-table 'car car)
