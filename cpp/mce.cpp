@@ -1871,11 +1871,11 @@ void bpickle(boxed exp,
             }
         }
     } else {
-        throw std::range_error("unknown pickle expression");
+        throw std::range_error("unknown bpickle expression");
     }
 }
 
-void bconvert(const std::string& s, std::shared_ptr<Runtime> runtime) {
+void bconvert_out(const std::string& s, std::shared_ptr<Runtime> runtime) {
     auto exp = serialize(unmemoize(mce_restore(s, runtime)))->cast<pair>();
 
     std::vector<uint64_t> refs;
@@ -1887,19 +1887,123 @@ void bconvert(const std::string& s, std::shared_ptr<Runtime> runtime) {
     }
 
     auto size = static_cast<uint64_t>(v.size());
-    for (size_t i = 0; i < sizeof(size); ++i) {
-        std::cout << reinterpret_cast<const unsigned char*>(&size)[i];
+    std::cout.write(reinterpret_cast<const char*>(&size), sizeof(size));
+    std::cout.write(reinterpret_cast<const char*>(v.data()), v.size());
+}
+
+void bconvert_out(std::istream &stream, std::shared_ptr<Runtime> runtime) {
+    json j;
+    stream >> j;
+    return bconvert_out(j.get<std::string>(), runtime);
+}
+
+boxed bunpickle(const unsigned char *s,
+                uint64_t i,
+                std::unordered_map<uint64_t, boxed>& refs,
+                std::shared_ptr<Runtime> runtime);
+
+boxed bunpickle(const unsigned char *s,
+                uint64_t i,
+                const std::string& marker,
+                std::unordered_map<uint64_t, boxed>& refs,
+                std::shared_ptr<Runtime> runtime) {
+    auto r = make_vector(runtime);
+    refs[i] = r;
+    auto v = r->cast<vector>();
+    (*v)->push_back(box<symbol>(marker, runtime));
+    for (auto el : **bunpickle(s, *(uint64_t*)&s[i + 1], refs, runtime)->cast<vector>()) {
+        (*v)->push_back(el);
+    }
+    return r;
+}
+
+boxed bunpickle(const unsigned char *s,
+                uint64_t i,
+                std::unordered_map<uint64_t, boxed>& refs,
+                std::shared_ptr<Runtime> runtime) {
+    auto ref = refs.find(i);
+    if (ref != refs.end()) {
+        return ref->second;
     }
 
-    for (auto const& c : v) {
-        std::cout << c;
+// TODO: check s bounds - and in mce.c
+    switch (s[i]) {
+        case null_code:
+            return box(runtime);
+
+        case boolean_code:
+            return box<bool>(s[i + 1] == 1, runtime);
+
+        case number_code:
+            return box<double>(*(double*)&s[i + 1], runtime);
+
+        case char_code:
+            return box<char>(s[i + 1], runtime);
+
+        case string_code:
+            return box<std::string>(std::string(reinterpret_cast<const char*>(&s[i + 9]),
+                                                *(uint64_t*)&s[i + 1]),
+                                    runtime);
+
+        case symbol_code:
+            return box<symbol>(std::string(reinterpret_cast<const char*>(&s[i + 9]),
+                                           *(uint64_t*)&s[i + 1]),
+                               runtime);
+
+        case pair_code: {
+            auto bnil = box(runtime);
+            auto r = cons(bnil, bnil);
+            refs[i] = r;
+            auto ep = r->cast<pair>();
+            (*ep)->first = bunpickle(s, *(uint64_t*)&s[i + 1], refs, runtime);
+            (*ep)->second = bunpickle(s, *(uint64_t*)&s[i + 9], refs, runtime);
+            return r;
+        }
+
+        case vector_code: {
+            auto r = make_vector(runtime);
+            refs[i] = r;
+            auto v = r->cast<vector>();
+            for (uint64_t j = 0; j < *(uint64_t*)&s[i + 1]; ++j) {
+                (*v)->push_back(bunpickle(s, *(uint64_t*)&s[i + 9 + j * 8], refs, runtime));
+            }
+            return r;    
+        }
+
+        case unmemoized_code:
+            return bunpickle(s, i, "MCE-UNMEMOIZED", refs, runtime);
+
+        case result_code:
+            return bunpickle(s, i, "MCE-RESULT", refs, runtime);
+
+        case step_contn_code:
+            return bunpickle(s, i, "MCE-STEP-CONTN", refs, runtime);
+
+        case transfer_code:
+            return bunpickle(s, i, "MCE-TRANSFER", refs, runtime);
+
+        default:
+            throw std::range_error("unknown bunpickle expression");
     }
 }
 
-void bconvert(std::istream &stream, std::shared_ptr<Runtime> runtime) {
-    json j;
-    stream >> j;
-    return bconvert(j.get<std::string>(), runtime);
+void bconvert_in(const std::string& s, std::shared_ptr<Runtime> runtime) {
+    std::unordered_map<uint64_t, boxed> refs;
+    json j = mce_save(bunpickle(
+        &reinterpret_cast<const unsigned char*>(s.c_str())[8], 0, refs, runtime));
+    std::cout << j.dump();
+}
+
+void bconvert_in(std::istream &stream, std::shared_ptr<Runtime> runtime) {
+    uint64_t size;
+    stream.read(reinterpret_cast<char*>(&size), sizeof(size));
+
+    std::vector<unsigned char> v(size);
+    stream.read(reinterpret_cast<char*>(v.data()), size);
+
+    std::unordered_map<uint64_t, boxed> refs;
+    json j = mce_save(bunpickle(v.data(), 0, refs, runtime));
+    std::cout << j.dump();
 }
 
 boxed start(int argc, char *argv[]) {
@@ -1915,8 +2019,11 @@ boxed start(int argc, char *argv[]) {
         ("config",
          "Set configuration",
          cxxopts::value<std::string>())
-        ("bconvert",
+        ("bconvert-out",
          "Convert CPS form or state to binary format",
+         cxxopts::value<std::string>()->implicit_value(""))
+        ("bconvert-in",
+         "Convert binary format form or state to CPS",
          cxxopts::value<std::string>()->implicit_value(""));
     auto opts = options.parse(argc, argv);
     auto runtime = std::make_shared<Runtime>();
@@ -1933,12 +2040,21 @@ boxed start(int argc, char *argv[]) {
     if (opts.count("run")) {
         return start(json::parse(opts["run"].as<std::string>()), box(runtime));
     }
-    if (opts.count("bconvert")) {
-        auto state = opts["bconvert"].as<std::string>();
+    if (opts.count("bconvert-out")) {
+        auto state = opts["bconvert-out"].as<std::string>();
         if (state.empty()) {
-            bconvert(std::cin, runtime);
+            bconvert_out(std::cin, runtime);
         } else {
-            bconvert(state, runtime);
+            bconvert_out(state, runtime);
+        }
+        return box(runtime);
+    }
+    if (opts.count("bconvert-in")) {
+        auto state = opts["bconvert-in"].as<std::string>();
+        if (state.empty()) {
+            bconvert_in(std::cin, runtime);
+        } else {
+            bconvert_in(state, runtime);
         }
         return box(runtime);
     }

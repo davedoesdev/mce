@@ -694,10 +694,11 @@ uint64_t xdisplay(memory *mem,
         case string_code:
             if (is_write) {
                 struct quoting_options *options = clone_quoting_options(NULL);
+                set_quoting_style(options, c_quoting_style);
                 char *quoted = quotearg_alloc((char*)&mem->bytes[exp + 9],
                                               *(uint64_t*)&mem->bytes[exp + 1],
                                               options);
-                fprintf(out, "\"%s\"", quoted);
+                fprintf(out, "%s", quoted);
                 free(quoted);
                 free(options);
             } else {
@@ -825,14 +826,33 @@ uint64_t applyx(memory *mem,
     return send(mem, fn, make_step_contn(mem, k, env, args));
 }
 
-uint64_t transfer_test(memory *mem,
-                       uint64_t args) {
+uint64_t transfer_test(memory *mem, uint64_t args) {
     return applyx(mem,
                   make_form(mem, global_lambda_form,
                             cons(mem, make_symbol(mem, "result"), mem->nil)),
                   make_global_env(mem),
                   car(mem, args),
                   cdr(mem, args));
+}
+
+uint64_t cf_test(memory *mem, uint64_t args) {
+    double n = double_val(mem, list_ref(mem, args, 0));
+    uint64_t x = list_ref(mem, args, 1);
+    if (n == 0) {
+        /* Note since we lack the duality of the other implementations
+           (where we can return a function which has logic and can return
+           its definition when requested), we have to split the logic into
+           a separate helper global, cf-test-aux - which is not interoperable
+           with the other implementations. */
+        return make_form(mem, global_lambda_form,
+                         cons(mem, make_symbol(mem, "cf-test-aux"),
+                              cons(mem, x, mem->nil)));
+    }
+    return make_double(mem, double_val(mem, x) + n);
+}
+
+uint64_t cf_test_aux(memory *mem, uint64_t x, uint64_t args) {
+    return cf_test(mem, cons(mem, list_ref(mem, args, 0), cons(mem, x, mem->nil)));
 }
 
 uint64_t constructed_function0(memory *mem,
@@ -1019,6 +1039,13 @@ uint64_t global_lambda(memory *mem,
 
     if (symbol_equals(mem, defn, "getpid")) {
         return sendv(mem, k, make_double(mem, getpid()));
+    }
+
+    if (symbol_equals(mem, defn, "cf-test")) {
+        return sendv(mem, k, cf_test(mem, args));
+    }
+    if (symbol_equals(mem, defn, "cf-test-aux")) {
+        return sendv(mem, k, cf_test_aux(mem, list_ref(mem, form_args, 1), args));
     }
 
     xdisplay(mem, defn, stderr, false); fprintf(stderr, " ");
