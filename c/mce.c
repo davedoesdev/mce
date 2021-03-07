@@ -75,7 +75,9 @@ uint64_t gc_callback;
 bool calling_gc_callback = false;
 
 /* Note: src is modified during gc() and gc_aux() */
-void gc_aux(memory *src, uint64_t state, memory *dest) {
+uint64_t gc_aux(memory *src, uint64_t state, memory *dest) {
+    uint64_t size = dest->size;
+
     unsigned char code = src->bytes[state];
     dest->bytes[dest->size++] = code;
 
@@ -114,19 +116,9 @@ void gc_aux(memory *src, uint64_t state, memory *dest) {
             uint64_t pos = dest->size;
             dest->size += 2 * 8;
 
-            if (src->bytes[car_state] == gc_code) {
-                *(uint64_t*)&dest->bytes[pos] = *(uint64_t*)&src->bytes[car_state + 1];
-            } else {
-                *(uint64_t*)&dest->bytes[pos] = dest->size;
-                gc_aux(src, car_state, dest);
-            }
+            *(uint64_t*)&dest->bytes[pos] = gc_aux(src, car_state, dest);
+            *(uint64_t*)&dest->bytes[pos + 8] = gc_aux(src, cdr_state, dest);
 
-            if (src->bytes[cdr_state] == gc_code) {
-                *(uint64_t*)&dest->bytes[pos + 8] = *(uint64_t*)&src->bytes[cdr_state + 1];
-            } else {
-                *(uint64_t*)&dest->bytes[pos + 8] = dest->size;
-                gc_aux(src, cdr_state, dest);
-            }
             break;
         }
 
@@ -143,13 +135,8 @@ void gc_aux(memory *src, uint64_t state, memory *dest) {
             dest->size += len * 8;
 
             for (uint64_t i = 0; i < len; ++i) {
-                uint64_t el_state = *(uint64_t*)&src->bytes[state + 9 + i * 8];
-                if (src->bytes[el_state] == gc_code) {
-                    *(uint64_t*)&dest->bytes[pos + i * 8] = *(uint64_t*)&src->bytes[el_state + 1];
-                } else {
-                    *(uint64_t*)&dest->bytes[pos + i * 8] = dest->size;
-                    gc_aux(src, el_state, dest);
-                }
+                *(uint64_t*)&dest->bytes[pos + i * 8] = gc_aux(
+                    src, *(uint64_t*)&src->bytes[state + 9 + i * 8], dest);
             }
             break;
         }
@@ -163,17 +150,21 @@ void gc_aux(memory *src, uint64_t state, memory *dest) {
             src->bytes[state] = gc_code;
             *(uint64_t*)&src->bytes[state + 1] = dest->size - 1;
 
-            /* Note references should not come back here since we break them above,
-               so we don't need to check for gc_code */
-            *(uint64_t*)&dest->bytes[dest->size] = dest->size + 8;
+            uint64_t pos = dest->size;
             dest->size += 8;
-            gc_aux(src, vec_state, dest);
+
+            *(uint64_t*)&dest->bytes[pos] = gc_aux(src, vec_state, dest);
             break;
         }
+
+        case gc_code:
+            return *(uint64_t*)&src->bytes[state + 1];
 
         default:
             assert_perror(EINVAL);
     }
+
+    return size;
 }
 
 void gc(memory *src, uint64_t state, memory *dest) {
