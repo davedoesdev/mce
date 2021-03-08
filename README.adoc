@@ -3,7 +3,7 @@
 
 This is a continuation-passing metacircular evaluator for the Scheme language,
 with support for serializing the state of execution. Implementations are
-provided in Scheme (of course), C++, JavaScript and WebAssembly.
+provided in Scheme (of course), C++, JavaScript, WebAssembly and C.
 
 It consists of the following components:
 
@@ -23,7 +23,7 @@ Stateless servers::
   An experimental Web framework is provided which serializes the whole program state into a HTML document when user interaction is required. The state is restored when the browser POSTs back the user input form. The framework is modelled after the stateless server arrangement described http://rawgit.davedoesdev.com/davedoesdev/mce/master/doc/dissertation.pdf#page=103[here].
 
 The macro expansion and CPS conversion components are implemented in Scheme.
-The CPS execution component has Scheme, C++, JavaScript and WebAssembly
+The CPS execution component has Scheme, C++, JavaScript, WebAssembly and C
 implementations.
 
 # Building
@@ -79,6 +79,17 @@ https://github.com/CraneStation/wasmtime/blob/master/docs/WASI-overview.md[WASI]
 to run it, for example https://github.com/CraneStation/wasmtime[wasmtime] or
 https://nodejs.org/dist/latest-v13.x/docs/api/wasi.html[Node.js].
 
+## C
+
+Run:
+
+```bash
+make -C c
+```
+
+You should end up with executable `mce` in the link:c[] directory. This
+executes CPS forms produced by `scm/scan`.
+
 # Running the examples
 
 There are a number of examples in the link:examples[] directory.
@@ -113,6 +124,16 @@ or
 ./scm/expand < examples/test-loop.scm | ./scm/scan | node --experimental-wasi-unstable-preview1 js/run_wasm.js
 ```
 
+Using the C engine:
+
+```bash
+./scm/expand < examples/test-loop.scm | ./scm/scan | ./cpp/mce --bconvert-out | ./c/mce
+```
+
+Note: the `--bconvert-out` option converts the CPS form (JSON format) into a binary format
+that the C engine understands. There is a corresponding `--bconvert-in` option which converts
+C engine binary format to JSON format that the other engines understand.
+
 Of course, you can write the CPS form to a file so you only have to do it once,
 for example:
 
@@ -123,6 +144,7 @@ for example:
 node --experimental-wasi-unstable-preview1 js/main.js < test-loop.cps
 wasmtime cpp/wasm/mce.wasm < test-loop.cps
 node js/run_wasm.js < test-loop.cps
+./cpp/mce --bconvert-out < test-loop.cps | ./c/mce
 ```
 
 # State-saving
@@ -182,6 +204,44 @@ restore 22136
 10
 ```
 
+or from a C++ engine to a C one:
+
+```
+$ ./scm/expand < examples/test-state2.scm | ./scm/scan | ./cpp/mce | ./cpp/mce --bconvert-out | ./c/mce
+0
+1
+2
+3
+4
+5
+save 676481
+restore 676483
+6
+7
+8
+9
+10
+```
+
+or from a C engine to a Scheme one:
+
+```
+$ ./scm/expand < examples/test-state2.scm | ./scm/scan | ./cpp/mce --bconvert-out | ./c/mce | ./cpp/mce --bconvert-in | ./scm/mce 
+0
+1
+2
+3
+4
+5
+save 676630
+restore 676632
+6.0
+7.0
+8.0
+9.0
+10.0
+```
+
 or from a Scheme engine to a WebAssembly one:
 
 ```bash
@@ -224,6 +284,25 @@ You can change the threshold by using the `--gc-threshold` argument to
 
 link:examples/test-mem.scm[] can be used to check the garbage collector is
 working. It runs in a loop creating cycles.
+
+# C garbage collector
+
+The C engine implements a simple stop-and-copy garbage collector:
+
+* Memory is allocated from a large fixed-size byte array.
+* Memory allocated from the byte array is never individually freed.
+* Once the amount of memory allocated exceeds a certain threshold:
+  1. A new large fixed-size byte array is created.
+  2. The current computation state and its reachable data is copied
+     from the current array to the new array.
+  3. The current array is freed.
+  4. The new array becomes the current array.
+
+You can change the array size using the `--memory-capacity` argument to
+`./c/mce`. The default is 10 (Mebibytes).
+
+You can change the threshold using the `--gc-threshold` argument.
+The default is 8 (Mebibytes).
 
 # Stateless servers
 
@@ -295,5 +374,3 @@ netlify dev
 ```
 
 and then visit http://localhost:8888/counter.html.
-
-
