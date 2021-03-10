@@ -111,37 +111,18 @@ function memoize_lambda(proc, defn) {
 }
 
 function ctenv_lookup(i, env) {
-    const r = list_ref(env, i.car).cdr[i.cdr];
+    const r = list_ref(env, i.car)[i.cdr];
     return r === undefined ? null : r;
 }
 
-function ctenv_setvar(name, i, val, env) {
-    const first = i.car;
-    let second = i.cdr;
-    const bindings = list_ref(env, first);
-    const v = bindings.cdr;
-
+function ctenv_setvar(i, val, env) {
+    const v = list_ref(env, i.car);
     const len = v.length;
-    if (second >= len) {
-        v.length = second + 1;
+    if (i.cdr >= len) {
+        v.length = i.cdr + 1;
         v.fill(null, len);
     }
-    v[second] = val;
-
-    if (!bindings.car) {
-        bindings.car = cons(null, null);
-    }
-
-    let p = bindings.car;
-    while (second > 0) {
-        if (!p.cdr) {
-            p.cdr = cons(null, null);
-        }
-        p = p.cdr;
-        --second;
-    }
-    p.car = name;
-
+    v[i.cdr] = val;
     return val;
 }
 
@@ -507,9 +488,7 @@ function step_contn_args(args) {
 }
 
 function make_global_env() {
-    const values = [];
-    const bindings = cons(null, values);
-    return cons(bindings, null);
+    return cons([], null);
 }
 
 function is_transfer(args) {
@@ -582,51 +561,34 @@ function lookup_global(sym) {
     return f;
 }
 
-function extend_env(env, syms, values) {
-    return cons(cons(syms, list_to_vector(values)), env);
+function extend_env(env, len, values) {
+    return cons(list_to_vector(values), env);
 }
 
-function improper_extend_env(env, syms, values) {
-    let s = null;
-    let ps = s;
+function improper_extend_env(env, len, values) {
     const v = [];
 
-    while (syms && values) {
-        if (!(syms instanceof Pair)) {
-            const ns = cons(syms, null);
-            if (s) {
-                ps.cdr = ns;
-            } else {
-                s = ns;
-            }
+    for (let i = 0; (i < len) && values; ++i) {
+        if (i === (len - 1)) {
             v.push(values);
-            break;
-        }
-
-        const ns = cons(syms.car, null);
-        if (s) {
-            ps = ps.cdr = ns;
         } else {
-            s = ps = ns;
+            v.push(values.car);
+            values = values.cdr;
         }
-        v.push(values.car);
-
-        syms = syms.cdr;
-        values = values.cdr;
     }
 
-    return cons(cons(s, v), env);
+    return cons(v, env);
 }
 
-function handle_lambda(args, params, fn, env, extend_env) {
+function handle_lambda(args, len, fn, env, extend_env) {
     if (is_step_contn(args)) {
         return send(fn, cons(step_contn_k(args),
-                             cons(extend_env(env, params, step_contn_args(args)),
+                             cons(extend_env(env, len, step_contn_args(args)),
                                   null)));
     }
 
     return run(send(fn, cons(lookup_global(new Symbol('result')),
-                             cons(extend_env(env, params, args),
+                             cons(extend_env(env, len, args),
                                   null))));
 }
 
@@ -731,50 +693,48 @@ const scseq0 = define_form((self, first, rest) =>
 const scseq1 = define_form((self, k, env, rest) =>
     () => send(rest, cons(k, cons(env, null))));
 
-const lambda0 = define_form((self, params, len, scanned) =>
+const lambda0 = define_form((self, len, scanned) =>
     args => {
         const [k, env] = list_to_vector(args);
-        return sendv(k, make_form(lambda1, params, len, scanned, env));
+        return sendv(k, make_form(lambda1, len, scanned, env));
     });
 
-const lambda1 = define_form((self, params, len, scanned, env) =>
-    args => handle_lambda(args, params, scanned, env, extend_env));
+const lambda1 = define_form((self, len, scanned, env) =>
+    args => handle_lambda(args, len, scanned, env, extend_env));
 
-const improper_lambda0 = define_form((self, params, len, scanned) =>
+const improper_lambda0 = define_form((self, len, scanned) =>
     args => {
         const [k, env] = list_to_vector(args);
-        return sendv(k, make_form(improper_lambda1, params, len, scanned, env));
+        return sendv(k, make_form(improper_lambda1, len, scanned, env));
     });
 
-const improper_lambda1 = define_form((self, params, len, scanned, env) =>
-    args => handle_lambda(args, params, scanned, env, improper_extend_env));
+const improper_lambda1 = define_form((self, len, scanned, env) =>
+    args => handle_lambda(args, len, scanned, env, improper_extend_env));
 
-const letcc0 = define_form((self, name, scanned) =>
+const letcc0 = define_form((self, scanned) =>
     args => {
         const [k, env] = list_to_vector(args);
         return send(scanned,
            cons(k,
-                cons(extend_env(env,
-                                cons(name, null),
-                                cons(make_form(letcc1, k), null)),
+                cons(extend_env(env, 1, cons(make_form(letcc1, k), null)),
                      null)));
     });
 
 const letcc1 = define_form((self, k) =>
     args => handle_contn_lambda(args, k));
 
-const define0 = define_form((self, name, i, scanned) =>
+const define0 = define_form((self, i, scanned) =>
     args => {
         const [k, env] = list_to_vector(args);
         return send(scanned,
-            cons(make_form(define1, k, env, name, i),
+            cons(make_form(define1, k, env, i),
                  cons(env, null)));
     });
 
-const define1 = define_form((self, k, env, name, i) =>
+const define1 = define_form((self, k, env, i) =>
     args => {
         const [v] = list_to_vector(args);
-        return sendv(k, ctenv_setvar(name, i, v, env));
+        return sendv(k, ctenv_setvar(i, v, env));
     });
 
 const application0 = define_form((self, scanned) =>

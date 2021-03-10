@@ -74,10 +74,9 @@
 
 (define (ctenv-lookup i env)
     (let* ((senv (list-ref env (inexact->exact (car i))))
-           (vals (cdr senv))
            (index (inexact->exact (cdr i))))
-        (if (< index (vector-length vals))
-            (vector-ref vals index)
+        (if (< index (vector-length senv))
+            (vector-ref senv index)
             '())))
 
 (define (extend-vector vec index val)
@@ -91,48 +90,27 @@
                        (loop (+ i 1)))))
         newvec))
 
-(define (extend-list l index val)
-    (let ((newl (make-list (+ index 1))))
-        (let loop ((src l) (dst newl))
-            (if (null? src)
-                (set-car! dst val)
-                (begin (set-car! dst (car src))
-                       (loop (cdr src) (cdr dst)))))
-        newl))
-
-(define (ctenv-setvar! name i val env)
-    (let* ((senv (list-ref env (inexact->exact (car i))))
-           (syms (car senv))
-           (vals (cdr senv))
+(define (ctenv-setvar! i val env)
+    (let* ((sindex (inexact->exact (car i)))
+           (senv (list-ref env sindex))
            (index (inexact->exact (cdr i))))
-        (if (< index (vector-length vals))
-            (vector-set! vals index val)
-            (set-cdr! senv (extend-vector vals index val)))
-        (if (< index (length syms))
-            (list-set! syms index name)
-            (set-car! senv (extend-list syms index name))))
+        (if (< index (vector-length senv))
+            (vector-set! senv index val)
+            (list-set! env sindex (extend-vector senv index val))))
     val)
 
-(define (extend-env env syms len values)
-    (cons (cons syms (list->vector values)) env))
+(define (extend-env env len values)
+    (cons (list->vector values) env))
 
-(define (improper-extend-env env syms len values)
-    (let ((s '()) (ps '()) (v (make-vector len)))
-        (let loop ((i 0) (syms syms) (values values))
-            (if (and (< i len) (not (null? syms)) (not (null? values)))
-                (if (not (pair? syms))
-                    (let ((ns (cons syms '())))
-                        (if (null? s)
-                            (set! s ns)
-                            (set-cdr! ps ns))
-                        (vector-set! v i values))
-                    (let ((ns (cons (car syms) '())))
-                        (if (null? s)
-                            (begin (set! ps ns) (set! s ns))
-                            (begin (set-cdr! ps ns) (set! ps ns)))
-                        (vector-set! v i (car values))
-                        (loop (+ i 1) (cdr syms) (cdr values))))))
-        (cons (cons s v) env)))
+(define (improper-extend-env env len values)
+    (let ((v (make-vector len '())))
+        (let loop ((i 0) (values values))
+            (if (and (< i len) (not (null? values)))
+                (if (= i (- len 1))
+                    (vector-set! v i values)
+                    (begin (vector-set! v i (car values))
+                           (loop (+ i 1) (cdr values))))))
+        (cons v env)))
 
 (define (make-step-contn k env args) (cons 'MCE-STEP-CONTN (cons k (cons env args))))
 (define (step-contn? exp) (and (pair? exp) (equal? (car exp) 'MCE-STEP-CONTN)))
@@ -146,7 +124,7 @@
 (define (send k . v)
     (sendl k v))
 
-(define (make-global-env) (list (cons '() '#())))
+(define (make-global-env) (list '#()))
 
 (define (yield-defn? args)
     (and (not (null? args)) (equal? (car args) 'MCE-YIELD-DEFINITION)))
@@ -249,32 +227,29 @@
         (lambda (v) (send rest k env))))
 
 (define-form lambda0
-    (lambda (this params len scanned)
+    (lambda (this len scanned)
         (lambda (k env)
-            (send k (make-form lambda1 params len scanned env)))))
+            (send k (make-form lambda1 len scanned env)))))
 
 (define-form lambda1
-    (lambda (this params len scanned env)
+    (lambda (this len scanned env)
         (lambda args
-            (handle-lambda args params len scanned env extend-env))))
+            (handle-lambda args len scanned env extend-env))))
 
 (define-form improper-lambda0
-    (lambda (this params len scanned)
+    (lambda (this len scanned)
         (lambda (k env)
-            (send k (make-form improper-lambda1 params len scanned env)))))
+            (send k (make-form improper-lambda1 len scanned env)))))
 
 (define-form improper-lambda1
-    (lambda (this params len scanned env)
+    (lambda (this len scanned env)
         (lambda args
-            (handle-lambda args params len scanned env improper-extend-env))))
+            (handle-lambda args len scanned env improper-extend-env))))
 
 (define-form let/cc0
-    (lambda (this name scanned)
+    (lambda (this scanned)
         (lambda (k env)
-            (send scanned k (extend-env env
-                                        (list name)
-                                        1
-                                        (list (make-form let/cc1 k)))))))
+            (send scanned k (extend-env env 1 (list (make-form let/cc1 k)))))))
 
 (define-form let/cc1
     (lambda (this k)
@@ -282,14 +257,14 @@
             (handle-contn-lambda args k))))
 
 (define-form define0
-    (lambda (this name i scanned)
+    (lambda (this i scanned)
         (lambda (k env)
-            (send scanned (make-form define1 k env name i) env))))
+            (send scanned (make-form define1 k env i) env))))
 
 (define-form define1
-    (lambda (this k env name i)
+    (lambda (this k env i)
         (lambda (v)
-            (send k (ctenv-setvar! name i v env)))))
+            (send k (ctenv-setvar! i v env)))))
 
 (define-form application0
     (lambda (this scanned)
@@ -351,7 +326,7 @@
         (define (fixup)
             (let ((i (ctenv-index ctenv name)))
                 (if i
-                    (begin (set! f (make-form define0 name i scanned)) '())
+                    (begin (set! f (make-form define0 i scanned)) '())
                     (error-set!-not-found name))))
         (set-car! fixups (cons fixup (car fixups)))
         (lambda args (apply f args))))
@@ -384,30 +359,30 @@
                                (scseq (cddr exp)
                                       (extend-ctenv ctenv proper-params)
                                       fixups)))
-                            (make-form improper-lambda0 params (length proper-params) scanned))
+                            (make-form improper-lambda0 (length proper-params) scanned))
                         (let ((scanned
                                (scseq (cddr exp)
                                       (extend-ctenv ctenv params)
                                       fixups)))
-                            (make-form lambda0 params (length params) scanned)))))
+                            (make-form lambda0 (length params) scanned)))))
                ((let/cc)
                 (let* ((name (cadr exp))
                        (scanned (scseq (cddr exp)
                                        (extend-ctenv ctenv (list name))
                                        fixups)))
-                    (make-form let/cc0 name scanned)))
+                    (make-form let/cc0 scanned)))
                ((set!)
                 (let* ((name (cadr exp))
                        (i (ctenv-index ctenv name))
                        (scanned (scseq (cddr exp) ctenv fixups)))
                     (if i
-                        (make-form define0 name i scanned)
+                        (make-form define0 i scanned)
                         (make-undefined-set! name scanned ctenv fixups))))
                ((mce-define)
                 (let* ((name (cadr exp))
                        (i (putin-ctenv! ctenv name))
                        (scanned (scseq (cddr exp) ctenv fixups)))
-                    (make-form define0 name i scanned)))
+                    (make-form define0 i scanned)))
                ((begin)
                 (scseq (cdr exp) ctenv fixups))
                (else
@@ -431,7 +406,7 @@
                             (let* ((i (putin-ctenv! global-ctenv name))
                                    (tlexp (list toplevels (cadr toplevel)))
                                    (scanned (scan tlexp global-ctenv))
-                                   (form1 (make-form define0 name i scanned))
+                                   (form1 (make-form define0 i scanned))
                                    (form2 (make-form scseq0 form1 r)))
                                 (if (symbol? (fixup))
                                     (error-lookup-not-found name))
@@ -466,12 +441,12 @@
 (define (applyx k env fn args)
     (sendl fn (make-step-contn k env args)))
 
-(define (handle-lambda args params len fn env extend-env)
+(define (handle-lambda args len fn env extend-env)
     (if (step-contn? args)
         (send fn (step-contn-k args)
-                 (extend-env env params len (step-contn-args args)))
+                 (extend-env env len (step-contn-args args)))
         (run (send fn (lookup-global 'result)
-                      (extend-env env params len args)))))
+                      (extend-env env len args)))))
 
 (define (handle-contn-lambda args k)
     (cond ((transfer? args)

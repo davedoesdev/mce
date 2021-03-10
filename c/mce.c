@@ -239,6 +239,13 @@ uint64_t list_rest(memory *mem, uint64_t l, uint64_t i) {
     return cdr(mem, l);
 }
 
+void list_set(memory *mem, uint64_t l, uint64_t i, uint64_t val) {
+    while (i > 0) {
+         l = cdr(mem, l);
+    }
+    set_car(mem, l, val);
+}
+
 uint64_t list_length(memory *mem, uint64_t l) {
     uint64_t len = 0;
     while (mem->bytes[l] == pair_code) {
@@ -353,8 +360,7 @@ uint64_t ctenv_lookup(memory *mem,
                       uint64_t env) {
     uint64_t first = (uint64_t)double_val(mem, car(mem, i));
     uint64_t second = (uint64_t)double_val(mem, cdr(mem, i));
-    uint64_t bindings = list_ref(mem, env, first);
-    uint64_t v = cdr(mem, bindings);
+    uint64_t v = list_ref(mem, env, first);
     if (second < vector_size(mem, v)) {
         return vector_ref(mem, v, second);
     }
@@ -362,39 +368,22 @@ uint64_t ctenv_lookup(memory *mem,
 }
 
 uint64_t ctenv_setvar(memory *mem,
-                      uint64_t name,
                       uint64_t i,
                       uint64_t val,
                       uint64_t env) {
     uint64_t first = (uint64_t)double_val(mem, car(mem, i));
     uint64_t second = (uint64_t)double_val(mem, cdr(mem, i));
-    uint64_t bindings = list_ref(mem, env, first);
-    uint64_t v = cdr(mem, bindings);
+    uint64_t v = list_ref(mem, env, first);
     uint64_t size = vector_size(mem, v);
-
     if (second >= size) {
         uint64_t v2 = make_uninitialised_vector(mem, second + 1);
         for (uint64_t i = 0; i < second; ++i) {
             vector_set(mem, v2, i, i < size ? vector_ref(mem, v, i) : mem->nil);
         }
-        set_cdr(mem, bindings, v2);
+        list_set(mem, env, first, v2);
         v = v2;
     }
     vector_set(mem, v, second, val);
-
-    if (mem->bytes[car(mem, bindings)] == null_code) {
-        set_car(mem, bindings, cons(mem, mem->nil, mem->nil));
-    }
-    uint64_t p = car(mem, bindings);
-    while (second > 0) {
-        if (mem->bytes[cdr(mem, p)] == null_code) {
-            set_cdr(mem, p, cons(mem, mem->nil, mem->nil));
-        }
-        p = cdr(mem, p);
-        --second;
-    }
-    set_car(mem, p, name);
-    
     return val;
 }
 
@@ -456,51 +445,32 @@ uint64_t list_to_vector(memory *mem, uint64_t l, uint64_t len) {
 
 uint64_t extend_env(memory *mem,
                     uint64_t env,
-                    uint64_t syms,
                     uint64_t len,
                     uint64_t values) {
-    return cons(mem, cons(mem, syms, list_to_vector(mem, values, len)), env);
+    return cons(mem, list_to_vector(mem, values, len), env);
 }
 
 uint64_t improper_extend_env(memory *mem,
                              uint64_t env,
-                             uint64_t syms,
                              uint64_t len,
                              uint64_t values) {
-    uint64_t s = mem->nil;
-    uint64_t ps = mem->nil;
     uint64_t v = make_uninitialised_vector(mem, len);
-    uint64_t i = 0;
+    uint64_t i;
 
-    while ((i < len) && (mem->bytes[syms] != null_code) && (mem->bytes[values] != null_code)) {
-        if (mem->bytes[syms] != pair_code) {
-            uint64_t ns = cons(mem, syms, mem->nil);
-            if (mem->bytes[s] == null_code) {
-                s = ns;
-            } else {
-                set_cdr(mem, ps, ns);
-            }
-            vector_set(mem, v, i++, values);
-            break;
-        }
-
-        uint64_t ns = cons(mem, car(mem, syms), mem->nil);
-        if (mem->bytes[s] == null_code) {
-            s = ps = ns;
+    for (i = 0; (i < len) && (mem->bytes[values] != null_code); ++i) {
+        if (i == (len - 1)) {
+            vector_set(mem, v, i, values);
         } else {
-            set_cdr(mem, ps, ns);
-            ps = ns;
+            vector_set(mem, v, i, car(mem, values));
+            values = cdr(mem, values);
         }
-        vector_set(mem, v, i++, car(mem, values));
-        syms = cdr(mem, syms);
-        values = cdr(mem, values);
     }
 
     while (i < len) {
         vector_set(mem, v, i++, mem->nil);
     }
 
-    return cons(mem, cons(mem, s, v), env);
+    return cons(mem, v, env);
 }
 
 uint64_t make_step_contn(memory *mem, uint64_t k, uint64_t env, uint64_t args) {
@@ -806,7 +776,7 @@ uint64_t make_form(memory *mem, double form, uint64_t args) {
 }
 
 uint64_t make_global_env(memory *mem) {
-    return cons(mem, cons(mem, mem->nil, make_vector(mem, 0)), mem->nil);
+    return cons(mem, make_vector(mem, 0), mem->nil);
 }
 
 uint64_t applyx(memory *mem,
@@ -1128,71 +1098,63 @@ uint64_t scseq1(memory *mem,
 uint64_t lambda0(memory *mem,
                  uint64_t form_args,
                  uint64_t args) {
-    uint64_t params = list_ref(mem, form_args, 0);
-    uint64_t len = list_ref(mem, form_args, 1);
-    uint64_t scanned = list_ref(mem, form_args, 2);
+    uint64_t len = list_ref(mem, form_args, 0);
+    uint64_t scanned = list_ref(mem, form_args, 1);
     uint64_t k = list_ref(mem, args, 0);
     uint64_t env = list_ref(mem, args, 1);
     return sendv(mem, k,
                  make_form(mem, lambda1_form,
-                           cons(mem, params,
-                                cons(mem, len, cons(mem, scanned, cons(mem, env, mem->nil))))));
+                           cons(mem, len, cons(mem, scanned, cons(mem, env, mem->nil)))));
 }
 
 uint64_t lambda1(memory *mem,
                  uint64_t form_args,
                  uint64_t args) {
-    uint64_t params = list_ref(mem, form_args, 0);
-    uint64_t len = (uint64_t)double_val(mem, list_ref(mem, form_args, 1));
-    uint64_t scanned = list_ref(mem, form_args, 2);
-    uint64_t env = list_ref(mem, form_args, 3);
+    uint64_t len = (uint64_t)double_val(mem, list_ref(mem, form_args, 0));
+    uint64_t scanned = list_ref(mem, form_args, 1);
+    uint64_t env = list_ref(mem, form_args, 2);
 
     return send(mem, scanned,
         cons(mem, step_contn_k(mem, args),
-             cons(mem, extend_env(mem, env, params, len, step_contn_args(mem, args)),
+             cons(mem, extend_env(mem, env, len, step_contn_args(mem, args)),
                   mem->nil)));
 }
 
 uint64_t improper_lambda0(memory *mem,
                           uint64_t form_args,
                           uint64_t args) {
-    uint64_t params = list_ref(mem, form_args, 0);
-    uint64_t len = list_ref(mem, form_args, 1);
-    uint64_t scanned = list_ref(mem, form_args, 2);
+    uint64_t len = list_ref(mem, form_args, 0);
+    uint64_t scanned = list_ref(mem, form_args, 1);
     uint64_t k = list_ref(mem, args, 0);
     uint64_t env = list_ref(mem, args, 1);
     return sendv(mem, k,
                  make_form(mem, improper_lambda1_form,
-                           cons(mem, params,
-                                cons(mem, len, cons(mem, scanned, cons(mem, env, mem->nil))))));
+                           cons(mem, len, cons(mem, scanned, cons(mem, env, mem->nil)))));
 }
 
 uint64_t improper_lambda1(memory *mem,
                           uint64_t form_args,
                           uint64_t args) {
-    uint64_t params = list_ref(mem, form_args, 0);
-    uint64_t len = (uint64_t)double_val(mem, list_ref(mem, form_args, 1));
-    uint64_t scanned = list_ref(mem, form_args, 2);
-    uint64_t env = list_ref(mem, form_args, 3);
+    uint64_t len = (uint64_t)double_val(mem, list_ref(mem, form_args, 0));
+    uint64_t scanned = list_ref(mem, form_args, 1);
+    uint64_t env = list_ref(mem, form_args, 2);
 
     return send(mem, scanned,
         cons(mem, step_contn_k(mem, args),
-             cons(mem, improper_extend_env(mem, env, params, len, step_contn_args(mem, args)),
+             cons(mem, improper_extend_env(mem, env, len, step_contn_args(mem, args)),
                   mem->nil)));
 }
 
 uint64_t letcc0(memory *mem,
                 uint64_t form_args,
                 uint64_t args) {
-    uint64_t name = list_ref(mem, form_args, 0);
-    uint64_t scanned = list_ref(mem, form_args, 1); 
+    uint64_t scanned = list_ref(mem, form_args, 0); 
     uint64_t k = list_ref(mem, args, 0);
     uint64_t env = list_ref(mem, args, 1);
     return send(mem, scanned,
         cons(mem, k,
              cons(mem, extend_env(mem,
                                   env,
-                                  cons(mem, name, mem->nil),
                                   1,
                                   cons(mem, make_form(mem, letcc1_form, cons(mem, k, mem->nil)),
                                        mem->nil)),
@@ -1214,14 +1176,13 @@ uint64_t letcc1(memory *mem,
 uint64_t define0(memory *mem,
                  uint64_t form_args,
                  uint64_t args) {
-    uint64_t name = list_ref(mem, form_args, 0);
-    uint64_t i = list_ref(mem, form_args, 1);
-    uint64_t scanned = list_ref(mem, form_args, 2);
+    uint64_t i = list_ref(mem, form_args, 0);
+    uint64_t scanned = list_ref(mem, form_args, 1);
     uint64_t k = list_ref(mem, args, 0);
     uint64_t env = list_ref(mem, args, 1);
     return send(mem, scanned,
         cons(mem, make_form(mem, define1_form,
-                            cons(mem, k, cons(mem, env, cons(mem, name, cons(mem, i, mem->nil))))),
+                            cons(mem, k, cons(mem, env, cons(mem, i, mem->nil)))),
              cons(mem, env, mem->nil)));
 }
 
@@ -1230,10 +1191,9 @@ uint64_t define1(memory *mem,
                  uint64_t args) {
     uint64_t k = list_ref(mem, form_args, 0);
     uint64_t env = list_ref(mem, form_args, 1);
-    uint64_t name = list_ref(mem, form_args, 2);
-    uint64_t i = list_ref(mem, form_args, 3);
+    uint64_t i = list_ref(mem, form_args, 2);
     uint64_t v = list_ref(mem, args, 0);
-    return sendv(mem, k, ctenv_setvar(mem, name, i, v, env));
+    return sendv(mem, k, ctenv_setvar(mem, i, v, env));
 }
 
 uint64_t application0(memory *mem,
