@@ -27,6 +27,11 @@
     ((call-with-current-continuation f)
      (call/cc f))))
 
+(define-syntax not
+  (syntax-rules ()
+    ((not v)
+     (if v #f #t))))
+
 ; Simple version of values and call-with-values for the common case
 
 (define-syntax values

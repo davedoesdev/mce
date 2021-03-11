@@ -434,6 +434,37 @@ const global_table = new Map([
     ['set-gc-callback!', () => null]
 ]);
 
+const core_globals = [
+        result,
+        applyx,
+        less_than,
+        greater_than,
+        plus,
+        minus,
+        multiply,
+        divide,
+        is_number_equal,
+        null,
+        is_null,
+        is_vector,
+        vector_length,
+        vector_ref,
+        is_procedure,
+        is_eq,
+        cons,
+        is_pair,
+        car,
+        cdr,
+        set_car,
+        set_cdr,
+        length,
+        list_to_vector,
+        is_string,
+        is_string_equal,
+        transfer,
+        transfer_test
+];
+
 function get_global_function(name) {
     return global_table.get(name);
 }
@@ -457,8 +488,7 @@ function register_kenv_function(f) {
 }
 
 function find_global(sym) {
-    const s = sym.toString();
-    const r = global_table.get(s);
+    const r = sym instanceof Symbol ? global_table.get(sym.toString()) : core_globals[sym];
     if (r === undefined) {
         throw new SymbolNotFoundError('find_global', sym);
     }

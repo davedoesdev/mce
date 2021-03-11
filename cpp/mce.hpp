@@ -164,6 +164,7 @@ private:
     } allocated;
 
     std::unordered_map<std::string, function*> global_table;
+    std::vector<function*> core_globals;
     std::unordered_set<function*> kenvfn_set;
     std::unordered_map<std::string, boxed> config_table;
 
@@ -173,6 +174,7 @@ private:
                                       std::shared_ptr<Runtime> runtime,
                                       bool has_defn);
     friend boxed find_global(const symbol& sym, std::shared_ptr<Runtime> runtime);
+    friend boxed find_global(const double i, std::shared_ptr<Runtime> runtime);
     friend boxed wrap_global_lambda(boxed fn, boxed cf);
 };
 

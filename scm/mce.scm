@@ -311,6 +311,9 @@
 (define (error-set!-not-found name)
     (error "set!" "symbol not found" name))
 
+(define (error-core-global-not-found n)
+    (error "lookup" "core global not found" n))
+
 (define (make-undefined-lookup name ctenv fixups)
     (let ((f '()))
         (define (fixup)
@@ -497,18 +500,35 @@
     (sendl fn (cons 'MCE-TRANSFER args)))
 
 (define (find-global sym #!optional (err #t))
-    (let ((r (table-ref global-table sym)))
-        (if r
-            (ref-value r)
-            (if err
-                (error-lookup-not-found sym)
-                r))))
+    (if (number? sym)
+        (let ((r (if (< sym (vector-length core-globals))
+                     (vector-ref core-globals sym)
+                     '())))
+            (if r
+                r
+                (if err
+                    (error-core-global-not-found sym)
+                    #f)))
+        (let ((r (table-ref global-table sym)))
+            (if r
+                (ref-value r)
+                (if err
+                    (error-lookup-not-found sym)
+                    #f)))))
+
+(define (vector-index v vec i)
+    (if (< i (vector-length vec))
+        (if (eq? (vector-ref vec i) v)
+            i
+            (vector-index v vec (+ i 1)))
+        -1))
 
 (define (lookup-global sym #!optional (err #t))
     (let ((r (find-global sym err)))
         (if (procedure? r)
             (letrec*
-                ((defn (list global-lambda sym))
+                ((i (vector-index r core-globals 0))
+                 (defn (list global-lambda (if (< i 0) sym i)))
                  (f2 (memoize-lambda (lambda args (apply f args)) defn))
                  (f (memoize-lambda (wrap-global-lambda r f2) defn)))
                 f)
@@ -542,7 +562,6 @@
 (table-set! global-table 'eq? eq?)
 (table-set! global-table '= =)
 (table-set! global-table 'abs abs)
-(table-set! global-table 'not not)
 (table-set! global-table 'procedure? procedure?)
 (table-set! global-table 'save mce-save)
 (table-set! global-table 'restore grestore)
@@ -570,6 +589,65 @@
 (table-set! global-table 'cf-test cf-test)
 (table-set! global-table 'transfer-test transfer-test)
 (table-set! global-table 'set-gc-callback! (lambda (v) '()))
+
+(define core-globals (vector
+    ; result needs to be accessible from core for when we run a
+    ; lambda to its conclusion
+    result
+
+    ; apply is something only core can do
+    applyx
+
+    ; we're keeping numbers in core
+    <
+    >
+    +
+    -
+    *
+    /
+    =
+    '() ;abs - not implemted
+
+    ; we're keeping the empty list in core
+    ; note that core type predicates could be moved into lang but
+    ; (a) that would leak their type codes from core into lang for C engine
+    ; (b) they're intrinsic types in the other engines so can't be checked
+    ;     from lang level
+    null?
+
+    ; we're keeping vectors in core
+    vector?
+    vector-length
+    vector-ref
+
+    ; we're keeping lambdas in core
+    procedure?
+
+    ; ------------------------------
+
+    ; eq? will change later when some types are lifted into lang -
+    ; we'll probably have a core-eq? for the types we keep in core
+    eq?
+
+    ; these should go when we lift pairs into lang
+    cons
+    pair?
+    car
+    cdr
+    set-car!
+    set-cdr!
+    length
+    list->vector
+
+    ; these should go when we lift strings into lang
+    string?
+    string=?
+
+    ; transfer can only be done in core but it might not be useful
+    ; enough to keep - maybe make it optional
+    transfer
+    transfer-test
+))
 
 (define (get-global-function name)
     (ref-value (table-ref global-table name)))

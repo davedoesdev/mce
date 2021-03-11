@@ -55,6 +55,37 @@
 #define application1_form           21
 #define evalx_initial_form          22
 
+enum core_globals {
+    g_result,
+    g_applyx,
+    g_less_than,
+    g_greater_than,
+    g_plus,
+    g_minus,
+    g_multiply,
+    g_divide,
+    g_is_number_equal,
+    g_abs,
+    g_is_null,
+    g_is_vector,
+    g_vector_length,
+    g_vector_ref,
+    g_is_procedure,
+    g_is_eq,
+    g_cons,
+    g_is_pair,
+    g_car,
+    g_cdr,
+    g_set_car,
+    g_set_cdr,
+    g_length,
+    g_list_to_vector,
+    g_is_string,
+    g_is_string_equal,
+    g_transfer,
+    g_transfer_test
+};
+
 typedef struct {
     uint64_t capacity;
     uint64_t size;
@@ -837,14 +868,15 @@ uint64_t global_lambda(memory *mem,
                        uint64_t form_args,
                        uint64_t args) {
     uint64_t defn = list_ref(mem, form_args, 0);
+    double g = mem->bytes[defn] == number_code ? double_val(mem, defn) : -1;
 
     if (mem->bytes[args] == transfer_code) {
         args = transfer_args(mem, args);
 
-        if (symbol_equals(mem, defn, "transfer-test")) {
+        if (g == g_transfer_test) {
             return applyx(mem,
                           make_form(mem, global_lambda_form,
-                                    cons(mem, make_symbol(mem, "result"), mem->nil)),
+                                    cons(mem, make_double(mem, g_result), mem->nil)),
                           make_global_env(mem),
                           list_ref(mem, args, 0),
                           list_rest(mem, args, 0));
@@ -855,7 +887,7 @@ uint64_t global_lambda(memory *mem,
         return 0;
     }
 
-    if (symbol_equals(mem, defn, "result")) {
+    if (g == g_result) {
         return make_result(mem, car(mem, args));
     }
 
@@ -863,63 +895,101 @@ uint64_t global_lambda(memory *mem,
     uint64_t env = step_contn_env(mem, args);
     args = step_contn_args(mem, args);
 
-    if (symbol_equals(mem, defn, "transfer")) {
+    if (g == g_transfer) {
         return transfer(mem, args);
     }
 
-    if (symbol_equals(mem, defn, "<")) {
+    if (g == g_less_than) {
         return sendv(mem, k, less_than(mem, args));
     }
 
-    if (symbol_equals(mem, defn, ">")) {
+    if (g == g_greater_than) {
         return sendv(mem, k, greater_than(mem, args));
     }
 
-    if (symbol_equals(mem, defn, "+")) {
+    if (g == g_plus) {
         return sendv(mem, k, plus(mem, args));
     }
 
-    if (symbol_equals(mem, defn, "-")) {
+    if (g == g_minus) {
         return sendv(mem, k, minus(mem, args));
     }
 
-    if (symbol_equals(mem, defn, "*")) {
+    if (g == g_multiply) {
         return sendv(mem, k, multiply(mem, args));
     }
 
-    if (symbol_equals(mem, defn, "null?")) {
+    if (g == g_is_null) {
         return sendv(mem, k, is_null(mem, args));
     }
 
-    if (symbol_equals(mem, defn, "car")) {
+    if (g == g_car) {
         return sendv(mem, k, car(mem, car(mem, args)));
     }
 
-    if (symbol_equals(mem, defn, "cdr")) {
+    if (g == g_cdr) {
         return sendv(mem, k, cdr(mem, car(mem, args)));
     }
 
-    if (symbol_equals(mem, defn, "set-car!")) {
+    if (g == g_set_car) {
         return sendv(mem, k, set_car(mem, list_ref(mem, args, 0),
                                           list_ref(mem, args, 1)));
     }
 
-    if (symbol_equals(mem, defn, "set-cdr!")) {
+    if (g == g_set_cdr) {
         return sendv(mem, k, set_cdr(mem, list_ref(mem, args, 0),
                                           list_ref(mem, args, 1)));
     }
 
-    if (symbol_equals(mem, defn, "length")) {
+    if (g == g_length) {
         return sendv(mem, k, make_double(mem, list_length(mem, list_ref(mem, args, 0))));
     }
 
-    if (symbol_equals(mem, defn, "cons")) {
+    if (g == g_cons) {
         return sendv(mem, k, cons(mem, list_ref(mem, args, 0),
                                        list_ref(mem, args, 1)));
     }
 
-    if (symbol_equals(mem, defn, "eq?")) {
+    if (g == g_is_eq) {
         return sendv(mem, k, is_eq(mem, args));
+    }
+
+    if (g == g_is_pair) {
+        return sendv(mem, k, is_pair(mem, args));
+    }
+
+    if (g == g_is_vector) {
+        return sendv(mem, k, is_vector(mem, args));
+    }
+
+    if (g == g_is_procedure) {
+        return sendv(mem, k, is_procedure(mem, args));
+    }
+
+    if (g == g_vector_length) {
+        return sendv(mem, k, make_double(mem, vector_size(mem, car(mem, args))));
+    }
+
+    if (g == g_is_number_equal) {
+        return sendv(mem, k, is_number_equal(mem, args));
+    }
+
+    if (g == g_vector_ref) {
+        return sendv(mem, k, vector_ref(mem,
+                                        list_ref(mem, args, 0),
+                                        double_val(mem, list_ref(mem, args, 1))));
+    }
+
+    if (g == g_applyx) {
+        return applyx(mem,
+                      k,
+                      env,
+                      list_ref(mem, args, 0),
+                      list_ref(mem, args, 1));
+    }
+
+    if (g == g_abs) {
+        return sendv(mem, k, make_double(mem, fabs(double_val(mem, car(mem, args)))));
     }
 
     if (symbol_equals(mem, defn, "print")) {
@@ -942,52 +1012,10 @@ uint64_t global_lambda(memory *mem,
         return sendv(mem, k, is_string(mem, args));
     }
 
-    if (symbol_equals(mem, defn, "pair?")) {
-        return sendv(mem, k, is_pair(mem, args));
-    }
-
-    if (symbol_equals(mem, defn, "vector?")) {
-        return sendv(mem, k, is_vector(mem, args));
-    }
-
-    if (symbol_equals(mem, defn, "procedure?")) {
-        return sendv(mem, k, is_procedure(mem, args));
-    }
-
-    if (symbol_equals(mem, defn, "vector-length")) {
-        return sendv(mem, k, make_double(mem, vector_size(mem, car(mem, args))));
-    }
-
-    if (symbol_equals(mem, defn, "=")) {
-        return sendv(mem, k, is_number_equal(mem, args));
-    }
-
-    if (symbol_equals(mem, defn, "vector-ref")) {
-        return sendv(mem, k, vector_ref(mem,
-                                        list_ref(mem, args, 0),
-                                        double_val(mem, list_ref(mem, args, 1))));
-    }
-
-    if (symbol_equals(mem, defn, "apply")) {
-        return applyx(mem,
-                      k,
-                      env,
-                      list_ref(mem, args, 0),
-                      list_ref(mem, args, 1));
-    }
-
-    if (symbol_equals(mem, defn, "transfer-test")) {
-        return sendv(mem, k, transfer_test(mem, args));
-    }
-
     if (symbol_equals(mem, defn, "set-gc-callback!")) {
         gc_callback = list_ref(mem, args, 0);
         gc_callback_set = true;
         return sendv(mem, k, mem->nil);
-    }
-
-    if (symbol_equals(mem, defn, "abs")) {
-        return sendv(mem, k, make_double(mem, fabs(double_val(mem, car(mem, args)))));
     }
 
     if (symbol_equals(mem, defn, "save")) {

@@ -986,6 +986,21 @@ boxed find_global(const symbol& sym, std::shared_ptr<Runtime> runtime) {
     return make_lambda<boxed>(it->second, runtime);
 }
 
+boxed find_global(const double i, std::shared_ptr<Runtime> runtime) {
+    const auto f = runtime->core_globals.at(i);
+    if (!f) {
+        throw std::range_error(std::to_string(i));
+    }
+    return make_lambda<boxed>(f, runtime);
+}
+
+boxed find_global(boxed b) {
+    if (b->contains<double>()) {
+        return find_global(b->cast<double>(), b->get_runtime());
+    }
+    return find_global(*b->cast<symbol>(), b->get_runtime());
+}
+
 boxed step(boxed state) {
     return (**list_ref(state, 0)->cast<lambda>())(list_rest(state, 0));
 }
@@ -1102,8 +1117,8 @@ boxed handle_contn_lambda(boxed args, boxed k) {
 
 boxed global_lambda(boxed args) {
     auto self = list_ref(args, 0);
-    auto defn = list_ref(args, 1)->cast<symbol>();
-    return wrap_global_lambda(find_global(*defn, args->get_runtime()), self);
+    auto defn = list_ref(args, 1);
+    return wrap_global_lambda(find_global(defn), self);
 }
 
 boxed evalx_initial(boxed args) {
@@ -2076,6 +2091,36 @@ Runtime::Runtime() :
         { "cf-test", cf_test },
         { "transfer-test", transfer_test },
         { "set-gc-callback!", mce::set_gc_callback }
+    },
+    core_globals {
+        result,
+        gapplyx,
+        less_than,
+        greater_than,
+        plus,
+        minus,
+        multiply,
+        divide,
+        is_number_equal,
+        nullptr,
+        is_null,
+        is_vector,
+        vector_length,
+        vector_ref,
+        is_procedure,
+        is_eq,
+        gcons,
+        is_pair,
+        car,
+        cdr,
+        set_car,
+        set_cdr,
+        length,
+        list_to_vector,
+        is_string,
+        is_string_equal,
+        transfer,
+        transfer_test
     },
     kenvfn_set({
         gapplyx,
