@@ -846,12 +846,16 @@
           (list string-code exp))
          ((symbol? exp)
           (list symbol-code (symbol->string exp)))
+         ((pair? exp)
+          (cons vector-code
+                (cons 2
+                      (list (pickle-aux (car exp)) (pickle-aux (cdr exp))))))
          ((vector? exp)
           (cons vector-code
                 (cons (vector-length exp)
                       (map pickle-aux (vector->list exp)))))
          (else
-          exp)))
+          (error "pickle" "unknown expression" exp))))
 
 (define (pickle exp)
     (let ((port (open-output-string)))
@@ -875,7 +879,7 @@
               ((equal? code vector-code)
                (list->vector (map unpickle-aux (cddr exp))))
               (else
-               exp))))
+               (error "unpickle" "unknown expression" exp)))))
 
 (define (unpickle s)
     (unpickle-aux (json-read (open-input-string s))))

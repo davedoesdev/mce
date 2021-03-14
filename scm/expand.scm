@@ -271,6 +271,14 @@
 ) (
 (toplevel (list . args) args)
 
+(toplevel (pair? v)
+    (and (vector? v)
+         (= (vector-length v) 2)))
+
+(toplevel (car v) (vector-ref v 0))
+
+(toplevel (cdr v) (vector-ref v 1))
+
 (toplevel (cons* . args)
     (if (null? (cdr args))
         (car args)
