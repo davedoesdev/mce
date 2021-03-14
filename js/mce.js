@@ -110,12 +110,12 @@ function memoize_lambda(proc, defn) {
     return f;
 }
 
-function ctenv_lookup(i, env) {
+function rtenv_lookup(i, env) {
     const r = list_ref(env, i.car)[i.cdr];
     return r === undefined ? null : r;
 }
 
-function ctenv_setvar(i, val, env) {
+function rtenv_setvar(i, val, env) {
     const v = list_ref(env, i.car);
     const len = v.length;
     if (i.cdr >= len) {
@@ -379,7 +379,7 @@ function cf_test(n, x) {
 
 function transfer_test(k, ...args) {
     return applyx(lookup_global(new Symbol('result')),
-                  make_global_env(), k, vector_to_list(args));
+                  make_global_rtenv(), k, vector_to_list(args));
 }
 
 const config_table = new Map();
@@ -427,7 +427,6 @@ const global_table = new Map([
     ['restore', grestore],
     ['transfer', transfer],
     ['getpid', getpid],
-    ['list->vector', list_to_vector],
     ['get-config', get_config],
     ['cf-test', cf_test],
     ['transfer-test', transfer_test],
@@ -458,7 +457,6 @@ const core_globals = [
         set_car,
         set_cdr,
         length,
-        list_to_vector,
         is_string,
         is_string_equal,
         transfer,
@@ -517,7 +515,7 @@ function step_contn_args(args) {
     return list_rest(args, 2);
 }
 
-function make_global_env() {
+function make_global_rtenv() {
     return cons([], null);
 }
 
@@ -572,7 +570,7 @@ function handle_global_lambda_kenv(args, fn) {
     }
 
     return run(call_global(fn, cons(lookup_global(new Symbol('result')),
-                                    cons(make_global_env(),
+                                    cons(make_global_rtenv(),
                                          args))));
 }
 
@@ -591,11 +589,11 @@ function lookup_global(sym) {
     return f;
 }
 
-function extend_env(env, len, values) {
+function extend_rtenv(env, len, values) {
     return cons(list_to_vector(values), env);
 }
 
-function improper_extend_env(env, len, values) {
+function improper_extend_rtenv(env, len, values) {
     const v = [];
 
     for (let i = 0; (i < len) && values; ++i) {
@@ -610,15 +608,15 @@ function improper_extend_env(env, len, values) {
     return cons(v, env);
 }
 
-function handle_lambda(args, len, fn, env, extend_env) {
+function handle_lambda(args, len, fn, env, extend_rtenv) {
     if (is_step_contn(args)) {
         return send(fn, cons(step_contn_k(args),
-                             cons(extend_env(env, len, step_contn_args(args)),
+                             cons(extend_rtenv(env, len, step_contn_args(args)),
                                   null)));
     }
 
     return run(send(fn, cons(lookup_global(new Symbol('result')),
-                             cons(extend_env(env, len, args),
+                             cons(extend_rtenv(env, len, args),
                                   null))));
 }
 
@@ -655,7 +653,7 @@ function sendv(k, v) {
 const symbol_lookup = define_form((self, i) =>
     args => {
         const [k, env] = list_to_vector(args);
-        return sendv(k, ctenv_lookup(i, env));
+        return sendv(k, rtenv_lookup(i, env));
     });
 
 const send_value = define_form((self, exp) =>
@@ -667,7 +665,7 @@ const send_value = define_form((self, exp) =>
 const constructed_function0 = define_form((self, args, cf) =>
     args2 => {
         return applyx(make_form(constructed_function1, args2),
-                      make_global_env(), cf, args);
+                      make_global_rtenv(), cf, args);
     });
 
 const constructed_function1 = define_form((self, args) =>
@@ -730,7 +728,7 @@ const lambda0 = define_form((self, len, scanned) =>
     });
 
 const lambda1 = define_form((self, len, scanned, env) =>
-    args => handle_lambda(args, len, scanned, env, extend_env));
+    args => handle_lambda(args, len, scanned, env, extend_rtenv));
 
 const improper_lambda0 = define_form((self, len, scanned) =>
     args => {
@@ -739,14 +737,14 @@ const improper_lambda0 = define_form((self, len, scanned) =>
     });
 
 const improper_lambda1 = define_form((self, len, scanned, env) =>
-    args => handle_lambda(args, len, scanned, env, improper_extend_env));
+    args => handle_lambda(args, len, scanned, env, improper_extend_rtenv));
 
 const letcc0 = define_form((self, scanned) =>
     args => {
         const [k, env] = list_to_vector(args);
         return send(scanned,
            cons(k,
-                cons(extend_env(env, 1, cons(make_form(letcc1, k), null)),
+                cons(extend_rtenv(env, 1, cons(make_form(letcc1, k), null)),
                      null)));
     });
 
@@ -764,7 +762,7 @@ const define0 = define_form((self, i, scanned) =>
 const define1 = define_form((self, k, env, i) =>
     args => {
         const [v] = list_to_vector(args);
-        return sendv(k, ctenv_setvar(i, v, env));
+        return sendv(k, rtenv_setvar(i, v, env));
     });
 
 const application0 = define_form((self, scanned) =>

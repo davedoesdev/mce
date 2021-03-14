@@ -61,7 +61,7 @@
                 (if (null? e2)
                     (loop1 (+ i1 1) (cdr e1))
                     (if (equal? (car e2) sym)
-                        (cons i1 i2)
+                        (vector i1 i2)
                         (loop2 (+ i2 1) (cdr e2))))))))
 
 (define (putin-ctenv! ctenv sym)
@@ -70,11 +70,16 @@
             i
             (let ((e (car ctenv)))
                 (set-car! ctenv (append e (list sym)))
-                (cons 0 (length e))))))
+                (vector 0 (length e))))))
 
-(define (ctenv-lookup i env)
-    (let* ((senv (list-ref env (inexact->exact (car i))))
-           (index (inexact->exact (cdr i))))
+(define (vlist-ref vl i)
+    (if (= i 0)
+        (vector-ref vl 0)
+        (vlist-ref (vector-ref vl 1) (- i 1))))
+
+(define (rtenv-lookup i env)
+    (let* ((senv (vlist-ref env (inexact->exact (vector-ref i 0))))
+           (index (inexact->exact (vector-ref i 1))))
         (if (< index (vector-length senv))
             (vector-ref senv index)
             '())))
@@ -90,19 +95,63 @@
                        (loop (+ i 1)))))
         newvec))
 
-(define (ctenv-setvar! i val env)
-    (let* ((sindex (inexact->exact (car i)))
-           (senv (list-ref env sindex))
-           (index (inexact->exact (cdr i))))
+(define (vlist-set! vl i v)
+    (if (= i 0)
+        (vector-set! vl 0 v)
+        (vlist-set! vl (- i 1) v)))
+
+(define (rtenv-setvar! i val env)
+    (let* ((sindex (inexact->exact (vector-ref i 0)))
+           (senv (vlist-ref env sindex))
+           (index (inexact->exact (vector-ref i 1))))
         (if (< index (vector-length senv))
             (vector-set! senv index val)
-            (list-set! env sindex (extend-vector senv index val))))
+            (vlist-set! env sindex (extend-vector senv index val))))
     val)
 
-(define (extend-env env len values)
-    (cons (list->vector values) env))
+(define (list->vlist l)
+    (let ((r '()) (pr '()))
+        (let loop ((l l))
+            (if (pair? l)
+                (let ((nr (vector (car l) '())))
+                    (if (null? r)
+                        (begin (set! pr nr) (set! r nr))
+                        (begin (vector-set! pr 1 nr) (set! pr nr)))
+                    (loop (cdr l)))
+                (begin (if (null? r)
+                           (set! r l)
+                           (vector-set! pr 1 l))
+                       r)))))
 
-(define (improper-extend-env env len values)
+(define (vlist->list vl)
+    (let ((r '()) (pr '()))
+        (let loop ((vl vl))
+            (if (vector? vl)
+                (let ((nr (cons (vector-ref vl 0) '())))
+                    (if (null? r)
+                        (begin (set! pr nr) (set! r nr))
+                        (begin (set-cdr! pr nr) (set! pr nr)))
+                    (loop (vector-ref vl 1)))
+                (begin (if (null? r)
+                           (set! r vl)
+                           (set-cdr! pr vl))
+                       r)))))
+
+(define (applyvl f vl)
+    (apply f (vlist->list vl)))
+
+(define (vlist->vector len vl)
+    (let ((v (make-vector len '())))
+        (let loop ((i 0) (vl vl))
+            (if (and (< i len) (not (null? vl)))
+                (begin (vector-set! v i (vector-ref vl 0))
+                       (loop (+ i 1) (vector-ref vl 1)))))
+        v))
+
+(define (extend-rtenv env len values)
+    (vector (list->vector values) env))
+
+(define (improper-extend-rtenv env len values)
     (let ((v (make-vector len '())))
         (let loop ((i 0) (values values))
             (if (and (< i len) (not (null? values)))
@@ -110,21 +159,30 @@
                     (vector-set! v i values)
                     (begin (vector-set! v i (car values))
                            (loop (+ i 1) (cdr values))))))
-        (cons v env)))
+        (vector v env)))
 
-(define (make-step-contn k env args) (cons 'MCE-STEP-CONTN (cons k (cons env args))))
-(define (step-contn? exp) (and (pair? exp) (equal? (car exp) 'MCE-STEP-CONTN)))
-(define (step-contn-k exp) (cadr exp))
-(define (step-contn-env exp) (caddr exp))
-(define (step-contn-args exp) (cdddr exp))
+(define (make-step-contn k env args)
+    (vector 'MCE-STEP-CONTN (vector k (vector env args))))
+
+(define (step-contn? exp)
+    (and (pair? exp) (equal? (car exp) 'MCE-STEP-CONTN)))
+
+(define (step-contn-k exp)
+    (cadr exp))
+
+(define (step-contn-env exp)
+    (caddr exp))
+
+(define (step-contn-args exp)
+    (cdddr exp))
 
 (define (sendl k args)
-    (cons k args))
+    (vector k args))
 
 (define (send k . v)
-    (sendl k v))
+    (sendl k (list->vlist v)))
 
-(define (make-global-env) (list '#()))
+(define (make-global-rtenv) (vector '#() '()))
 
 (define (yield-defn? args)
     (and (not (null? args)) (equal? (car args) 'MCE-YIELD-DEFINITION)))
@@ -168,7 +226,7 @@
 (define-form symbol-lookup
     (lambda (this i)
         (lambda (k env)
-            (send k (ctenv-lookup i env)))))
+            (send k (rtenv-lookup i env)))))
 
 (define-form send-value
     (lambda (this exp)
@@ -179,7 +237,7 @@
     (lambda (this args cf)
         (lambda args2
             (applyx (make-form constructed-function1 args2)
-                    (make-global-env) cf args))))
+                    (make-global-rtenv) cf args))))
 
 (define-form constructed-function1
     (lambda (this args)
@@ -215,7 +273,7 @@
 (define-form sclis2
     (lambda (this k v)
         (lambda (w)
-            (send k (cons v w)))))
+            (send k (vector v w)))))
 
 (define-form scseq0
     (lambda (this first rest)
@@ -234,7 +292,7 @@
 (define-form lambda1
     (lambda (this len scanned env)
         (lambda args
-            (handle-lambda args len scanned env extend-env))))
+            (handle-lambda args len scanned env extend-rtenv))))
 
 (define-form improper-lambda0
     (lambda (this len scanned)
@@ -244,12 +302,12 @@
 (define-form improper-lambda1
     (lambda (this len scanned env)
         (lambda args
-            (handle-lambda args len scanned env improper-extend-env))))
+            (handle-lambda args len scanned env improper-extend-rtenv))))
 
 (define-form let/cc0
     (lambda (this scanned)
         (lambda (k env)
-            (send scanned k (extend-env env 1 (list (make-form let/cc1 k)))))))
+            (send scanned k (extend-rtenv env 1 (list (make-form let/cc1 k)))))))
 
 (define-form let/cc1
     (lambda (this k)
@@ -264,7 +322,7 @@
 (define-form define1
     (lambda (this k env i)
         (lambda (v)
-            (send k (ctenv-setvar! i v env)))))
+            (send k (rtenv-setvar! i v env)))))
 
 (define-form application0
     (lambda (this scanned)
@@ -274,7 +332,7 @@
 (define-form application1
     (lambda (this k env)
         (lambda (v)
-            (applyx k env (car v) (cdr v)))))
+            (applyx k env (vector-ref v 0) (vector-ref v 1)))))
 
 (define-form evalx-initial
     (lambda (this k env scanned)
@@ -283,7 +341,7 @@
 
 (define (make-form n . args)
     (letrec*
-        ((defn (cons n args))
+        ((defn (list->vlist (cons n args)))
          (f2 (memoize-lambda (lambda args (apply f args)) defn))
          (f (memoize-lambda (apply (vector-ref forms (inexact->exact n))
                                    (cons f2 args))
@@ -418,7 +476,7 @@
         r))
 
 (define (step state)
-    (apply (car state) (cdr state)))
+    (applyvl (vector-ref state 0) (vector-ref state 1)))
 
 (define (result v)
     (vector 'MCE-RESULT v))
@@ -444,12 +502,12 @@
 (define (applyx k env fn args)
     (sendl fn (make-step-contn k env args)))
 
-(define (handle-lambda args len fn env extend-env)
+(define (handle-lambda args len fn env extend-rtenv)
     (if (step-contn? args)
         (send fn (step-contn-k args)
-                 (extend-env env len (step-contn-args args)))
+                 (extend-rtenv env len (step-contn-args args)))
         (run (send fn (lookup-global 'result)
-                      (extend-env env len args)))))
+                      (extend-rtenv env len args)))))
 
 (define (handle-contn-lambda args k)
     (cond ((transfer? args)
@@ -463,7 +521,7 @@
 
 (define (globalize x args cf)
     (if (procedure? x)
-        (letrec* ((defn (list constructed-function0 args cf))
+        (letrec* ((defn (list->vlist (list constructed-function0 args cf)))
                   (f2 (memoize-lambda (lambda args (apply f args)) defn))
                   (f (memoize-lambda (wrap-global-lambda x f2) defn)))
             f)
@@ -485,7 +543,7 @@
                         (cons (step-contn-env args)
                               (step-contn-args args))))
         (run (apply fn (cons (lookup-global 'result)
-                             (cons (make-global-env)
+                             (cons (make-global-rtenv)
                                    args))))))
 
 (define (wrap-global-lambda fn cf)
@@ -493,11 +551,15 @@
         (lambda args (handle-global-lambda-kenv args fn))
         (lambda args (handle-global-lambda args fn cf))))
 
-(define (transfer? exp) (and (pair? exp) (equal? (car exp) 'MCE-TRANSFER)))
-(define (transfer-args exp) (cdr exp))
-
 (define (transfer k env fn . args)
-    (sendl fn (cons 'MCE-TRANSFER args)))
+    (sendl fn (vector 'MCE-TRANSFER (list->vlist args))))
+
+(define (transfer? exp)
+    (and (vector? exp)
+         (= (vector-length exp) 2)
+         (equal? (vector-ref exp 0) 'MCE-TRANSFER)))
+
+(define (transfer-args exp) (vector-ref exp 1))
 
 (define (find-global sym #!optional (err #t))
     (if (number? sym)
@@ -528,7 +590,7 @@
         (if (procedure? r)
             (letrec*
                 ((i (vector-index r core-globals 0))
-                 (defn (list global-lambda (if (< i 0) sym i)))
+                 (defn (list->vlist (list global-lambda (if (< i 0) sym i))))
                  (f2 (memoize-lambda (lambda args (apply f args)) defn))
                  (f (memoize-lambda (wrap-global-lambda r f2) defn)))
                 f)
@@ -548,7 +610,7 @@
         (+ x n)))
 
 (define (transfer-test k . args)
-    (applyx (lookup-global 'result) (make-global-env) k args))
+    (applyx (lookup-global 'result) (make-global-rtenv) k args))
 
 (table-set! global-table 'result result)
 (table-set! global-table 'print print)
@@ -569,22 +631,14 @@
 (table-set! global-table 'write-state write)
 (table-set! global-table 'newline newline)
 (table-set! global-table 'transfer transfer) 
-(table-set! global-table 'car car)
-(table-set! global-table 'cdr cdr)
-(table-set! global-table 'set-car! set-car!)
-(table-set! global-table 'set-cdr! set-cdr!)
-(table-set! global-table 'length length)
 (table-set! global-table 'apply applyx)
 (table-set! global-table 'getpid getpid)
 (table-set! global-table 'null? null?)
 (table-set! global-table 'string? string?)
-(table-set! global-table 'pair? pair?)
 (table-set! global-table 'string=? string=?)
 (table-set! global-table 'vector? vector?)
 (table-set! global-table 'vector-length vector-length)
 (table-set! global-table 'vector-ref vector-ref)
-(table-set! global-table 'cons cons)
-(table-set! global-table 'list->vector list->vector)
 (table-set! global-table 'get-config get-config)
 (table-set! global-table 'cf-test cf-test)
 (table-set! global-table 'transfer-test transfer-test)
@@ -629,16 +683,6 @@
     ; we'll probably have a core-eq? for the types we keep in core
     eq?
 
-    ; these should go when we lift pairs into lang
-    cons
-    pair?
-    car
-    cdr
-    set-car!
-    set-cdr!
-    length
-    list->vector
-
     ; these should go when we lift strings into lang
     string?
     string=?
@@ -675,15 +719,6 @@
 (define (get-config k)
     (ref-value (table-ref config-table k)))
 
-(define (cmap f l tab set-entry!)
-   (let ((ref (table-ref tab l)))
-       (if ref
-           (ref-value ref)
-           (let ((entry (set-entry! tab l (cons '() '()))))
-               (set-car! entry (f (car l)))
-               (set-cdr! entry (f (cdr l)))
-               entry))))
-
 (define (vector-cmap f vec tab set-entry!)
     (let ((ref (table-ref tab vec)))
         (if ref
@@ -704,25 +739,23 @@
     (vector-ref v 1))
 
 (define (memoize-aux exp tab fn)
-    (cond ((pair? exp)
-           (cmap fn exp tab table-set!))
-          ((vector? exp)
-           (if (unmemoized? exp)
-               (let ((ref (table-ref tab exp)))
-                   (if ref
-                       (ref-value ref)
-                       (letrec*
-                           ((repexp (unmemoized-repexp exp))
-                            (entry (table-set! tab exp
-                                (memoize-lambda (lambda args (apply f args))
-                                                (lambda () r))))
-                            (r (fn repexp))
-                            (f (lambda args
-                                   (set! f (apply make-form r))
-                                   (apply f args))))
-                           entry)))
-               (vector-cmap fn exp tab table-set!)))
-          (else exp)))
+    (if (vector? exp)
+        (if (unmemoized? exp)
+            (let ((ref (table-ref tab exp)))
+                (if ref
+                    (ref-value ref)
+                    (letrec*
+                        ((repexp (unmemoized-repexp exp))
+                         (entry (table-set! tab exp
+                             (memoize-lambda (lambda args (apply f args))
+                                             (lambda () r))))
+                         (r (fn repexp))
+                         (f (lambda args
+                                (set! f (applyvl make-form r))
+                                (apply f args))))
+                        entry)))
+            (vector-cmap fn exp tab table-set!))
+        exp))
 
 (define (memoize exp)
     (letrec ((tab (make-eq-table))
@@ -730,9 +763,7 @@
         (fn exp)))
 
 (define (unmemoize-aux exp tab fn)
-    (cond ((pair? exp)
-           (cmap fn exp tab table-set!))
-          ((vector? exp)
+    (cond ((vector? exp)
            (vector-cmap fn exp tab table-set!))
           ((procedure? exp)
            (let ((ref (table-ref tab exp)))
@@ -760,9 +791,9 @@
     (vector-ref v 1))
 
 (define (serialize-aux exp tab fn set-entry!)
-    (cond ((pair? exp) (cmap fn exp tab set-entry!))
-          ((vector? exp) (vector-cmap fn exp tab set-entry!))
-          (else exp)))
+    (if (vector? exp)
+        (vector-cmap fn exp tab set-entry!)
+        exp))
 
 (define (serialize exp)
     (letrec ((counter 0)
@@ -774,15 +805,14 @@
                   entry))
              (fn (lambda (x) (serialize-aux x tab fn set-entry!))))
         (let ((serialized (fn exp)))
-            (cons serialized counter))))
+            (vector serialized counter))))
 
 (define (deserialize-aux exp tab fn set-entry!)
-    (cond ((pair? exp) (cmap fn exp tab set-entry!))
-          ((vector? exp)
-           (if (serialized? exp)
-               (ref-value (table-ref tab (inexact->exact (serialized-n exp))))
-               (vector-cmap fn exp tab set-entry!)))
-          (else exp)))
+    (if (vector? exp)
+        (if (serialized? exp)
+            (ref-value (table-ref tab (inexact->exact (serialized-n exp))))
+            (vector-cmap fn exp tab set-entry!))
+        exp))
 
 (define (deserialize exp)
     (letrec ((counter 0)
@@ -793,7 +823,7 @@
                   (set! counter (+ counter 1))
                   entry))
              (fn (lambda (x) (deserialize-aux x tab fn set-entry!))))
-        (fn (car exp))))
+        (fn (vector-ref exp 0))))
 
 (define null-code    "a")
 (define boolean-code "b")
@@ -801,8 +831,7 @@
 (define char-code    "d")
 (define string-code  "e")
 (define symbol-code  "f")
-(define pair-code    "g")
-(define vector-code  "h")
+(define vector-code  "g")
 
 (define (pickle-aux exp)
    (cond ((null? exp)
@@ -817,8 +846,6 @@
           (list string-code exp))
          ((symbol? exp)
           (list symbol-code (symbol->string exp)))
-         ((pair? exp)
-          (list pair-code (pickle-aux (car exp)) (pickle-aux (cdr exp))))
          ((vector? exp)
           (cons vector-code
                 (cons (vector-length exp)
@@ -845,8 +872,6 @@
                (cadr exp))
               ((equal? code symbol-code)
                (string->symbol (cadr exp)))
-              ((equal? code pair-code)
-               (cons (unpickle-aux (cadr exp)) (unpickle-aux (caddr exp))))
               ((equal? code vector-code)
                (list->vector (map unpickle-aux (cddr exp))))
               (else
@@ -868,9 +893,9 @@
     (send k (mce-restore s)))
 
 (define (mce-eval exp)
-    (evalx (lookup-global 'result) exp (make-global-env)))
+    (evalx (lookup-global 'result) exp (make-global-rtenv)))
 
-(define (mce-run exp . env)
+(define (mce-run exp)
     (run (mce-eval exp)))
 
 (define (start-parsed is_scan v args)

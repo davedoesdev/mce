@@ -79,7 +79,6 @@ enum core_globals {
     g_set_car,
     g_set_cdr,
     g_length,
-    g_list_to_vector,
     g_is_string,
     g_is_string_equal,
     g_transfer,
@@ -386,7 +385,7 @@ uint64_t make_result(memory *mem, uint64_t val) {
     return state;
 }
 
-uint64_t ctenv_lookup(memory *mem,
+uint64_t rtenv_lookup(memory *mem,
                       uint64_t i,
                       uint64_t env) {
     uint64_t first = (uint64_t)double_val(mem, car(mem, i));
@@ -398,7 +397,7 @@ uint64_t ctenv_lookup(memory *mem,
     return mem->nil;
 }
 
-uint64_t ctenv_setvar(memory *mem,
+uint64_t rtenv_setvar(memory *mem,
                       uint64_t i,
                       uint64_t val,
                       uint64_t env) {
@@ -474,17 +473,17 @@ uint64_t list_to_vector(memory *mem, uint64_t l, uint64_t len) {
     return v;
 }
 
-uint64_t extend_env(memory *mem,
-                    uint64_t env,
-                    uint64_t len,
-                    uint64_t values) {
+uint64_t extend_rtenv(memory *mem,
+                      uint64_t env,
+                      uint64_t len,
+                      uint64_t values) {
     return cons(mem, list_to_vector(mem, values, len), env);
 }
 
-uint64_t improper_extend_env(memory *mem,
-                             uint64_t env,
-                             uint64_t len,
-                             uint64_t values) {
+uint64_t improper_extend_rtenv(memory *mem,
+                               uint64_t env,
+                               uint64_t len,
+                               uint64_t values) {
     uint64_t v = make_uninitialised_vector(mem, len);
     uint64_t i;
 
@@ -785,7 +784,7 @@ uint64_t symbol_lookup(memory *mem,
     uint64_t i = list_ref(mem, form_args, 0);
     uint64_t k = list_ref(mem, args, 0);
     uint64_t env = list_ref(mem, args, 1);
-    return sendv(mem, k, ctenv_lookup(mem, i, env));
+    return sendv(mem, k, rtenv_lookup(mem, i, env));
 }
 
 uint64_t send_value(memory *mem,
@@ -806,7 +805,7 @@ uint64_t make_form(memory *mem, double form, uint64_t args) {
     return state;
 }
 
-uint64_t make_global_env(memory *mem) {
+uint64_t make_global_rtenv(memory *mem) {
     return cons(mem, make_vector(mem, 0), mem->nil);
 }
 
@@ -822,7 +821,7 @@ uint64_t transfer_test(memory *mem, uint64_t args) {
     return applyx(mem,
                   make_form(mem, global_lambda_form,
                             cons(mem, make_symbol(mem, "result"), mem->nil)),
-                  make_global_env(mem),
+                  make_global_rtenv(mem),
                   car(mem, args),
                   cdr(mem, args));
 }
@@ -853,7 +852,7 @@ uint64_t constructed_function0(memory *mem,
     uint64_t args2 = list_ref(mem, form_args, 0);
     uint64_t cf = list_ref(mem, form_args, 1);
     return applyx(mem, make_form(mem, constructed_function1_form, cons(mem, args, mem->nil)),
-                  make_global_env(mem), cf, args2);
+                  make_global_rtenv(mem), cf, args2);
 }
 
 uint64_t constructed_function1(memory *mem,
@@ -877,7 +876,7 @@ uint64_t global_lambda(memory *mem,
             return applyx(mem,
                           make_form(mem, global_lambda_form,
                                     cons(mem, make_double(mem, g_result), mem->nil)),
-                          make_global_env(mem),
+                          make_global_rtenv(mem),
                           list_ref(mem, args, 0),
                           list_rest(mem, args, 0));
         }
@@ -1144,7 +1143,7 @@ uint64_t lambda1(memory *mem,
 
     return send(mem, scanned,
         cons(mem, step_contn_k(mem, args),
-             cons(mem, extend_env(mem, env, len, step_contn_args(mem, args)),
+             cons(mem, extend_rtenv(mem, env, len, step_contn_args(mem, args)),
                   mem->nil)));
 }
 
@@ -1169,7 +1168,7 @@ uint64_t improper_lambda1(memory *mem,
 
     return send(mem, scanned,
         cons(mem, step_contn_k(mem, args),
-             cons(mem, improper_extend_env(mem, env, len, step_contn_args(mem, args)),
+             cons(mem, improper_extend_rtenv(mem, env, len, step_contn_args(mem, args)),
                   mem->nil)));
 }
 
@@ -1181,11 +1180,11 @@ uint64_t letcc0(memory *mem,
     uint64_t env = list_ref(mem, args, 1);
     return send(mem, scanned,
         cons(mem, k,
-             cons(mem, extend_env(mem,
-                                  env,
-                                  1,
-                                  cons(mem, make_form(mem, letcc1_form, cons(mem, k, mem->nil)),
-                                       mem->nil)),
+             cons(mem, extend_rtenv(mem,
+                                    env,
+                                    1,
+                                    cons(mem, make_form(mem, letcc1_form, cons(mem, k, mem->nil)),
+                                         mem->nil)),
                   mem->nil)));
 }
 
@@ -1221,7 +1220,7 @@ uint64_t define1(memory *mem,
     uint64_t env = list_ref(mem, form_args, 1);
     uint64_t i = list_ref(mem, form_args, 2);
     uint64_t v = list_ref(mem, args, 0);
-    return sendv(mem, k, ctenv_setvar(mem, i, v, env));
+    return sendv(mem, k, rtenv_setvar(mem, i, v, env));
 }
 
 uint64_t application0(memory *mem,
@@ -1370,7 +1369,7 @@ uint64_t maybe_gc(memory *mem, uint64_t state) {
             uint64_t r = run(mem, applyx(mem,
                make_form(mem, global_lambda_form,
                          cons(mem, make_symbol(mem, "result"), mem->nil)),
-               make_global_env(mem),
+               make_global_rtenv(mem),
                gc_callback,
                cons(mem, make_double(mem, mem->size), mem->nil)));
             calling_gc_callback = false;
@@ -1398,7 +1397,7 @@ uint64_t start(memory *mem, uint64_t state) {
         return run(mem, applyx(mem,
             make_form(mem, global_lambda_form,
                       cons(mem, make_symbol(mem, "result"), mem->nil)),
-            make_global_env(mem),
+            make_global_rtenv(mem),
             state,
             mem->nil));
     }

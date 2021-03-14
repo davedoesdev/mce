@@ -124,7 +124,7 @@ struct CMapEqual {
 typedef std::unordered_map<boxed, boxed, CMapHash, CMapEqual> cmap_table;
 typedef std::function<boxed(boxed)> map_fn;
 typedef std::function<boxed(cmap_table&, boxed, boxed)> set_entry_fn;
-typedef boxed extend_env_fn(boxed env, size_t len, boxed values);
+typedef boxed extend_rtenv_fn(boxed env, size_t len, boxed values);
 
 boxed cons(boxed car, boxed cdr) {
     auto runtime = car->get_runtime();
@@ -609,7 +609,7 @@ boxed sendv(boxed k, boxed v) {
     return send(k, cons(v, box(v->get_runtime())));
 }
 
-boxed ctenv_lookup(boxed i, boxed env) {
+boxed rtenv_lookup(boxed i, boxed env) {
     auto ip = i->cast<pair>();
     auto first = (*ip)->first->cast<double>();
     auto second = (*ip)->second->cast<double>();
@@ -620,7 +620,7 @@ boxed ctenv_lookup(boxed i, boxed env) {
     return box(i->get_runtime());
 }
 
-boxed ctenv_setvar(boxed i, boxed val, boxed env) {
+boxed rtenv_setvar(boxed i, boxed val, boxed env) {
     auto ip = i->cast<pair>();
     auto first = (*ip)->first->cast<double>();
     auto second = (*ip)->second->cast<double>();
@@ -637,7 +637,7 @@ boxed symbol_lookup(boxed args) {
     return make_lambda<boxed>([i](boxed args) -> boxed {
         auto k = list_ref(args, 0);
         auto env = list_ref(args, 1);
-        return sendv(k, ctenv_lookup(i, env));
+        return sendv(k, rtenv_lookup(i, env));
     }, args->get_runtime());
 }
 
@@ -693,7 +693,7 @@ boxed transfer(boxed args) {
         cons(box<symbol>("MCE-TRANSFER", args->get_runtime()), list_rest(args, 2)));
 }
 
-boxed make_global_env(std::shared_ptr<Runtime> runtime) {
+boxed make_global_rtenv(std::shared_ptr<Runtime> runtime) {
     return cons(make_vector(runtime), box(runtime));
 }
 
@@ -1044,7 +1044,7 @@ boxed handle_global_lambda_kenv(boxed args, boxed fn) {
     }
 
     return run(send(fn, cons(lookup_global(symbol("result"), args->get_runtime()),
-                             cons(make_global_env(args->get_runtime()),
+                             cons(make_global_rtenv(args->get_runtime()),
                                   args))));
 }
 
@@ -1064,11 +1064,11 @@ boxed wrap_global_lambda(boxed fn, boxed cf) {
     }, runtime);
 }
 
-boxed extend_env(boxed env, size_t, boxed values) {
+boxed extend_rtenv(boxed env, size_t, boxed values) {
     return cons(list_to_vector(values), env);
 }
 
-boxed improper_extend_env(boxed env, size_t len, boxed values) {
+boxed improper_extend_rtenv(boxed env, size_t len, boxed values) {
     auto runtime = env->get_runtime();
     auto bnil = box(runtime);
     auto av = make_vector(runtime);
@@ -1088,18 +1088,18 @@ boxed handle_lambda(boxed args,
                     size_t len,
                     boxed fn,
                     boxed env,
-                    extend_env_fn extend_env) {
+                    extend_rtenv_fn extend_rtenv) {
     auto runtime = args->get_runtime();
     auto bnil = box(runtime);
 
     if (is_step_contn(args)) {
         return send(fn, cons(step_contn_k(args),
-                             cons(extend_env(env, len, step_contn_args(args)),
+                             cons(extend_rtenv(env, len, step_contn_args(args)),
                                   bnil)));
     }
 
     return run(send(fn, cons(lookup_global(symbol("result"), runtime),
-                             cons(extend_env(env, len, args),
+                             cons(extend_rtenv(env, len, args),
                                   bnil))));
 }
 
@@ -1243,7 +1243,7 @@ boxed constructed_function0(boxed args) {
     auto cf = list_ref(args, 2);
     return make_lambda<boxed>([args2, cf](boxed args3) -> boxed {
         return applyx(make_form(forms::constructed_function1, cons(args3, box(args3->get_runtime()))),
-                      make_global_env(args3->get_runtime()), cf, args2);
+                      make_global_rtenv(args3->get_runtime()), cf, args2);
     }, args->get_runtime());
 }
 
@@ -1346,7 +1346,7 @@ boxed lambda1(boxed args) {
     auto scanned = list_ref(args, 2);
     auto env = list_ref(args, 3);
     return make_lambda<boxed>([len, scanned, env](boxed args) -> boxed {
-        return handle_lambda(args, len, scanned, env, extend_env);
+        return handle_lambda(args, len, scanned, env, extend_rtenv);
     }, args->get_runtime());
 }
 
@@ -1368,7 +1368,7 @@ boxed improper_lambda1(boxed args) {
     auto scanned = list_ref(args, 2);
     auto env = list_ref(args, 3);
     return make_lambda<boxed>([len, scanned, env](boxed args) -> boxed {
-        return handle_lambda(args, len, scanned, env, improper_extend_env);
+        return handle_lambda(args, len, scanned, env, improper_extend_rtenv);
     }, args->get_runtime());
 }
 
@@ -1400,10 +1400,10 @@ boxed letcc0(boxed args) {
         auto bnil = box(args->get_runtime());
         return send(scanned,
             cons(k,
-                 cons(extend_env(env,
-                                 1,
-                                 cons(make_form(forms::letcc1, cons(k, bnil)),
-                                      bnil)),
+                 cons(extend_rtenv(env,
+                                   1,
+                                   cons(make_form(forms::letcc1, cons(k, bnil)),
+                                        bnil)),
                       bnil)));
     }, args->get_runtime());
 }
@@ -1414,7 +1414,7 @@ boxed define1(boxed args) {
     auto i = list_ref(args, 3);
     return make_lambda<boxed>([k, env, i](boxed args) -> boxed {
         auto v = list_ref(args, 0);
-        return sendv(k, ctenv_setvar(i, v, env));
+        return sendv(k, rtenv_setvar(i, v, env));
     }, args->get_runtime());
 }
 
@@ -2044,7 +2044,7 @@ boxed cf_test(boxed args) {
 boxed transfer_test(boxed args) {
     auto runtime = args->get_runtime();
     return applyx(lookup_global(symbol("result"), runtime),
-                  make_global_env(args->get_runtime()),
+                  make_global_rtenv(args->get_runtime()),
                   list_ref(args, 0),
                   list_rest(args, 0));
 }
@@ -2086,7 +2086,6 @@ Runtime::Runtime() :
         { "transfer", transfer },
         { "getpid", getpid },
         { "cons", gcons },
-        { "list->vector", list_to_vector },
         { "get-config", mce::get_config },
         { "cf-test", cf_test },
         { "transfer-test", transfer_test },
@@ -2116,7 +2115,6 @@ Runtime::Runtime() :
         set_car,
         set_cdr,
         length,
-        list_to_vector,
         is_string,
         is_string_equal,
         transfer,
