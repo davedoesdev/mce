@@ -273,6 +273,10 @@ function vector_ref(v, i) {
     return v[i];
 }
 
+function vector_set(v, i, exp) {
+    v[i] = exp;
+}
+
 function is_eq(x, y) {
     if (((x instanceof Char) && (y instanceof Char)) ||
         ((x instanceof Symbol) && (y instanceof Symbol))) {
@@ -319,7 +323,8 @@ function cf_test(n, x) {
 }
 
 function transfer_test(k, ...args) {
-    return applyx(lookup_global(new Symbol('result')), make_global_rtenv(), k, args);
+    return applyx(lookup_global(new Symbol('result')),
+                  make_global_rtenv(), k, vector_to_vlist(args));
 }
 
 const config_table = new Map();
@@ -382,6 +387,7 @@ const core_globals = [
         is_vector,
         vector_length,
         vector_ref,
+        vector_set,
         is_procedure,
         is_eq,
         is_string,
@@ -457,7 +463,7 @@ function transfer_args(args) {
 }
 
 function transfer(k, env, fn, ...args) {
-    return send(fn, [new Symbol('MCE-TRANSFER'), args]);
+    return send(fn, [new Symbol('MCE-TRANSFER'), vector_to_vlist(args)]);
 }
 
 function globalize(x, args, cf) {
