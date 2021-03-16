@@ -279,6 +279,12 @@
 
 (toplevel (cdr v) (vector-ref v 1))
 
+(toplevel (set-car! v x) (vector-set! v 0 x))
+
+(toplevel (set-cdr! v y) (vector-set! v 1 y))
+
+(toplevel (cons x y) (vector x y))
+
 (toplevel (cons* . args)
     (if (null? (cdr args))
         (car args)

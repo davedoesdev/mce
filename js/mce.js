@@ -8,71 +8,7 @@ import yargs from 'yargs';
 export class Char extends String {}
 export class Symbol extends String {}
 
-export class Pair {
-    constructor(car, cdr) {
-        this.car = car;
-        this.cdr = cdr;
-    }
-}
-
 export function make_runtime() {
-
-function cons(car, cdr) {
-    return new Pair(car, cdr);
-}
-
-function list_ref(l, i) {
-    while (i > 0) {
-        l = l.cdr;
-        --i;
-    }
-    return l.car;
-}
-
-function list_rest(l, i) {
-    while (i > 0) {
-        l = l.cdr;
-        --i;
-    }
-    return l.cdr;
-}
-
-function length(l) {
-    let len = 0;
-    while (l !== null) {
-        l = l.cdr;
-        ++len;
-    }
-    return len;
-}
-
-function list_to_vector(l) {
-    let v = [];
-    while (l !== null) {
-        v.push(l.car);
-        l = l.cdr;
-    }
-    return v;
-}
-
-function vector_to_list(v) {
-    let l = null;
-    for (let i = v.length - 1; i >= 0; --i) {
-        l = cons(v[i], l);
-    }
-    return l;
-}
-
-function cmap(f, l, tab, set_entry) {
-    const ref = tab.get(l);
-    if (ref !== undefined) {
-        return ref;
-    }
-    const entry = set_entry(tab, l, cons(null, null));
-    entry.car = f(l.car);
-    entry.cdr = f(l.cdr);
-    return entry;
-}
 
 function vector_cmap(f, vec, tab, set_entry) {
     const ref = tab.get(vec);
@@ -88,12 +24,12 @@ function vector_cmap(f, vec, tab, set_entry) {
 
 function is_yield_defn(args) {
     return args &&
-           (args.car instanceof Symbol) &&
-           (args.car.toString() === 'MCE-YIELD-DEFINITION');
+           (args[0] instanceof Symbol) &&
+           (args[0].toString() === 'MCE-YIELD-DEFINITION');
 }
 
 function get_procedure_defn(proc) {
-    return proc(cons(new Symbol('MCE-YIELD-DEFINITION'), null));
+    return proc([new Symbol('MCE-YIELD-DEFINITION'), null]);
 }
 
 function memoize_lambda(proc, defn) {
@@ -110,19 +46,52 @@ function memoize_lambda(proc, defn) {
     return f;
 }
 
+function vlist_ref(vl, i) {
+    while (i > 0) {
+        vl = vl[1];
+        --i;
+    }
+    return vl[0];
+}
+
+function vlist_rest(vl, i) {
+    while (i > 0) {
+        vl = vl[1];
+        --i;
+    }
+    return vl[1];
+}
+
+function vlist_to_vector(vl) {
+    let v = [];
+    while (vl !== null) {
+        v.push(vl[0]);
+        vl = vl[1];
+    }
+    return v;
+}
+
+function vector_to_vlist(v) {
+    let vl = null;
+    for (let i = v.length - 1; i >= 0; --i) {
+        vl = [v[i], vl];
+    }
+    return vl;
+}
+
 function rtenv_lookup(i, env) {
-    const r = list_ref(env, i.car)[i.cdr];
+    const r = vlist_ref(env, i[0])[i[1]];
     return r === undefined ? null : r;
 }
 
 function rtenv_setvar(i, val, env) {
-    const v = list_ref(env, i.car);
+    const v = vlist_ref(env, i[0]);
     const len = v.length;
-    if (i.cdr >= len) {
-        v.length = i.cdr + 1;
+    if (i[1] >= len) {
+        v.length = i[1] + 1;
         v.fill(null, len);
     }
-    v[i.cdr] = val;
+    v[i[1]] = val;
     return val;
 }
 
@@ -141,6 +110,12 @@ class UnknownDisplayExpressionError extends Error {
 class UnknownPickleExpressionError extends Error {
     constructor(exp) {
         super(`unknown pickle expression: ${exp}`);
+    }
+}
+
+class UnknownUnpickleExpressionError extends Error {
+    constructor(exp) {
+        super(`unknown unpickle expression: ${exp}`);
     }
 }
 
@@ -172,22 +147,6 @@ function xdisplay(exp, out, is_write) {
         }
     } else if (exp instanceof Symbol) {
         out.write(exp.toString());
-    } else if (exp instanceof Pair) {
-        let first = true;
-        out.write('(');
-        while (exp instanceof Pair) {
-            if (!first) {
-                out.write(' ');
-            }
-            first = false;
-            xdisplay(exp.car, out, is_write);
-            exp = exp.cdr;
-        }
-        if (exp !== null) {
-            out.write(' . ');
-            xdisplay(exp, out, is_write);
-        }
-        out.write(')');
     } else if (Array.isArray(exp)) {
         let first = true;
         out.write('#(');
@@ -294,8 +253,8 @@ function is_string(exp) {
     return typeof exp === 'string';
 }
 
-function is_pair(exp) {
-    return exp instanceof Pair;
+function vector(...args) {
+    return args;
 }
 
 function is_vector(exp) {
@@ -312,14 +271,6 @@ function vector_length(v) {
 
 function vector_ref(v, i) {
     return v[i];
-}
-
-function car(p) {
-    return p.car;
-}
-
-function cdr(p) {
-    return p.cdr;
 }
 
 function is_eq(x, y) {
@@ -355,16 +306,6 @@ function is_string_equal(x, y) {
     return x === y;
 }
 
-function set_car(p, exp) {
-    p.car = exp;
-    return p;
-}
-
-function set_cdr(p, exp) {
-    p.cdr = exp;
-    return p;
-}
-
 function getpid() {
     return process.pid;
 }
@@ -378,8 +319,7 @@ function cf_test(n, x) {
 }
 
 function transfer_test(k, ...args) {
-    return applyx(lookup_global(new Symbol('result')),
-                  make_global_rtenv(), k, vector_to_list(args));
+    return applyx(lookup_global(new Symbol('result')), make_global_rtenv(), k, args);
 }
 
 const config_table = new Map();
@@ -408,18 +348,11 @@ const global_table = new Map([
     ['ewrite', ewrite],
     ['null?', is_null],
     ['string?', is_string],
-    ['pair?', is_pair],
     ['vector?', is_vector],
     ['procedure?', is_procedure],
     ['vector-length', vector_length],
     ['vector-ref', vector_ref],
     ['string=?', is_string_equal],
-    ['car', car],
-    ['cdr', cdr],
-    ['set-car!', set_car],
-    ['set-cdr!', set_cdr],
-    ["length", length],
-    ['cons', cons],
     ['eq?', is_eq],
     ['=', is_number_equal],
     ['apply', applyx],
@@ -445,18 +378,12 @@ const core_globals = [
         is_number_equal,
         null,
         is_null,
+        vector,
         is_vector,
         vector_length,
         vector_ref,
         is_procedure,
         is_eq,
-        cons,
-        is_pair,
-        car,
-        cdr,
-        set_car,
-        set_cdr,
-        length,
         is_string,
         is_string_equal,
         transfer,
@@ -494,43 +421,43 @@ function find_global(sym) {
 }
 
 function make_step_contn(k, env, args) {
-    return cons(new Symbol('MCE-STEP-CONTN'), cons(k, cons(env, args)));
+    return [new Symbol('MCE-STEP-CONTN'), [k, [env, args]]];
 }
 
 function is_step_contn(args) {
     return args &&
-           (args.car instanceof Symbol) &&
-           (args.car.toString() === 'MCE-STEP-CONTN');
+           (args[0] instanceof Symbol) &&
+           (args[0].toString() === 'MCE-STEP-CONTN');
 }
 
 function step_contn_k(args) {
-    return list_ref(args, 1);
+    return vlist_ref(args, 1);
 }
 
 function step_contn_env(args) {
-    return list_ref(args, 2);
+    return vlist_ref(args, 2);
 }
 
 function step_contn_args(args) {
-    return list_rest(args, 2);
+    return vlist_rest(args, 2);
 }
 
 function make_global_rtenv() {
-    return cons([], null);
+    return [[], null];
 }
 
 function is_transfer(args) {
     return args &&
-           (args.car instanceof Symbol) &&
-           (args.car.toString() === 'MCE-TRANSFER');
+           (args[0] instanceof Symbol) &&
+           (args[0].toString() === 'MCE-TRANSFER');
 }
 
 function transfer_args(args) {
-    return list_rest(args, 0);
+    return args[1];
 }
 
 function transfer(k, env, fn, ...args) {
-    return send(fn, cons(new Symbol('MCE-TRANSFER'), vector_to_list(args)));
+    return send(fn, [new Symbol('MCE-TRANSFER'), args]);
 }
 
 function globalize(x, args, cf) {
@@ -538,14 +465,14 @@ function globalize(x, args, cf) {
         return x;
     }
 
-    const defn = cons(constructed_function0, cons(args, cons(cf, null)));
+    const defn = [constructed_function0, [args, [cf, null]]];
     const f2 = memoize_lambda(args => f(args), defn);
     const f = memoize_lambda(wrap_global_lambda(x, f2), defn);
     return f;
 }
 
 function call_global(f, args) {
-    return f(...list_to_vector(args));
+    return f(...vlist_to_vector(args));
 }
 
 function handle_global_lambda(args, fn, cf) {
@@ -564,14 +491,20 @@ function handle_global_lambda(args, fn, cf) {
 
 function handle_global_lambda_kenv(args, fn) {
     if (is_step_contn(args)) {
-        return call_global(fn, cons(step_contn_k(args),
-                                    cons(step_contn_env(args),
-                                         step_contn_args(args))));
+        return call_global(fn, [
+            step_contn_k(args), [
+                step_contn_env(args),
+                step_contn_args(args)
+            ]
+        ]);
     }
 
-    return run(call_global(fn, cons(lookup_global(new Symbol('result')),
-                                    cons(make_global_rtenv(),
-                                         args))));
+    return run(call_global(fn, [
+        lookup_global(new Symbol('result')), [
+            make_global_rtenv(),
+            args
+        ]
+    ]));
 }
 
 function wrap_global_lambda(fn, cf) {
@@ -583,14 +516,14 @@ function wrap_global_lambda(fn, cf) {
 
 function lookup_global(sym) {
     const r = find_global(sym);
-    const defn = cons(global_lambda, cons(sym, null));
+    const defn = [global_lambda, [sym, null]];
     const f2 = memoize_lambda(args => f(args), defn);
     const f = memoize_lambda(wrap_global_lambda(r, f2), defn);
     return f;
 }
 
 function extend_rtenv(env, len, values) {
-    return cons(list_to_vector(values), env);
+    return [vlist_to_vector(values), env];
 }
 
 function improper_extend_rtenv(env, len, values) {
@@ -600,24 +533,30 @@ function improper_extend_rtenv(env, len, values) {
         if (i === (len - 1)) {
             v.push(values);
         } else {
-            v.push(values.car);
-            values = values.cdr;
+            v.push(values[0]);
+            values = values[1];
         }
     }
 
-    return cons(v, env);
+    return [v, env];
 }
 
 function handle_lambda(args, len, fn, env, extend_rtenv) {
     if (is_step_contn(args)) {
-        return send(fn, cons(step_contn_k(args),
-                             cons(extend_rtenv(env, len, step_contn_args(args)),
-                                  null)));
+        return send(fn, [
+            step_contn_k(args), [
+                extend_rtenv(env, len, step_contn_args(args)),
+                null
+            ]
+        ]);
     }
 
-    return run(send(fn, cons(lookup_global(new Symbol('result')),
-                             cons(extend_rtenv(env, len, args),
-                                  null))));
+    return run(send(fn, [
+        lookup_global(new Symbol('result')), [
+            extend_rtenv(env, len, args),
+            null
+        ]
+    ]));
 }
 
 function handle_contn_lambda(args, k) {
@@ -644,21 +583,23 @@ function define_form(f) {
     return len;
 }
 
-const send = cons;
+function send(k, vl) {
+    return [k, vl];
+}
 
 function sendv(k, v) {
-    return send(k, cons(v, null));
+    return send(k, [v, null]);
 }
 
 const symbol_lookup = define_form((self, i) =>
     args => {
-        const [k, env] = list_to_vector(args);
+        const [k, env] = vlist_to_vector(args);
         return sendv(k, rtenv_lookup(i, env));
     });
 
 const send_value = define_form((self, exp) =>
     args => {
-        const [k] = list_to_vector(args);
+        const [k] = vlist_to_vector(args);
         return sendv(k, exp);
     });
 
@@ -670,7 +611,7 @@ const constructed_function0 = define_form((self, args, cf) =>
 
 const constructed_function1 = define_form((self, args) =>
     args2 => {
-        const [f] = list_to_vector(args2);
+        const [f] = vlist_to_vector(args2);
         return send(f, args);
     });
 
@@ -679,51 +620,47 @@ const global_lambda = define_form((self, defn) =>
 
 const if0 = define_form((self, scan0, scan1, scan2) =>
     args => {
-        const [k, env] = list_to_vector(args);
-        return send(scan0, cons(make_form(if1, k, env, scan1, scan2),
-                                cons(env, null)));
+        const [k, env] = vlist_to_vector(args);
+        return send(scan0, [make_form(if1, k, env, scan1, scan2), [env, null]]);
     });
 
 const if1 = define_form((self, k, env, scan1, scan2) =>
     args => {
-        const [v] = list_to_vector(args);
+        const [v] = vlist_to_vector(args);
         const f = v ? scan1 : scan2;
-        return send(f, cons(k, cons(env, null)));
+        return send(f, [k, [env, null]]);
     });
 
 const sclis0 = define_form((self, first, rest) =>
     args => {
-        const [k, env] = list_to_vector(args);
-        return send(first, cons(make_form(sclis1, k, env, rest),
-                                cons(env, null)));
+        const [k, env] = vlist_to_vector(args);
+        return send(first, [make_form(sclis1, k, env, rest), [env, null]]);
     });
 
 const sclis1 = define_form((self, k, env, rest) =>
     args => {
-        const [v] = list_to_vector(args);
-        return send(rest, cons(make_form(sclis2, k, v),
-                               cons(env, null)));
+        const [v] = vlist_to_vector(args);
+        return send(rest, [make_form(sclis2, k, v), [env, null]]);
     });
 
 const sclis2 = define_form((self, k, v) =>
     args => {
-        const [w] = list_to_vector(args);
-        return sendv(k, cons(v, w));
+        const [w] = vlist_to_vector(args);
+        return sendv(k, [v, w]);
     });
 
 const scseq0 = define_form((self, first, rest) =>
     args => {
-        const [k, env] = list_to_vector(args);
-        return send(first, cons(make_form(scseq1, k, env, rest),
-                                cons(env, null)));
+        const [k, env] = vlist_to_vector(args);
+        return send(first, [make_form(scseq1, k, env, rest), [env, null]]);
     });
 
 const scseq1 = define_form((self, k, env, rest) =>
-    () => send(rest, cons(k, cons(env, null))));
+    () => send(rest, [k, [env, null]]));
 
 const lambda0 = define_form((self, len, scanned) =>
     args => {
-        const [k, env] = list_to_vector(args);
+        const [k, env] = vlist_to_vector(args);
         return sendv(k, make_form(lambda1, len, scanned, env));
     });
 
@@ -732,7 +669,7 @@ const lambda1 = define_form((self, len, scanned, env) =>
 
 const improper_lambda0 = define_form((self, len, scanned) =>
     args => {
-        const [k, env] = list_to_vector(args);
+        const [k, env] = vlist_to_vector(args);
         return sendv(k, make_form(improper_lambda1, len, scanned, env));
     });
 
@@ -741,11 +678,10 @@ const improper_lambda1 = define_form((self, len, scanned, env) =>
 
 const letcc0 = define_form((self, scanned) =>
     args => {
-        const [k, env] = list_to_vector(args);
-        return send(scanned,
-           cons(k,
-                cons(extend_rtenv(env, 1, cons(make_form(letcc1, k), null)),
-                     null)));
+        const [k, env] = vlist_to_vector(args);
+        return send(scanned, [
+            k, [extend_rtenv(env, 1, [make_form(letcc1, k), null]), null]
+        ]);
     });
 
 const letcc1 = define_form((self, k) =>
@@ -753,39 +689,36 @@ const letcc1 = define_form((self, k) =>
 
 const define0 = define_form((self, i, scanned) =>
     args => {
-        const [k, env] = list_to_vector(args);
-        return send(scanned,
-            cons(make_form(define1, k, env, i),
-                 cons(env, null)));
+        const [k, env] = vlist_to_vector(args);
+        return send(scanned, [make_form(define1, k, env, i), [env, null]]);
     });
 
 const define1 = define_form((self, k, env, i) =>
     args => {
-        const [v] = list_to_vector(args);
+        const [v] = vlist_to_vector(args);
         return sendv(k, rtenv_setvar(i, v, env));
     });
 
 const application0 = define_form((self, scanned) =>
     args => {
-        const [k, env] = list_to_vector(args);
-        return send(scanned, cons(make_form(application1, k, env),
-                                  cons(env, null)));
+        const [k, env] = vlist_to_vector(args);
+        return send(scanned, [make_form(application1, k, env), [env, null]]);
     });
 
 const application1 = define_form((self, k, env) =>
     args => {
-        const [v] = list_to_vector(args);
-        return applyx(k, env, list_ref(v, 0), list_rest(v, 0));
+        const [v] = vlist_to_vector(args);
+        return applyx(k, env, vlist_ref(v, 0), vlist_rest(v, 0));
     });
 
 const evalx_initial = define_form((self, k, env, scanned) =>
-    () => send(scanned, cons(k, cons(env, null))));
+    () => send(scanned, [k, [env, null]]));
 
 function make_form(n, ...args) {
-    const defn = cons(n, vector_to_list(args));
+    const defn = [n, vector_to_vlist(args)];
     const f2 = memoize_lambda(args => f(args), defn);
     args.unshift(f2);
-    const f = memoize_lambda(forms[defn.car](...args), defn);
+    const f = memoize_lambda(forms[n](...args), defn);
     return f;
 }
 
@@ -805,9 +738,6 @@ function unmemoized_repexp(v) {
 }
 
 function memoize_aux(exp, tab, fn) {
-    if (exp instanceof Pair) {
-        return cmap(fn, exp, tab, table_set);
-    }
     if (Array.isArray(exp)) {
         if (is_unmemoized(exp)) {
             const ref = tab.get(exp)
@@ -819,7 +749,7 @@ function memoize_aux(exp, tab, fn) {
                 memoize_lambda(args => f(args), () => r));
             const r = fn(repexp);
             let f = args => {
-                f = make_form(r.car, ...list_to_vector(r.cdr));
+                f = make_form(r[0], ...vlist_to_vector(r[1]));
                 return f(args);
             };
             return entry;
@@ -836,9 +766,6 @@ function memoize(exp) {
 }
 
 function unmemoize_aux(exp, tab, fn) {
-    if (exp instanceof Pair) {
-        return cmap(fn, exp, tab, table_set);
-    }
     if (Array.isArray(exp)) {
         return vector_cmap(fn, exp, tab, table_set);
     }
@@ -876,9 +803,6 @@ function serialized_n(v) {
 }
 
 function serialize_aux(exp, tab, fn, set_entry) {
-    if (exp instanceof Pair) {
-        return cmap(fn, exp, tab, set_entry);
-    }
     if (Array.isArray(exp)) {
         return vector_cmap(fn, exp, tab, set_entry);
     }
@@ -893,13 +817,10 @@ function serialize(exp) {
         return entry;
     };
     const fn = x => serialize_aux(x, tab, fn, set_entry);
-    return cons(fn(exp), counter);
+    return [fn(exp), counter];
 }
 
 function deserialize_aux(exp, tab, fn, set_entry) {
-    if (exp instanceof Pair) {
-        return cmap(fn, exp, tab, set_entry);
-    }
     if (Array.isArray(exp)) {
         if (is_serialized(exp)) {
             return tab.get(serialized_n(exp));
@@ -916,7 +837,7 @@ function deserialize(exp) {
         return table_set(tab, counter++, entry);
     };
     const fn = x => deserialize_aux(x, tab, fn, set_entry);
-    return fn(exp.car);
+    return fn(exp[0]);
 }
 
 const null_code    = 'a';
@@ -925,8 +846,7 @@ const number_code  = 'c';
 const char_code    = 'd';
 const string_code  = 'e';
 const symbol_code  = 'f';
-const pair_code    = 'g';
-const vector_code  = 'h';
+const vector_code  = 'g';
 
 function pickle_aux(exp) {
     const j = [];
@@ -947,10 +867,6 @@ function pickle_aux(exp) {
     } else if (exp instanceof Symbol) {
         j.push(symbol_code);
         j.push(exp.toString());
-    } else if (exp instanceof Pair) {
-        j.push(pair_code);
-        j.push(pickle_aux(exp.car));
-        j.push(pickle_aux(exp.cdr));
     } else if (Array.isArray(exp)) {
         j.push(vector_code);
         j.push(exp.length);
@@ -969,6 +885,8 @@ function pickle(exp) {
 
 function unpickle_aux(exp) {
     switch (exp[0]) {
+    case null_code:
+        return null;
     case boolean_code:
         return exp[1] === "t";
     case number_code:
@@ -979,12 +897,10 @@ function unpickle_aux(exp) {
         return exp[1];
     case symbol_code:
         return new Symbol(exp[1]);
-    case pair_code:
-        return cons(unpickle_aux(exp[1]), unpickle_aux(exp[2]));
     case vector_code:
         return exp.slice(2).map(unpickle_aux);
     default:
-        return null;
+        throw new UnknownUnpickleExpressionError(exp);
     }
 }
 
@@ -1020,7 +936,7 @@ function result_val(exp) {
 }
 
 async function step(state) {
-    return await state.car(state.cdr);
+    return await state[0](state[1]);
 }
 
 async function run(state) {
@@ -1083,8 +999,7 @@ return {
     start_stream,
     start,
     send,
-    sendv,
-    cons
+    sendv
 };
 
 }

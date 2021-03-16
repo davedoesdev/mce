@@ -156,13 +156,13 @@
         (let loop ((i 0) (values values))
             (if (and (< i len) (not (null? values)))
                 (if (= i (- len 1))
-                    (vector-set! v i values)
+                    (vector-set! v i (list->vlist values))
                     (begin (vector-set! v i (car values))
                            (loop (+ i 1) (cdr values))))))
         (vector v env)))
 
 (define (make-step-contn k env args)
-    (vector 'MCE-STEP-CONTN (vector k (vector env args))))
+    (cons 'MCE-STEP-CONTN (cons k (cons env args))))
 
 (define (step-contn? exp)
     (and (pair? exp) (equal? (car exp) 'MCE-STEP-CONTN)))
@@ -177,10 +177,10 @@
     (cdddr exp))
 
 (define (sendl k args)
-    (vector k args))
+    (vector k (list->vlist args)))
 
 (define (send k . v)
-    (sendl k (list->vlist v)))
+    (sendl k v))
 
 (define (make-global-rtenv) (vector '#() '()))
 
@@ -521,7 +521,7 @@
 
 (define (globalize x args cf)
     (if (procedure? x)
-        (letrec* ((defn (list->vlist (list constructed-function0 args cf)))
+        (letrec* ((defn (list->vlist (list constructed-function0 (list->vlist args) cf)))
                   (f2 (memoize-lambda (lambda args (apply f args)) defn))
                   (f (memoize-lambda (wrap-global-lambda x f2) defn)))
             f)
@@ -552,14 +552,13 @@
         (lambda args (handle-global-lambda args fn cf))))
 
 (define (transfer k env fn . args)
-    (sendl fn (vector 'MCE-TRANSFER (list->vlist args))))
+    (sendl fn (cons 'MCE-TRANSFER args)))
 
 (define (transfer? exp)
-    (and (vector? exp)
-         (= (vector-length exp) 2)
-         (equal? (vector-ref exp 0) 'MCE-TRANSFER)))
+    (and (pair? exp) (equal? (car exp) 'MCE-TRANSFER)))
 
-(define (transfer-args exp) (vector-ref exp 1))
+(define (transfer-args exp)
+    (cdr exp))
 
 (define (find-global sym #!optional (err #t))
     (if (number? sym)
@@ -636,9 +635,11 @@
 (table-set! global-table 'null? null?)
 (table-set! global-table 'string? string?)
 (table-set! global-table 'string=? string=?)
+(table-set! global-table 'vector vector)
 (table-set! global-table 'vector? vector?)
 (table-set! global-table 'vector-length vector-length)
 (table-set! global-table 'vector-ref vector-ref)
+(table-set! global-table 'vector-set! vector-set!)
 (table-set! global-table 'get-config get-config)
 (table-set! global-table 'cf-test cf-test)
 (table-set! global-table 'transfer-test transfer-test)
@@ -670,9 +671,11 @@
     null?
 
     ; we're keeping vectors in core
+    vector
     vector?
     vector-length
     vector-ref
+    vector-set!
 
     ; we're keeping lambdas in core
     procedure?
@@ -833,7 +836,7 @@
 (define symbol-code  "f")
 (define vector-code  "g")
 
-(define (pickle-aux exp)
+(define (pickle-aux exp #!key (is_scan #f))
    (cond ((null? exp)
           (list null-code))
          ((boolean? exp)
@@ -846,20 +849,22 @@
           (list string-code exp))
          ((symbol? exp)
           (list symbol-code (symbol->string exp)))
-         ((pair? exp)
+         ((and (pair? exp) :is_scan is_scan)
           (cons vector-code
                 (cons 2
-                      (list (pickle-aux (car exp)) (pickle-aux (cdr exp))))))
+                      (list (pickle-aux (car exp) :is_scan is_scan)
+                            (pickle-aux (cdr exp) :is_scan is_scan)))))
          ((vector? exp)
           (cons vector-code
                 (cons (vector-length exp)
-                      (map pickle-aux (vector->list exp)))))
+                      (map (lambda (v) (pickle-aux v :is_scan is_scan))
+                           (vector->list exp)))))
          (else
           (error "pickle" "unknown expression" exp))))
 
-(define (pickle exp)
+(define (pickle exp #!key (is_scan #f))
     (let ((port (open-output-string)))
-        (json-write (pickle-aux exp) port)
+        (json-write (pickle-aux exp :is_scan is_scan) port)
         (get-output-string port)))
 
 (define (unpickle-aux exp)
@@ -884,8 +889,8 @@
 (define (unpickle s)
     (unpickle-aux (json-read (open-input-string s))))
 
-(define (mce-save exp)
-    (pickle (serialize (unmemoize exp))))
+(define (mce-save exp #!key (is_scan #f))
+    (pickle (serialize (unmemoize exp)) :is_scan is_scan))
 
 (define (mce-restore s)
     (memoize (deserialize (unpickle s))))
@@ -904,7 +909,7 @@
 
 (define (start-parsed is_scan v args)
     (if is_scan
-        (write (mce-save (mce-eval v)))
+        (write (mce-save (mce-eval v) :is_scan is_scan))
         (if (string? v)
             (let ((r (mce-restore v)))
                 (if (procedure? r)
