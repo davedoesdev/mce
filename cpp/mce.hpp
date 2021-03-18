@@ -116,7 +116,6 @@ private:
 };
 
 typedef std::shared_ptr<Box> boxed;
-typedef std::shared_ptr<std::pair<boxed, boxed>> pair;
 typedef std::shared_ptr<std::vector<boxed>> vector;
 typedef boxed function(boxed);
 typedef std::shared_ptr<std::function<function>> func;
@@ -158,7 +157,6 @@ private:
     bool calling_gc_callback;
 
     struct {
-        std::unordered_map<pair*, std::weak_ptr<pair>> pairs;
         std::unordered_map<vector*, std::weak_ptr<vector>> vectors;
         std::unordered_map<func*, std::pair<bool, std::weak_ptr<func>>> functions;
     } allocated;
@@ -168,7 +166,6 @@ private:
     std::unordered_set<function*> kenvfn_set;
     std::unordered_map<std::string, boxed> config_table;
 
-    friend boxed cons(boxed car, boxed cdr);
     friend boxed make_vector(std::shared_ptr<Runtime> runtime);
     friend lambda make_lambda<lambda>(std::function<function> fn,
                                       std::shared_ptr<Runtime> runtime,

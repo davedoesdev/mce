@@ -216,6 +216,9 @@ function plus(...args) {
 }
 
 function minus(n, ...args) {
+    if (args.length === 0) {
+        return -n;
+    }
     for (let arg of args) {
         n -= arg;
     }
@@ -231,6 +234,9 @@ function multiply(...args) {
 }
 
 function divide(n, ...args) {
+    if (args.length === 0) {
+        return 1 / n;
+    }
     for (let arg of args) {
         n /= arg;
     }
@@ -315,7 +321,7 @@ function getpid() {
 }
 
 function cf_test(n, x) {
-    if (n == 0) {
+    if (n === 0) {
         return n2 => cf_test(n2, x);
     } else {
         return x + n;
