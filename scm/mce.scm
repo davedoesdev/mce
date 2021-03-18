@@ -563,7 +563,7 @@
 (define (find-global sym #!optional (err #t))
     (if (number? sym)
         (let ((r (if (< sym (vector-length core-globals))
-                     (vector-ref core-globals sym)
+                     (vector-ref core-globals (inexact->exact sym))
                      '())))
             (if r
                 r
@@ -611,6 +611,10 @@
 (define (transfer-test k . args)
     (applyx (lookup-global 'result) (make-global-rtenv) k args))
 
+(define (gvector-set! vec i v)
+    (vector-set! vec i v)
+    '())
+
 (table-set! global-table 'result result)
 (table-set! global-table 'print print)
 (table-set! global-table 'eprint eprint)
@@ -639,7 +643,7 @@
 (table-set! global-table 'vector? vector?)
 (table-set! global-table 'vector-length vector-length)
 (table-set! global-table 'vector-ref vector-ref)
-(table-set! global-table 'vector-set! vector-set!)
+(table-set! global-table 'vector-set! gvector-set!)
 (table-set! global-table 'get-config get-config)
 (table-set! global-table 'cf-test cf-test)
 (table-set! global-table 'transfer-test transfer-test)
@@ -675,7 +679,7 @@
     vector?
     vector-length
     vector-ref
-    vector-set!
+    gvector-set!
 
     ; we're keeping lambdas in core
     procedure?

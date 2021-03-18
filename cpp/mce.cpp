@@ -348,7 +348,7 @@ boxed vlist_rest(boxed vl, size_t i) {
         --i;
     }
 
-    return (*vl->cast<vector>())->at(0);
+    return (*vl->cast<vector>())->at(1);
 }
 
 boxed vlist_to_vector(boxed vl) {
@@ -719,6 +719,14 @@ boxed vector_ref(boxed args) {
     return (*a->cast<vector>())->at(i->cast<double>());
 }
 
+boxed vector_set(boxed args) {
+    auto a = vlist_ref(args, 0);
+    auto i = vlist_ref(args, 1);
+    auto exp = vlist_ref(args, 2);
+    (*a->cast<vector>())->at(i->cast<double>()) = exp;
+    return box(args->get_runtime());
+}
+
 boxed is_string_equal(boxed args) {
     auto x = vlist_ref(args, 0);
     auto y = vlist_ref(args, 1);
@@ -907,7 +915,7 @@ boxed handle_global_lambda(boxed args, boxed fn, boxed cf) {
     return globalize((**f)(args), args, cf);
 }
 
-boxed lookup_global(const symbol& sym, std::shared_ptr<Runtime> runtime);
+boxed lookup_global(const double i, std::shared_ptr<Runtime> runtime);
 
 boxed handle_global_lambda_kenv(boxed args, boxed fn) {
     if (is_step_contn(args)) {
@@ -916,8 +924,9 @@ boxed handle_global_lambda_kenv(boxed args, boxed fn) {
                               step_contn_args(args))));
     }
 
-    return run(send(fn, vc(lookup_global(symbol("result"), args->get_runtime()),
-                           vc(make_global_rtenv(args->get_runtime()),
+    auto runtime = args->get_runtime();
+    return run(send(fn, vc(lookup_global(runtime->g_result, runtime),
+                           vc(make_global_rtenv(runtime),
                               args))));
 }
 
@@ -971,7 +980,7 @@ boxed handle_lambda(boxed args,
                               bnil)));
     }
 
-    return run(send(fn, vc(lookup_global(symbol("result"), runtime),
+    return run(send(fn, vc(lookup_global(runtime->g_result, runtime),
                            vc(extend_rtenv(env, len, args),
                               bnil))));
 }
@@ -1083,10 +1092,10 @@ boxed aform(enum forms n, std::shared_ptr<Runtime> runtime) {
     return box<double>(static_cast<double>(n), runtime);
 }
 
-boxed lookup_global(const symbol& sym, std::shared_ptr<Runtime> runtime) {
-    auto r = find_global(sym, runtime);
+boxed lookup_global(const double i, std::shared_ptr<Runtime> runtime) {
+    auto r = find_global(i, runtime);
     auto defn = vc(aform(forms::global_lambda, runtime),
-                   vc(box<symbol>(sym, runtime), box(runtime)));
+                   vc(box<double>(i, runtime), box(runtime)));
     auto f = box(runtime);
     auto f2 = memoize_lambda(make_lambda<lambda>([f](boxed args) -> boxed {
         return (**f->cast<lambda>())(args);
@@ -1862,7 +1871,7 @@ boxed cf_test(boxed args) {
 
 boxed transfer_test(boxed args) {
     auto runtime = args->get_runtime();
-    return applyx(lookup_global(symbol("result"), runtime),
+    return applyx(lookup_global(runtime->g_result, runtime),
                   make_global_rtenv(args->get_runtime()),
                   vlist_ref(args, 0),
                   vlist_rest(args, 0));
@@ -1872,35 +1881,16 @@ Runtime::Runtime() :
     gc_threshold(10000),
     calling_gc_callback(false),
     global_table {
-        { "result", result },
-        { "<", less_than },
-        { ">", greater_than },
         { "print", print },
         { "eprint", eprint },
         { "write", write },
         { "write-state", write },
         { "ewrite", write },
-        { "+", plus },
-        { "-", minus },
-        { "*", multiply },
-        { "/", divide },
-        { "null?", is_null },
-        { "eq?", is_eq },
-        { "=", is_number_equal },
-        { "string?", is_string },
-        { "procedure?", is_procedure },
-        { "string=?", is_string_equal },
-        { "vector?", is_vector },
-        { "vector-length", vector_length },
-        { "vector-ref", vector_ref },
-        { "apply", gapplyx },
         { "save", save },
         { "restore", restore },
-        { "transfer", transfer },
         { "getpid", getpid },
         { "get-config", mce::get_config },
         { "cf-test", cf_test },
-        { "transfer-test", transfer_test },
         { "set-gc-callback!", mce::set_gc_callback }
     },
     core_globals {
@@ -1915,7 +1905,7 @@ Runtime::Runtime() :
         is_number_equal,
         nullptr,
         is_null,
-        vector,
+        vlist_to_vector,
         is_vector,
         vector_length,
         vector_ref,
@@ -1931,7 +1921,9 @@ Runtime::Runtime() :
         gapplyx,
         transfer,
         restore
-    }) {}
+    }),
+    g_result(std::find(core_globals.begin(), core_globals.end(), result) -
+             core_globals.begin()) {}
 
 void Runtime::set_gc_threshold(size_t v) {
     gc_threshold = v;

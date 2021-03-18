@@ -281,6 +281,7 @@ function vector_ref(v, i) {
 
 function vector_set(v, i, exp) {
     v[i] = exp;
+    return null;
 }
 
 function is_eq(x, y) {
@@ -329,7 +330,7 @@ function cf_test(n, x) {
 }
 
 function transfer_test(k, ...args) {
-    return applyx(lookup_global(new Symbol('result')),
+    return applyx(lookup_global(g_result),
                   make_global_rtenv(), k, vector_to_vlist(args));
 }
 
@@ -345,35 +346,16 @@ function get_config(k) {
 }
 
 const global_table = new Map([
-    ['result', result],
-    ['+', plus],
-    ['-', minus],
-    ['*', multiply],
-    ['/', divide],
-    ['<', less_than],
-    ['>', greater_than],
     ['print', print],
     ['eprint', eprint],
     ['write', write],
     ['write-state', write],
     ['ewrite', ewrite],
-    ['null?', is_null],
-    ['string?', is_string],
-    ['vector?', is_vector],
-    ['procedure?', is_procedure],
-    ['vector-length', vector_length],
-    ['vector-ref', vector_ref],
-    ['string=?', is_string_equal],
-    ['eq?', is_eq],
-    ['=', is_number_equal],
-    ['apply', applyx],
     ['save', mce_save],
     ['restore', grestore],
-    ['transfer', transfer],
     ['getpid', getpid],
     ['get-config', get_config],
     ['cf-test', cf_test],
-    ['transfer-test', transfer_test],
     ['set-gc-callback!', () => null]
 ]);
 
@@ -401,6 +383,8 @@ const core_globals = [
         transfer,
         transfer_test
 ];
+
+const g_result = core_globals.indexOf(result);
 
 function get_global_function(name) {
     return global_table.get(name);
@@ -512,7 +496,7 @@ function handle_global_lambda_kenv(args, fn) {
     }
 
     return run(call_global(fn, [
-        lookup_global(new Symbol('result')), [
+        lookup_global(g_result), [
             make_global_rtenv(),
             args
         ]
@@ -526,9 +510,9 @@ function wrap_global_lambda(fn, cf) {
     return args => handle_global_lambda(args, fn, cf);
 }
 
-function lookup_global(sym) {
-    const r = find_global(sym);
-    const defn = [global_lambda, [sym, null]];
+function lookup_global(n) {
+    const r = find_global(n);
+    const defn = [global_lambda, [n, null]];
     const f2 = memoize_lambda(args => f(args), defn);
     const f = memoize_lambda(wrap_global_lambda(r, f2), defn);
     return f;
@@ -564,7 +548,7 @@ function handle_lambda(args, len, fn, env, extend_rtenv) {
     }
 
     return run(send(fn, [
-        lookup_global(new Symbol('result')), [
+        lookup_global(g_result), [
             extend_rtenv(env, len, args),
             null
         ]

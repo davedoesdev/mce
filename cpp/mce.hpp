@@ -132,23 +132,6 @@ public:
 };
 
 class Runtime : public std::enable_shared_from_this<Runtime> {
-public:
-    Runtime();
-
-    void set_gc_threshold(size_t v);
-    void maybe_gc();
-
-    boxed get_config(const std::string& k);
-    void set_config(const std::string& k, boxed v);
-
-    void set_gc_callback(boxed v);
-
-    function* get_global_function(const std::string& name);
-    void register_global_function(const std::string& name, function f);
-    void unregister_global_function(const std::string& name);
-
-    void register_kenv_function(function f);
-
 private:
     size_t gc_threshold;
     void break_cycles();
@@ -173,6 +156,25 @@ private:
     friend boxed find_global(const symbol& sym, std::shared_ptr<Runtime> runtime);
     friend boxed find_global(const double i, std::shared_ptr<Runtime> runtime);
     friend boxed wrap_global_lambda(boxed fn, boxed cf);
+
+public:
+    Runtime();
+
+    void set_gc_threshold(size_t v);
+    void maybe_gc();
+
+    boxed get_config(const std::string& k);
+    void set_config(const std::string& k, boxed v);
+
+    void set_gc_callback(boxed v);
+
+    function* get_global_function(const std::string& name);
+    void register_global_function(const std::string& name, function f);
+    void unregister_global_function(const std::string& name);
+
+    void register_kenv_function(function f);
+
+    const double g_result;
 };
 
 boxed send(boxed k, boxed args);
