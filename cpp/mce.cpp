@@ -364,15 +364,6 @@ boxed vlist_to_vector(boxed vl) {
     return a;
 }
 
-boxed vector_to_vlist(boxed vec) {
-    auto v = vec->cast<vector>();
-    auto vl = box(vec->get_runtime());
-    for (auto it = (*v)->rbegin(); it != (*v)->rend(); ++it) {
-        vl = vc(*it, vl);
-    }
-    return vl;
-}
-
 boxed vector_cmap(map_fn f, boxed v, cmap_table& tab, set_entry_fn set_entry) {
     auto ref = tab.find(v);
     if (ref != tab.end()) {
@@ -396,7 +387,7 @@ boxed table_set(cmap_table& tab, boxed v, boxed entry) {
 }
 
 bool is_yield_defn(boxed args) {
-    if (!args->contains<vector>()) {
+    if (!args->contains<vector>() || (*args->cast<vector>())->empty()) {
         return false;
     }
     auto first = vlist_ref(args, 0);
@@ -561,7 +552,7 @@ boxed make_step_contn(boxed k, boxed env, boxed args) {
 }
 
 bool is_step_contn(boxed args) {
-    if (!args->contains<vector>()) {
+    if (!args->contains<vector>() || (*args->cast<vector>())->empty()) {
         return false;
     }
     auto first = vlist_ref(args, 0);
@@ -582,7 +573,7 @@ boxed step_contn_args(boxed args) {
 }
 
 bool is_transfer(boxed args) {
-    if (!args->contains<vector>()) {
+    if (!args->contains<vector>() || (*args->cast<vector>())->empty()) {
         return false;
     }
     auto first = vlist_ref(args, 0);
@@ -700,6 +691,15 @@ boxed is_string(boxed args) {
 boxed is_procedure(boxed args) {
     auto a = vlist_ref(args, 0);
     return box<bool>(a->contains<lambda>(), args->get_runtime());
+}
+
+boxed make_vector(boxed args) {
+    auto n = vlist_ref(args, 0)->cast<double>();
+    auto runtime = args->get_runtime();
+    auto a = make_vector(runtime);
+    auto v = a->cast<vector>();
+    (*v)->resize(n, box(runtime));
+    return a;
 }
 
 boxed is_vector(boxed args) {
@@ -1462,7 +1462,8 @@ boxed serialize(boxed exp) {
     map_fn fn = [&tab, &fn, &set_entry](boxed x) -> boxed {
         return serialize_aux(x, tab, fn, set_entry);
     };
-    return vc(fn(exp), box<double>(counter, runtime));
+    auto serialized = fn(exp);
+    return vc(serialized, box<double>(counter, runtime));
 }
 
 boxed deserialize_aux(boxed exp,
@@ -1690,6 +1691,7 @@ void bconvert_out(const std::string& s, std::shared_ptr<Runtime> runtime) {
     bpickle((*exp)->at(0), refs, v, 0);
 
     if (refs.size() != (*exp)->at(1)->cast<double>()) {
+    std::cerr << refs.size() << " " << (*exp)->at(1)->cast<double>() << std::endl;
         throw std::length_error("unexpected number of references");
     }
 
@@ -1905,7 +1907,7 @@ Runtime::Runtime() :
         is_number_equal,
         nullptr,
         is_null,
-        vlist_to_vector,
+        make_vector,
         is_vector,
         vector_length,
         vector_ref,

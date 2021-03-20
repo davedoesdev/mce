@@ -22,8 +22,7 @@
 #define char_code                   'd'
 #define string_code                 'e'
 #define symbol_code                 'f'
-#define pair_code                   'g'
-#define vector_code                 'h'
+#define vector_code                 'g'
 
 #define unmemoized_code             '0'
 #define result_code                 '1'
@@ -55,6 +54,15 @@
 #define application1_form           21
 #define evalx_initial_form          22
 
+/*
+vector is:
+0: vector_code
+1: length
+9: for each element:
+     0: index
+9 + length * 8: first element (when deserialized)
+*/
+
 enum core_globals {
     g_result,
     g_applyx,
@@ -67,18 +75,13 @@ enum core_globals {
     g_is_number_equal,
     g_abs,
     g_is_null,
+    g_make_vector,
     g_is_vector,
     g_vector_length,
     g_vector_ref,
+    g_vector_set,
     g_is_procedure,
     g_is_eq,
-    g_cons,
-    g_is_pair,
-    g_car,
-    g_cdr,
-    g_set_car,
-    g_set_cdr,
-    g_length,
     g_is_string,
     g_is_string_equal,
     g_transfer,
@@ -136,22 +139,6 @@ uint64_t gc_aux(memory *src, uint64_t state, memory *dest) {
             break;
         }
 
-        case pair_code: {
-            uint64_t car_state = *(uint64_t*)&src->bytes[state + 1];
-            uint64_t cdr_state = *(uint64_t*)&src->bytes[state + 9];
-
-            src->bytes[state] = gc_code;
-            *(uint64_t*)&src->bytes[state + 1] = dest->size - 1;
-
-            uint64_t pos = dest->size;
-            dest->size += 2 * 8;
-
-            *(uint64_t*)&dest->bytes[pos] = gc_aux(src, car_state, dest);
-            *(uint64_t*)&dest->bytes[pos + 8] = gc_aux(src, cdr_state, dest);
-
-            break;
-        }
-
         case vector_code: {
             uint64_t len = *(uint64_t*)&src->bytes[state + 1];
 
@@ -202,89 +189,6 @@ void gc(memory *src, uint64_t state, memory *dest) {
     assert(dest->size > 0);
 }
 
-/*
-pair is:
-0: pair_code
-1: first value index
-9: second value index
-17: first value (when deserialized)
-
-vector is:
-0: vector_code
-1: length
-9: for each element:
-     0: index
-9 + length * 8: first element (when deserialized)
-*/
-
-uint64_t car(memory *mem, uint64_t state) {
-    assert(mem->bytes[state] == pair_code);
-    return *(uint64_t*)&mem->bytes[state + 1];
-}
-
-uint64_t cdr(memory *mem, uint64_t state) {
-    assert(mem->bytes[state] == pair_code);
-    return *(uint64_t*)&mem->bytes[state + 9];
-}
-
-uint64_t set_car(memory *mem, uint64_t state, uint64_t val) {
-    assert(mem->bytes[state] == pair_code);
-    *(uint64_t*)&mem->bytes[state + 1] = val;
-    return state;
-}
-
-uint64_t set_cdr(memory *mem, uint64_t state, uint64_t val) {
-    assert(mem->bytes[state] == pair_code);
-    *(uint64_t*)&mem->bytes[state + 9] = val;
-    return state;
-}
-
-uint64_t cons(memory *mem, uint64_t car, uint64_t cdr) {
-    uint64_t state = allocate(mem, 1 + 8 + 8);
-    mem->bytes[state] = pair_code;
-    *(uint64_t*)&mem->bytes[state + 1] = car;
-    *(uint64_t*)&mem->bytes[state + 9] = cdr;
-    return state;
-}
-
-#define send cons
-
-uint64_t sendv(memory *mem, uint64_t k, uint64_t v) {
-    return send(mem, k, cons(mem, v, mem->nil));
-}
-
-uint64_t list_ref(memory *mem, uint64_t l, uint64_t i) {
-    while (i > 0) {
-        l = cdr(mem, l);
-        --i;
-    }
-    return car(mem, l);
-}
-
-uint64_t list_rest(memory *mem, uint64_t l, uint64_t i) {
-    while (i > 0) {
-        l = cdr(mem, l);
-        --i;
-    }
-    return cdr(mem, l);
-}
-
-void list_set(memory *mem, uint64_t l, uint64_t i, uint64_t val) {
-    while (i > 0) {
-         l = cdr(mem, l);
-    }
-    set_car(mem, l, val);
-}
-
-uint64_t list_length(memory *mem, uint64_t l) {
-    uint64_t len = 0;
-    while (mem->bytes[l] == pair_code) {
-        l = cdr(mem, l);
-        ++len;
-    }
-    return len;
-}
-
 uint64_t make_uninitialised_vector(memory *mem, uint64_t n) {
     uint64_t state = allocate(mem, 1 + 8 + n * 8);
     mem->bytes[state] = vector_code;
@@ -311,10 +215,47 @@ uint64_t vector_ref(memory *mem, uint64_t v, uint64_t i) {
     return *(uint64_t*)&mem->bytes[v + 9 + i * 8];
 }
 
-void vector_set(memory *mem, uint64_t v, uint64_t i, uint64_t val) {
+uint64_t vector_set(memory *mem, uint64_t v, uint64_t i, uint64_t val) {
     assert(mem->bytes[v] == vector_code);
     assert(i < *(uint64_t*)&mem->bytes[v + 1]);
     *(uint64_t*)&mem->bytes[v + 9 + i * 8] = val;
+    return mem->nil;
+}
+
+uint64_t vc(memory *mem, uint64_t first, uint64_t second) {
+    uint64_t v = make_uninitialised_vector(mem, 2);
+    vector_set(mem, v, 0, first);
+    vector_set(mem, v, 1, second);
+    return v;
+}
+
+#define send vc
+
+uint64_t sendv(memory *mem, uint64_t k, uint64_t v) {
+    return send(mem, k, vc(mem, v, mem->nil));
+}
+
+uint64_t vlist_ref(memory *mem, uint64_t vl, uint64_t i) {
+    while (i > 0) {
+        vl = vector_ref(mem, vl, 1);
+        --i;
+    }
+    return vector_ref(mem, vl, 0);
+}
+
+uint64_t vlist_rest(memory *mem, uint64_t vl, uint64_t i) {
+    while (i > 0) {
+        vl = vector_ref(mem, vl, 1);
+        --i;
+    }
+    return vector_ref(mem, vl, 1);
+}
+
+void vlist_set(memory *mem, uint64_t vl, uint64_t i, uint64_t val) {
+    while (i > 0) {
+        vl = vector_ref(mem, vl, 1);
+    }
+    vector_set(mem, vl, 0, val);
 }
 
 double double_val(memory *mem, uint64_t state) {
@@ -388,9 +329,9 @@ uint64_t make_result(memory *mem, uint64_t val) {
 uint64_t rtenv_lookup(memory *mem,
                       uint64_t i,
                       uint64_t env) {
-    uint64_t first = (uint64_t)double_val(mem, car(mem, i));
-    uint64_t second = (uint64_t)double_val(mem, cdr(mem, i));
-    uint64_t v = list_ref(mem, env, first);
+    uint64_t first = (uint64_t)double_val(mem, vector_ref(mem, i, 0));
+    uint64_t second = (uint64_t)double_val(mem, vector_ref(mem, i, 1));
+    uint64_t v = vlist_ref(mem, env, first);
     if (second < vector_size(mem, v)) {
         return vector_ref(mem, v, second);
     }
@@ -401,16 +342,16 @@ uint64_t rtenv_setvar(memory *mem,
                       uint64_t i,
                       uint64_t val,
                       uint64_t env) {
-    uint64_t first = (uint64_t)double_val(mem, car(mem, i));
-    uint64_t second = (uint64_t)double_val(mem, cdr(mem, i));
-    uint64_t v = list_ref(mem, env, first);
+    uint64_t first = (uint64_t)double_val(mem, vector_ref(mem, i, 0));
+    uint64_t second = (uint64_t)double_val(mem, vector_ref(mem, i, 1));
+    uint64_t v = vlist_ref(mem, env, first);
     uint64_t size = vector_size(mem, v);
     if (second >= size) {
         uint64_t v2 = make_uninitialised_vector(mem, second + 1);
         for (uint64_t i = 0; i < second; ++i) {
             vector_set(mem, v2, i, i < size ? vector_ref(mem, v, i) : mem->nil);
         }
-        list_set(mem, env, first, v2);
+        vlist_set(mem, env, first, v2);
         v = v2;
     }
     vector_set(mem, v, second, val);
@@ -460,15 +401,15 @@ uint64_t restore(memory *mem, uint64_t s) {
     return size;
 }
 
-uint64_t list_to_vector(memory *mem, uint64_t l, uint64_t len) {
+uint64_t vlist_to_vector(memory *mem, uint64_t vl, uint64_t len) {
     uint64_t v = make_uninitialised_vector(mem, len);
     uint64_t i = 0;
-    while ((mem->bytes[l] == pair_code) && (i < len)) {
-        vector_set(mem, v, i++, car(mem, l));
-        l = cdr(mem, l);
+    while ((mem->bytes[vl] == vector_code) && (i < len)) {
+        vector_set(mem, v, i++, vector_ref(mem, vl, 0));
+        vl = vector_ref(mem, vl, 1);
     }
     while (i < len) {
-        vector_set(mem, v, i++, mem->nil);
+        vector_set(mem, vl, i++, mem->nil);
     }
     return v;
 }
@@ -477,7 +418,7 @@ uint64_t extend_rtenv(memory *mem,
                       uint64_t env,
                       uint64_t len,
                       uint64_t values) {
-    return cons(mem, list_to_vector(mem, values, len), env);
+    return vc(mem, vlist_to_vector(mem, values, len), env);
 }
 
 uint64_t improper_extend_rtenv(memory *mem,
@@ -491,8 +432,8 @@ uint64_t improper_extend_rtenv(memory *mem,
         if (i == (len - 1)) {
             vector_set(mem, v, i, values);
         } else {
-            vector_set(mem, v, i, car(mem, values));
-            values = cdr(mem, values);
+            vector_set(mem, v, i, vector_ref(mem, values, 0));
+            values = vector_ref(mem, values, 1);
         }
     }
 
@@ -500,7 +441,7 @@ uint64_t improper_extend_rtenv(memory *mem,
         vector_set(mem, v, i++, mem->nil);
     }
 
-    return cons(mem, v, env);
+    return vc(mem, v, env);
 }
 
 uint64_t make_step_contn(memory *mem, uint64_t k, uint64_t env, uint64_t args) {
@@ -536,8 +477,8 @@ uint64_t transfer(memory *mem, uint64_t args) {
     *(uint64_t*)&mem->bytes[state + 1] = state + 9;
     mem->bytes[state + 9] = vector_code;
     *(uint64_t*)&mem->bytes[state + 10] = 1;
-    *(uint64_t*)&mem->bytes[state + 18] = cdr(mem, args);
-    return send(mem, car(mem, args), state);
+    *(uint64_t*)&mem->bytes[state + 18] = vector_ref(mem, args, 1);
+    return send(mem, vector_ref(mem, args, 0), state);
 }
 
 uint64_t transfer_args(memory *mem, uint64_t state) {
@@ -547,50 +488,64 @@ uint64_t transfer_args(memory *mem, uint64_t state) {
 
 uint64_t less_than(memory *mem, uint64_t args) {
     return make_boolean(mem, 
-        double_val(mem, list_ref(mem, args, 0)) <
-        double_val(mem, list_ref(mem, args, 1)));
+        double_val(mem, vlist_ref(mem, args, 0)) <
+        double_val(mem, vlist_ref(mem, args, 1)));
 }
 
 uint64_t greater_than(memory *mem, uint64_t args) {
     return make_boolean(mem,
-        double_val(mem, list_ref(mem, args, 0)) >
-        double_val(mem, list_ref(mem, args, 1)));
+        double_val(mem, vlist_ref(mem, args, 0)) >
+        double_val(mem, vlist_ref(mem, args, 1)));
 }
 
 uint64_t plus(memory *mem, uint64_t args) {
     double r = 0;
-    while (mem->bytes[args] == pair_code) {
-        r += double_val(mem, car(mem, args));
-        args = cdr(mem, args);
+    while (mem->bytes[args] == vector_code) {
+        r += double_val(mem, vector_ref(mem, args, 0));
+        args = vector_ref(mem, args, 1);
     }
     return make_double(mem, r);
 }
 
 uint64_t minus(memory *mem, uint64_t args) {
-    double r = double_val(mem, car(mem, args));
-    while (mem->bytes[args = cdr(mem, args)] == pair_code) {
-        r -= double_val(mem, car(mem, args));
+    double n = double_val(mem, vector_ref(mem, args, 0));
+    if (mem->bytes[vector_ref(mem, args, 1)] != vector_code) {
+        return make_double(mem, -n);
     }
-    return make_double(mem, r);
+    while (mem->bytes[args = vector_ref(mem, args, 1)] == vector_code) {
+        n -= double_val(mem, vector_ref(mem, args, 0));
+    }
+    return make_double(mem, n);
 }
 
 uint64_t multiply(memory *mem, uint64_t args) {
     double r = 1;
-    while (mem->bytes[args] == pair_code) {
-        r *= double_val(mem, car(mem, args));
-        args = cdr(mem, args);
+    while (mem->bytes[args] == vector_code) {
+        r *= double_val(mem, vector_ref(mem, args, 0));
+        args = vector_ref(mem, args, 1);
     }
     return make_double(mem, r);
 }
 
+uint64_t divide(memory *mem, uint64_t args) {
+    double n = double_val(mem, vector_ref(mem, args, 0));
+    if (mem->bytes[vector_ref(mem, args, 1)] != vector_code) {
+        return make_double(mem, 1 / n);
+    }
+    while (mem->bytes[args = vector_ref(mem, args, 1)] == vector_code) {
+        n /= double_val(mem, vector_ref(mem, args, 0));
+    }
+    return make_double(mem, n);
+}
+
 uint64_t is_null(memory *mem, uint64_t args) {
     return make_boolean(mem,
-        mem->bytes[car(mem, args)] == null_code);
+        mem->bytes[vector_ref(mem, args, 0)] == null_code);
 }
 
 uint64_t is_eq(memory *mem, uint64_t args) {
-    uint64_t x = list_ref(mem, args, 0);
-    uint64_t y = list_ref(mem, args, 1);
+    uint64_t x = vlist_ref(mem, args, 0);
+    uint64_t y = vlist_ref(mem, args, 1);
 
     unsigned char x_type = mem->bytes[x];
     unsigned char y_type = mem->bytes[y];
@@ -632,28 +587,23 @@ uint64_t is_eq(memory *mem, uint64_t args) {
 
 uint64_t is_string(memory *mem, uint64_t args) {
     return make_boolean(mem,
-        mem->bytes[car(mem, args)] == string_code);
-}
-
-uint64_t is_pair(memory *mem, uint64_t args) {
-    return make_boolean(mem,
-        mem->bytes[car(mem, args)] == pair_code);
+        mem->bytes[vector_ref(mem, args, 0)] == string_code);
 }
 
 uint64_t is_vector(memory *mem, uint64_t args) {
     return make_boolean(mem,
-        mem->bytes[car(mem, args)] == vector_code);
+        mem->bytes[vector_ref(mem, args, 0)] == vector_code);
 }
 
 uint64_t is_procedure(memory *mem, uint64_t args) {
     return make_boolean(mem,
-        mem->bytes[car(mem, args)] == unmemoized_code);
+        mem->bytes[vector_ref(mem, args, 0)] == unmemoized_code);
 }
 
 uint64_t is_number_equal(memory *mem, uint64_t args) {
     return make_boolean(mem,
-        double_val(mem, list_ref(mem, args, 0)) ==
-        double_val(mem, list_ref(mem, args, 1)));
+        double_val(mem, vlist_ref(mem, args, 0)) ==
+        double_val(mem, vlist_ref(mem, args, 1)));
 }
 
 uint64_t xdisplay(memory *mem,
@@ -701,24 +651,6 @@ uint64_t xdisplay(memory *mem,
             fwrite(&mem->bytes[exp + 9], 1, *(uint64_t*)&mem->bytes[exp + 1], out);
             break;
 
-        case pair_code: {
-            bool first = true;
-            fprintf(out, "(");
-            while (mem->bytes[exp] == pair_code) {
-                if (!first) {
-                    fprintf(out, " ");
-                }
-                first = false;
-                xdisplay(mem, car(mem, exp), out, is_write);
-                exp = cdr(mem, exp);
-            }
-            if (mem->bytes[exp] != null_code) {
-                fprintf(out, " . ");
-                xdisplay(mem, exp, out, is_write);
-            }
-            fprintf(out, ")");
-            break;
-        }
         case vector_code: {
             bool first = true;
             fprintf(out, "#(");
@@ -749,9 +681,9 @@ uint64_t xdisplay_args(memory *mem,
                        FILE *out,
                        bool is_write) {
     uint64_t r = mem->nil;
-    while (mem->bytes[args] == pair_code) {
-        r = xdisplay(mem, car(mem, args), out, is_write);
-        args = cdr(mem, args);
+    while (mem->bytes[args] == vector_code) {
+        r = xdisplay(mem, vector_ref(mem, args, 0), out, is_write);
+        args = vector_ref(mem, args, 1);
     }
     if (!is_write) {
         fprintf(out, "\n");
@@ -772,7 +704,7 @@ uint64_t gwrite(memory *mem, uint64_t args) {
 }
 
 uint64_t write_state(memory *mem, uint64_t args) {
-    uint64_t s = car(mem, args);
+    uint64_t s = vector_ref(mem, args, 0);
     assert(mem->bytes[s] == string_code);
     fwrite(&mem->bytes[s + 1], 1, *(uint64_t*)&mem->bytes[s + 1] + 8, stdout);
     return s;
@@ -781,17 +713,17 @@ uint64_t write_state(memory *mem, uint64_t args) {
 uint64_t symbol_lookup(memory *mem,
                        uint64_t form_args,
                        uint64_t args) {
-    uint64_t i = list_ref(mem, form_args, 0);
-    uint64_t k = list_ref(mem, args, 0);
-    uint64_t env = list_ref(mem, args, 1);
+    uint64_t i = vlist_ref(mem, form_args, 0);
+    uint64_t k = vlist_ref(mem, args, 0);
+    uint64_t env = vlist_ref(mem, args, 1);
     return sendv(mem, k, rtenv_lookup(mem, i, env));
 }
 
 uint64_t send_value(memory *mem,
                     uint64_t form_args,
                     uint64_t args) {
-    uint64_t exp = list_ref(mem, form_args, 0);
-    uint64_t k = list_ref(mem, args, 0);
+    uint64_t exp = vlist_ref(mem, form_args, 0);
+    uint64_t k = vlist_ref(mem, args, 0);
     return sendv(mem, k, exp);
 }
 
@@ -801,12 +733,12 @@ uint64_t make_form(memory *mem, double form, uint64_t args) {
     *(uint64_t*)&mem->bytes[state + 1] = state + 9;
     mem->bytes[state + 9] = vector_code;
     *(uint64_t*)&mem->bytes[state + 10] = 1;
-    *(uint64_t*)&mem->bytes[state + 18] = cons(mem, make_double(mem, form), args);
+    *(uint64_t*)&mem->bytes[state + 18] = vc(mem, make_double(mem, form), args);
     return state;
 }
 
 uint64_t make_global_rtenv(memory *mem) {
-    return cons(mem, make_vector(mem, 0), mem->nil);
+    return vc(mem, make_vector(mem, 0), mem->nil);
 }
 
 uint64_t applyx(memory *mem,
@@ -820,53 +752,53 @@ uint64_t applyx(memory *mem,
 uint64_t transfer_test(memory *mem, uint64_t args) {
     return applyx(mem,
                   make_form(mem, global_lambda_form,
-                            cons(mem, make_symbol(mem, "result"), mem->nil)),
+                            vc(mem, make_double(mem, g_result), mem->nil)),
                   make_global_rtenv(mem),
-                  car(mem, args),
-                  cdr(mem, args));
+                  vector_ref(mem, args, 0),
+                  vector_ref(mem, args, 1));
 }
 
 uint64_t cf_test(memory *mem, uint64_t args) {
-    double n = double_val(mem, list_ref(mem, args, 0));
-    uint64_t x = list_ref(mem, args, 1);
+    double n = double_val(mem, vlist_ref(mem, args, 0));
+    uint64_t x = vlist_ref(mem, args, 1);
     if (n == 0) {
         /* Note since we lack the duality of the other implementations
-           (where we can return a function which has logic and can return
-           its definition when requested), we have to split the logic into
+           (where we can return a function which has logic and can also return
+           its own definition when requested), we have to split the logic into
            a separate helper global, cf-test-aux - which is not interoperable
            with the other implementations. */
         return make_form(mem, global_lambda_form,
-                         cons(mem, make_symbol(mem, "cf-test-aux"),
-                              cons(mem, x, mem->nil)));
+                         vc(mem, make_symbol(mem, "cf-test-aux"),
+                            vc(mem, x, mem->nil)));
     }
     return make_double(mem, double_val(mem, x) + n);
 }
 
 uint64_t cf_test_aux(memory *mem, uint64_t x, uint64_t args) {
-    return cf_test(mem, cons(mem, list_ref(mem, args, 0), cons(mem, x, mem->nil)));
+    return cf_test(mem, vc(mem, vlist_ref(mem, args, 0), vc(mem, x, mem->nil)));
 }
 
 uint64_t constructed_function0(memory *mem,
                                uint64_t form_args,
                                uint64_t args) {
-    uint64_t args2 = list_ref(mem, form_args, 0);
-    uint64_t cf = list_ref(mem, form_args, 1);
-    return applyx(mem, make_form(mem, constructed_function1_form, cons(mem, args, mem->nil)),
+    uint64_t args2 = vlist_ref(mem, form_args, 0);
+    uint64_t cf = vlist_ref(mem, form_args, 1);
+    return applyx(mem, make_form(mem, constructed_function1_form, vc(mem, args, mem->nil)),
                   make_global_rtenv(mem), cf, args2);
 }
 
 uint64_t constructed_function1(memory *mem,
                                uint64_t form_args,
                                uint64_t args) {
-    uint64_t args2 = list_ref(mem, form_args, 0);
-    uint64_t f = list_ref(mem, args, 0);
+    uint64_t args2 = vlist_ref(mem, form_args, 0);
+    uint64_t f = vlist_ref(mem, args, 0);
     return send(mem, f, args2);
 }
 
 uint64_t global_lambda(memory *mem,
                        uint64_t form_args,
                        uint64_t args) {
-    uint64_t defn = list_ref(mem, form_args, 0);
+    uint64_t defn = vlist_ref(mem, form_args, 0);
     double g = mem->bytes[defn] == number_code ? double_val(mem, defn) : -1;
 
     if (mem->bytes[args] == transfer_code) {
@@ -875,10 +807,10 @@ uint64_t global_lambda(memory *mem,
         if (g == g_transfer_test) {
             return applyx(mem,
                           make_form(mem, global_lambda_form,
-                                    cons(mem, make_double(mem, g_result), mem->nil)),
+                                    vc(mem, make_double(mem, g_result), mem->nil)),
                           make_global_rtenv(mem),
-                          list_ref(mem, args, 0),
-                          list_rest(mem, args, 0));
+                          vlist_ref(mem, args, 0),
+                          vlist_rest(mem, args, 0));
         }
 
         xdisplay(mem, defn, stderr, false); fprintf(stderr, " ");
@@ -887,15 +819,19 @@ uint64_t global_lambda(memory *mem,
     }
 
     if (g == g_result) {
-        return make_result(mem, car(mem, args));
+        return make_result(mem, vector_ref(mem, args, 0));
     }
 
     uint64_t k = step_contn_k(mem, args);
     uint64_t env = step_contn_env(mem, args);
     args = step_contn_args(mem, args);
 
-    if (g == g_transfer) {
-        return transfer(mem, args);
+    if (g == g_applyx) {
+        return applyx(mem,
+                      k,
+                      env,
+                      vlist_ref(mem, args, 0),
+                      vlist_ref(mem, args, 1));
     }
 
     if (g == g_less_than) {
@@ -918,77 +854,61 @@ uint64_t global_lambda(memory *mem,
         return sendv(mem, k, multiply(mem, args));
     }
 
-    if (g == g_is_null) {
-        return sendv(mem, k, is_null(mem, args));
-    }
-
-    if (g == g_car) {
-        return sendv(mem, k, car(mem, car(mem, args)));
-    }
-
-    if (g == g_cdr) {
-        return sendv(mem, k, cdr(mem, car(mem, args)));
-    }
-
-    if (g == g_set_car) {
-        return sendv(mem, k, set_car(mem, list_ref(mem, args, 0),
-                                          list_ref(mem, args, 1)));
-    }
-
-    if (g == g_set_cdr) {
-        return sendv(mem, k, set_cdr(mem, list_ref(mem, args, 0),
-                                          list_ref(mem, args, 1)));
-    }
-
-    if (g == g_length) {
-        return sendv(mem, k, make_double(mem, list_length(mem, list_ref(mem, args, 0))));
-    }
-
-    if (g == g_cons) {
-        return sendv(mem, k, cons(mem, list_ref(mem, args, 0),
-                                       list_ref(mem, args, 1)));
-    }
-
-    if (g == g_is_eq) {
-        return sendv(mem, k, is_eq(mem, args));
-    }
-
-    if (g == g_is_pair) {
-        return sendv(mem, k, is_pair(mem, args));
-    }
-
-    if (g == g_is_vector) {
-        return sendv(mem, k, is_vector(mem, args));
-    }
-
-    if (g == g_is_procedure) {
-        return sendv(mem, k, is_procedure(mem, args));
-    }
-
-    if (g == g_vector_length) {
-        return sendv(mem, k, make_double(mem, vector_size(mem, car(mem, args))));
+    if (g == g_divide) {
+        return sendv(mem, k, divide(mem, args));
     }
 
     if (g == g_is_number_equal) {
         return sendv(mem, k, is_number_equal(mem, args));
     }
 
+    if (g == g_abs) {
+        return sendv(mem, k, make_double(mem, fabs(double_val(mem, vector_ref(mem, args, 0)))));
+    }
+
+    if (g == g_is_null) {
+        return sendv(mem, k, is_null(mem, args));
+    }
+
+    if (g == g_make_vector) {
+        return sendv(mem, k, make_vector(mem, double_val(mem, vector_ref(mem, args, 0))));
+    }
+
+    if (g == g_is_vector) {
+        return sendv(mem, k, is_vector(mem, args));
+    }
+
+    if (g == g_vector_length) {
+        return sendv(mem, k, make_double(mem, vector_size(mem, vector_ref(mem, args, 0))));
+    }
+
     if (g == g_vector_ref) {
         return sendv(mem, k, vector_ref(mem,
-                                        list_ref(mem, args, 0),
-                                        double_val(mem, list_ref(mem, args, 1))));
+                                        vlist_ref(mem, args, 0),
+                                        double_val(mem, vlist_ref(mem, args, 1))));
     }
 
-    if (g == g_applyx) {
-        return applyx(mem,
-                      k,
-                      env,
-                      list_ref(mem, args, 0),
-                      list_ref(mem, args, 1));
+    if (g == g_vector_set) {
+        return sendv(mem, k, vector_set(mem,
+                                        vlist_ref(mem,args, 0),
+                                        double_val(mem, vlist_ref(mem, args, 1)),
+                                        vlist_ref(mem, args, 2)));
     }
 
-    if (g == g_abs) {
-        return sendv(mem, k, make_double(mem, fabs(double_val(mem, car(mem, args)))));
+    if (g == g_is_procedure) {
+        return sendv(mem, k, is_procedure(mem, args));
+    }
+
+    if (g == g_is_eq) {
+        return sendv(mem, k, is_eq(mem, args));
+    }
+
+    if (g == g_is_string) {
+        return sendv(mem, k, is_string(mem, args));
+    }
+
+    if (g == g_transfer) {
+        return transfer(mem, args);
     }
 
     if (symbol_equals(mem, defn, "print")) {
@@ -1007,22 +927,18 @@ uint64_t global_lambda(memory *mem,
         return sendv(mem, k, write_state(mem, args));
     }
 
-    if (symbol_equals(mem, defn, "string?")) {
-        return sendv(mem, k, is_string(mem, args));
-    }
-
     if (symbol_equals(mem, defn, "set-gc-callback!")) {
-        gc_callback = list_ref(mem, args, 0);
+        gc_callback = vlist_ref(mem, args, 0);
         gc_callback_set = true;
         return sendv(mem, k, mem->nil);
     }
 
     if (symbol_equals(mem, defn, "save")) {
-        return sendv(mem, k, save(mem, car(mem, args)));
+        return sendv(mem, k, save(mem, vector_ref(mem, args, 0)));
     }
 
     if (symbol_equals(mem, defn, "restore")) {
-        return sendv(mem, k, restore(mem, car(mem, args)));
+        return sendv(mem, k, restore(mem, vector_ref(mem, args, 0)));
     }
 
     if (symbol_equals(mem, defn, "getpid")) {
@@ -1033,7 +949,7 @@ uint64_t global_lambda(memory *mem,
         return sendv(mem, k, cf_test(mem, args));
     }
     if (symbol_equals(mem, defn, "cf-test-aux")) {
-        return sendv(mem, k, cf_test_aux(mem, list_ref(mem, form_args, 1), args));
+        return sendv(mem, k, cf_test_aux(mem, vlist_ref(mem, form_args, 1), args));
     }
 
     xdisplay(mem, defn, stderr, false); fprintf(stderr, " ");
@@ -1044,154 +960,154 @@ uint64_t global_lambda(memory *mem,
 uint64_t if0(memory *mem,
              uint64_t form_args,
              uint64_t args) {
-    uint64_t scan0 = list_ref(mem, form_args, 0);
-    uint64_t scan1 = list_ref(mem, form_args, 1);
-    uint64_t scan2 = list_ref(mem, form_args, 2);
-    uint64_t k = list_ref(mem, args, 0);
-    uint64_t env = list_ref(mem, args, 1);
+    uint64_t scan0 = vlist_ref(mem, form_args, 0);
+    uint64_t scan1 = vlist_ref(mem, form_args, 1);
+    uint64_t scan2 = vlist_ref(mem, form_args, 2);
+    uint64_t k = vlist_ref(mem, args, 0);
+    uint64_t env = vlist_ref(mem, args, 1);
     return send(mem, scan0,
-        cons(mem, make_form(mem, if1_form,
-                            cons(mem, k,
-                                 cons(mem, env, cons(mem, scan1, cons(mem, scan2, mem->nil))))),
-             cons(mem, env, mem->nil)));
+        vc(mem, make_form(mem, if1_form,
+                          vc(mem, k,
+                             vc(mem, env, vc(mem, scan1, vc(mem, scan2, mem->nil))))),
+           vc(mem, env, mem->nil)));
 }
 
 uint64_t if1(memory *mem,
              uint64_t form_args,
              uint64_t args) {
-    uint64_t k = list_ref(mem, form_args, 0);
-    uint64_t env = list_ref(mem, form_args, 1);
-    uint64_t scan1 = list_ref(mem, form_args, 2);
-    uint64_t scan2 = list_ref(mem, form_args, 3);
-    bool v = boolean_val(mem, list_ref(mem, args, 0));
-    return send(mem, v ? scan1 : scan2, cons(mem, k, cons(mem, env, mem->nil)));
+    uint64_t k = vlist_ref(mem, form_args, 0);
+    uint64_t env = vlist_ref(mem, form_args, 1);
+    uint64_t scan1 = vlist_ref(mem, form_args, 2);
+    uint64_t scan2 = vlist_ref(mem, form_args, 3);
+    bool v = boolean_val(mem, vlist_ref(mem, args, 0));
+    return send(mem, v ? scan1 : scan2, vc(mem, k, vc(mem, env, mem->nil)));
 }
 
 uint64_t sclis0(memory *mem,
                 uint64_t form_args,
                 uint64_t args) {
-    uint64_t first = list_ref(mem, form_args, 0);
-    uint64_t rest = list_ref(mem, form_args, 1);
-    uint64_t k = list_ref(mem, args, 0);
-    uint64_t env = list_ref(mem, args, 1);
+    uint64_t first = vlist_ref(mem, form_args, 0);
+    uint64_t rest = vlist_ref(mem, form_args, 1);
+    uint64_t k = vlist_ref(mem, args, 0);
+    uint64_t env = vlist_ref(mem, args, 1);
     return send(mem, first,
-        cons(mem, make_form(mem, sclis1_form,
-                            cons(mem, k, cons(mem, env, cons(mem, rest, mem->nil)))),
-             cons(mem, env, mem->nil)));
+        vc(mem, make_form(mem, sclis1_form,
+                          vc(mem, k, vc(mem, env, vc(mem, rest, mem->nil)))),
+           vc(mem, env, mem->nil)));
 }
 
 uint64_t sclis1(memory *mem,
                 uint64_t form_args,
                 uint64_t args) {
-    uint64_t k = list_ref(mem, form_args, 0);
-    uint64_t env = list_ref(mem, form_args, 1);
-    uint64_t rest = list_ref(mem, form_args, 2);
-    uint64_t v = list_ref(mem, args, 0);
+    uint64_t k = vlist_ref(mem, form_args, 0);
+    uint64_t env = vlist_ref(mem, form_args, 1);
+    uint64_t rest = vlist_ref(mem, form_args, 2);
+    uint64_t v = vlist_ref(mem, args, 0);
     return send(mem, rest,
-        cons(mem, make_form(mem, sclis2_form, cons(mem, k, cons(mem, v, mem->nil))),
-             cons(mem, env, mem->nil)));
+        vc(mem, make_form(mem, sclis2_form, vc(mem, k, vc(mem, v, mem->nil))),
+           vc(mem, env, mem->nil)));
 }
 
 uint64_t sclis2(memory *mem,
                 uint64_t form_args,
                 uint64_t args) {
-    uint64_t k = list_ref(mem, form_args, 0);
-    uint64_t v = list_ref(mem, form_args, 1);
-    uint64_t w = list_ref(mem, args, 0);
-    return sendv(mem, k, cons(mem, v, w));
+    uint64_t k = vlist_ref(mem, form_args, 0);
+    uint64_t v = vlist_ref(mem, form_args, 1);
+    uint64_t w = vlist_ref(mem, args, 0);
+    return sendv(mem, k, vc(mem, v, w));
 }
 
 uint64_t scseq0(memory *mem,
                 uint64_t form_args,
                 uint64_t args) {
-    uint64_t first = list_ref(mem, form_args, 0);
-    uint64_t rest = list_ref(mem, form_args, 1);
-    uint64_t k = list_ref(mem, args, 0);
-    uint64_t env = list_ref(mem, args, 1);
+    uint64_t first = vlist_ref(mem, form_args, 0);
+    uint64_t rest = vlist_ref(mem, form_args, 1);
+    uint64_t k = vlist_ref(mem, args, 0);
+    uint64_t env = vlist_ref(mem, args, 1);
     return send(mem, first,
-        cons(mem, make_form(mem, scseq1_form,
-                            cons(mem, k, cons(mem, env, cons(mem, rest, mem->nil)))),
-             cons(mem, env, mem->nil)));
+        vc(mem, make_form(mem, scseq1_form,
+                          vc(mem, k, vc(mem, env, vc(mem, rest, mem->nil)))),
+           vc(mem, env, mem->nil)));
 }
 
 uint64_t scseq1(memory *mem,
                 uint64_t form_args) {
-    uint64_t k = list_ref(mem, form_args, 0);
-    uint64_t env = list_ref(mem, form_args, 1);
-    uint64_t rest = list_ref(mem, form_args, 2);
-    return send(mem, rest, cons(mem, k, cons(mem, env, mem->nil)));
+    uint64_t k = vlist_ref(mem, form_args, 0);
+    uint64_t env = vlist_ref(mem, form_args, 1);
+    uint64_t rest = vlist_ref(mem, form_args, 2);
+    return send(mem, rest, vc(mem, k, vc(mem, env, mem->nil)));
 }
 
 uint64_t lambda0(memory *mem,
                  uint64_t form_args,
                  uint64_t args) {
-    uint64_t len = list_ref(mem, form_args, 0);
-    uint64_t scanned = list_ref(mem, form_args, 1);
-    uint64_t k = list_ref(mem, args, 0);
-    uint64_t env = list_ref(mem, args, 1);
+    uint64_t len = vlist_ref(mem, form_args, 0);
+    uint64_t scanned = vlist_ref(mem, form_args, 1);
+    uint64_t k = vlist_ref(mem, args, 0);
+    uint64_t env = vlist_ref(mem, args, 1);
     return sendv(mem, k,
                  make_form(mem, lambda1_form,
-                           cons(mem, len, cons(mem, scanned, cons(mem, env, mem->nil)))));
+                           vc(mem, len, vc(mem, scanned, vc(mem, env, mem->nil)))));
 }
 
 uint64_t lambda1(memory *mem,
                  uint64_t form_args,
                  uint64_t args) {
-    uint64_t len = (uint64_t)double_val(mem, list_ref(mem, form_args, 0));
-    uint64_t scanned = list_ref(mem, form_args, 1);
-    uint64_t env = list_ref(mem, form_args, 2);
+    uint64_t len = (uint64_t)double_val(mem, vlist_ref(mem, form_args, 0));
+    uint64_t scanned = vlist_ref(mem, form_args, 1);
+    uint64_t env = vlist_ref(mem, form_args, 2);
 
     return send(mem, scanned,
-        cons(mem, step_contn_k(mem, args),
-             cons(mem, extend_rtenv(mem, env, len, step_contn_args(mem, args)),
-                  mem->nil)));
+        vc(mem, step_contn_k(mem, args),
+           vc(mem, extend_rtenv(mem, env, len, step_contn_args(mem, args)),
+              mem->nil)));
 }
 
 uint64_t improper_lambda0(memory *mem,
                           uint64_t form_args,
                           uint64_t args) {
-    uint64_t len = list_ref(mem, form_args, 0);
-    uint64_t scanned = list_ref(mem, form_args, 1);
-    uint64_t k = list_ref(mem, args, 0);
-    uint64_t env = list_ref(mem, args, 1);
+    uint64_t len = vlist_ref(mem, form_args, 0);
+    uint64_t scanned = vlist_ref(mem, form_args, 1);
+    uint64_t k = vlist_ref(mem, args, 0);
+    uint64_t env = vlist_ref(mem, args, 1);
     return sendv(mem, k,
                  make_form(mem, improper_lambda1_form,
-                           cons(mem, len, cons(mem, scanned, cons(mem, env, mem->nil)))));
+                           vc(mem, len, vc(mem, scanned, vc(mem, env, mem->nil)))));
 }
 
 uint64_t improper_lambda1(memory *mem,
                           uint64_t form_args,
                           uint64_t args) {
-    uint64_t len = (uint64_t)double_val(mem, list_ref(mem, form_args, 0));
-    uint64_t scanned = list_ref(mem, form_args, 1);
-    uint64_t env = list_ref(mem, form_args, 2);
+    uint64_t len = (uint64_t)double_val(mem, vlist_ref(mem, form_args, 0));
+    uint64_t scanned = vlist_ref(mem, form_args, 1);
+    uint64_t env = vlist_ref(mem, form_args, 2);
 
     return send(mem, scanned,
-        cons(mem, step_contn_k(mem, args),
-             cons(mem, improper_extend_rtenv(mem, env, len, step_contn_args(mem, args)),
-                  mem->nil)));
+        vc(mem, step_contn_k(mem, args),
+           vc(mem, improper_extend_rtenv(mem, env, len, step_contn_args(mem, args)),
+              mem->nil)));
 }
 
 uint64_t letcc0(memory *mem,
                 uint64_t form_args,
                 uint64_t args) {
-    uint64_t scanned = list_ref(mem, form_args, 0); 
-    uint64_t k = list_ref(mem, args, 0);
-    uint64_t env = list_ref(mem, args, 1);
+    uint64_t scanned = vlist_ref(mem, form_args, 0); 
+    uint64_t k = vlist_ref(mem, args, 0);
+    uint64_t env = vlist_ref(mem, args, 1);
     return send(mem, scanned,
-        cons(mem, k,
-             cons(mem, extend_rtenv(mem,
-                                    env,
-                                    1,
-                                    cons(mem, make_form(mem, letcc1_form, cons(mem, k, mem->nil)),
-                                         mem->nil)),
-                  mem->nil)));
+        vc(mem, k,
+           vc(mem, extend_rtenv(mem,
+                                env,
+                                1,
+                                vc(mem, make_form(mem, letcc1_form, vc(mem, k, mem->nil)),
+                                   mem->nil)),
+              mem->nil)));
 }
 
 uint64_t letcc1(memory *mem,
                 uint64_t form_args,
                 uint64_t args) {
-    uint64_t k = list_ref(mem, form_args, 0);
+    uint64_t k = vlist_ref(mem, form_args, 0);
 
     if (mem->bytes[args] == transfer_code) {
         return send(mem, k, transfer_args(mem, args));
@@ -1203,53 +1119,53 @@ uint64_t letcc1(memory *mem,
 uint64_t define0(memory *mem,
                  uint64_t form_args,
                  uint64_t args) {
-    uint64_t i = list_ref(mem, form_args, 0);
-    uint64_t scanned = list_ref(mem, form_args, 1);
-    uint64_t k = list_ref(mem, args, 0);
-    uint64_t env = list_ref(mem, args, 1);
+    uint64_t i = vlist_ref(mem, form_args, 0);
+    uint64_t scanned = vlist_ref(mem, form_args, 1);
+    uint64_t k = vlist_ref(mem, args, 0);
+    uint64_t env = vlist_ref(mem, args, 1);
     return send(mem, scanned,
-        cons(mem, make_form(mem, define1_form,
-                            cons(mem, k, cons(mem, env, cons(mem, i, mem->nil)))),
-             cons(mem, env, mem->nil)));
+        vc(mem, make_form(mem, define1_form,
+                          vc(mem, k, vc(mem, env, vc(mem, i, mem->nil)))),
+           vc(mem, env, mem->nil)));
 }
 
 uint64_t define1(memory *mem,
                  uint64_t form_args,
                  uint64_t args) {
-    uint64_t k = list_ref(mem, form_args, 0);
-    uint64_t env = list_ref(mem, form_args, 1);
-    uint64_t i = list_ref(mem, form_args, 2);
-    uint64_t v = list_ref(mem, args, 0);
+    uint64_t k = vlist_ref(mem, form_args, 0);
+    uint64_t env = vlist_ref(mem, form_args, 1);
+    uint64_t i = vlist_ref(mem, form_args, 2);
+    uint64_t v = vlist_ref(mem, args, 0);
     return sendv(mem, k, rtenv_setvar(mem, i, v, env));
 }
 
 uint64_t application0(memory *mem,
                       uint64_t form_args,
                       uint64_t args) {
-    uint64_t scanned = list_ref(mem, form_args, 0);
-    uint64_t k = list_ref(mem, args, 0);
-    uint64_t env = list_ref(mem, args,  1);
+    uint64_t scanned = vlist_ref(mem, form_args, 0);
+    uint64_t k = vlist_ref(mem, args, 0);
+    uint64_t env = vlist_ref(mem, args,  1);
     return send(mem, scanned,
-        cons(mem, make_form(mem, application1_form,
-                            cons(mem, k, cons(mem, env, mem->nil))),
-             cons(mem, env, mem->nil)));
+        vc(mem, make_form(mem, application1_form,
+                          vc(mem, k, vc(mem, env, mem->nil))),
+           vc(mem, env, mem->nil)));
 }
 
 uint64_t application1(memory *mem,
                       uint64_t form_args,
                       uint64_t args) {
-    uint64_t k = list_ref(mem, form_args, 0);
-    uint64_t env = list_ref(mem, form_args, 1);
-    uint64_t v = list_ref(mem, args, 0);
-    return applyx(mem, k, env, car(mem, v), cdr(mem, v));
+    uint64_t k = vlist_ref(mem, form_args, 0);
+    uint64_t env = vlist_ref(mem, form_args, 1);
+    uint64_t v = vlist_ref(mem, args, 0);
+    return applyx(mem, k, env, vector_ref(mem, v, 0), vector_ref(mem, v, 1));
 }
 
 uint64_t evalx_initial(memory *mem,
                        uint64_t form_args) {
-    uint64_t k = list_ref(mem, form_args, 0);
-    uint64_t env = list_ref(mem, form_args, 1);
-    uint64_t scanned = list_ref(mem, form_args, 2);
-    return send(mem, scanned, cons(mem, k, cons(mem, env, mem->nil)));
+    uint64_t k = vlist_ref(mem, form_args, 0);
+    uint64_t env = vlist_ref(mem, form_args, 1);
+    uint64_t scanned = vlist_ref(mem, form_args, 2);
+    return send(mem, scanned, vc(mem, k, vc(mem, env, mem->nil)));
 }
 
 uint64_t handle_form(memory *mem,
@@ -1336,7 +1252,7 @@ uint64_t handle_form(memory *mem,
 uint64_t handle_unmemoized(memory *mem, uint64_t state, uint64_t args) {
     assert(mem->bytes[state] == unmemoized_code);
     uint64_t exp = vector_ref(mem, *(uint64_t*)&mem->bytes[state + 1], 0);
-    return handle_form(mem, double_val(mem, car(mem, exp)), cdr(mem, exp), args);
+    return handle_form(mem, double_val(mem, vector_ref(mem, exp, 0)), vector_ref(mem, exp, 1), args);
 }
 
 uint64_t run(memory *mem, uint64_t state);
@@ -1344,7 +1260,7 @@ uint64_t run(memory *mem, uint64_t state);
 uint64_t maybe_gc(memory *mem, uint64_t state) {
     if (mem->size > mem->gc_threshold && !calling_gc_callback) {
         if (gc_callback_set) {
-            state = cons(mem, state, gc_callback);
+            state = vc(mem, state, gc_callback);
         }
         memory dest = {
             mem->capacity,
@@ -1363,15 +1279,15 @@ uint64_t maybe_gc(memory *mem, uint64_t state) {
         free(mem->bytes);
         *mem = dest;
         if (gc_callback_set) {
-            state = car(mem, 0);
-            gc_callback = cdr(mem, 0);
+            state = vector_ref(mem, 0, 0);
+            gc_callback = vector_ref(mem, 0, 1);
             calling_gc_callback = true;
             uint64_t r = run(mem, applyx(mem,
                make_form(mem, global_lambda_form,
-                         cons(mem, make_symbol(mem, "result"), mem->nil)),
+                         vc(mem, make_double(mem, g_result), mem->nil)),
                make_global_rtenv(mem),
                gc_callback,
-               cons(mem, make_double(mem, mem->size), mem->nil)));
+               vc(mem, make_double(mem, mem->size), mem->nil)));
             calling_gc_callback = false;
             assert((mem->bytes[r] != boolean_code) || boolean_val(mem, r));
         } else {
@@ -1382,7 +1298,7 @@ uint64_t maybe_gc(memory *mem, uint64_t state) {
 }
 
 uint64_t step(memory *mem, uint64_t state) {
-    return handle_unmemoized(mem, car(mem, state), cdr(mem, state));
+    return handle_unmemoized(mem, vector_ref(mem, state, 0), vector_ref(mem, state, 1));
 }
 
 uint64_t run(memory *mem, uint64_t state) {
@@ -1396,7 +1312,7 @@ uint64_t start(memory *mem, uint64_t state) {
     if (mem->bytes[state] == unmemoized_code) {
         return run(mem, applyx(mem,
             make_form(mem, global_lambda_form,
-                      cons(mem, make_symbol(mem, "result"), mem->nil)),
+                      vc(mem, make_double(mem, g_result), mem->nil)),
             make_global_rtenv(mem),
             state,
             mem->nil));

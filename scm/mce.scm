@@ -140,14 +140,6 @@
 (define (applyvl f vl)
     (apply f (vlist->list vl)))
 
-(define (vlist->vector len vl)
-    (let ((v (make-vector len '())))
-        (let loop ((i 0) (vl vl))
-            (if (and (< i len) (not (null? vl)))
-                (begin (vector-set! v i (vector-ref vl 0))
-                       (loop (+ i 1) (vector-ref vl 1)))))
-        v))
-
 (define (extend-rtenv env len values)
     (vector (list->vector values) env))
 
@@ -639,7 +631,7 @@
 (table-set! global-table 'null? null?)
 (table-set! global-table 'string? string?)
 (table-set! global-table 'string=? string=?)
-(table-set! global-table 'vector vector)
+(table-set! global-table 'make-vector make-vector)
 (table-set! global-table 'vector? vector?)
 (table-set! global-table 'vector-length vector-length)
 (table-set! global-table 'vector-ref vector-ref)
@@ -665,7 +657,7 @@
     *
     /
     =
-    '() ;abs - not implemted
+    abs
 
     ; we're keeping the empty list in core
     ; note that core type predicates could be moved into lang but
@@ -675,7 +667,7 @@
     null?
 
     ; we're keeping vectors in core
-    vector
+    make-vector
     vector?
     vector-length
     vector-ref

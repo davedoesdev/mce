@@ -259,8 +259,8 @@ function is_string(exp) {
     return typeof exp === 'string';
 }
 
-function vector(...args) {
-    return args;
+function make_vector(n) {
+    return new Array(n).fill(null);
 }
 
 function is_vector(exp) {
@@ -371,7 +371,7 @@ const core_globals = [
         is_number_equal,
         null,
         is_null,
-        vector,
+        make_vector,
         is_vector,
         vector_length,
         vector_ref,

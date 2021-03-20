@@ -283,7 +283,27 @@
 
 (toplevel (set-cdr! v y) (vector-set! v 1 y))
 
-(toplevel (cons x y) (vector x y))
+(toplevel (length l)
+    (let loop ((i 0) (l l))
+        (if (null? l)
+            i
+            (loop (+ i 1) (cdr l)))))
+
+(toplevel (vector . els)
+    (let* ((len (length els))
+           (v (make-vector len)))
+        (let loop ((i 0) (els els))
+            (if (= i len)
+                v
+                (begin (vector-set! v i (car els))
+                       (loop (+ i 1) (cdr els)))))))
+
+(toplevel (cons x y)
+;(vector x y))
+    (let ((v (make-vector 2)))
+        (vector-set! v 0 x)
+        (vector-set! v 1 y)
+        v))
 
 (toplevel (cons* . args)
     (if (null? (cdr args))
