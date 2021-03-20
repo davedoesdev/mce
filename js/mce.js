@@ -837,20 +837,20 @@ function deserialize(exp) {
 }
 
 const null_code    = 'a';
-const boolean_code = 'b';
-const number_code  = 'c';
-const char_code    = 'd';
-const string_code  = 'e';
-const symbol_code  = 'f';
-const vector_code  = 'g';
+const true_code    = 'b';
+const false_code   = 'c';
+const number_code  = 'd';
+const char_code    = 'e';
+const string_code  = 'f';
+const symbol_code  = 'g';
+const vector_code  = 'h';
 
 function pickle_aux(exp) {
     const j = [];
     if (exp === null) {
         j.push(null_code);
     } else if (typeof exp === 'boolean') {
-        j.push(boolean_code);
-        j.push(exp ? 't' : 'f');
+        j.push(exp ? true_code : false_code);
     } else if (typeof exp === 'number') {
         j.push(number_code);
         j.push(exp);
@@ -883,8 +883,10 @@ function unpickle_aux(exp) {
     switch (exp[0]) {
     case null_code:
         return null;
-    case boolean_code:
-        return exp[1] === "t";
+    case true_code:
+        return true;
+    case false_code:
+        return false;
     case number_code:
         return exp[1];
     case char_code:

@@ -17,12 +17,13 @@
 #define MEBIBYTES                   (1024 * 1024)
 
 #define null_code                   'a'
-#define boolean_code                'b'
-#define number_code                 'c'
-#define char_code                   'd'
-#define string_code                 'e'
-#define symbol_code                 'f'
-#define vector_code                 'g'
+#define true_code                   'b'
+#define false_code                  'c'
+#define number_code                 'd'
+#define char_code                   'e'
+#define string_code                 'f'
+#define symbol_code                 'g'
+#define vector_code                 'h'
 
 #define unmemoized_code             '0'
 #define result_code                 '1'
@@ -119,7 +120,10 @@ uint64_t gc_aux(memory *src, uint64_t state, memory *dest) {
             dest->nil = dest->size - 1;
             break;
 
-        case boolean_code:
+        case true_code:
+        case false_code:
+            break;
+
         case char_code:
             dest->bytes[dest->size++] = src->bytes[state + 1];
             break;
@@ -271,14 +275,14 @@ uint64_t make_double(memory *mem, double v) {
 }
 
 bool boolean_val(memory *mem, uint64_t state) {
-    assert(mem->bytes[state] == boolean_code);
-    return mem->bytes[state + 1] == 1;
+    unsigned char code = mem->bytes[state];
+    assert(code == true_code || code == false_code);
+    return code == true_code;
 }
 
 uint64_t make_boolean(memory *mem, bool v) {
-    uint64_t state = allocate(mem, 1 + 1);
-    mem->bytes[state] = boolean_code;
-    mem->bytes[state + 1] = v ? 1 : 0;
+    uint64_t state = allocate(mem, 1);
+    mem->bytes[state] = v ? true_code : false_code;
     return state;
 }
 
@@ -550,20 +554,12 @@ uint64_t is_eq(memory *mem, uint64_t args) {
     unsigned char x_type = mem->bytes[x];
     unsigned char y_type = mem->bytes[y];
 
-    if (x_type == null_code) {
-        return make_boolean(mem, y_type == null_code);
-    }
-
-    if (y_type == null_code) {
-        return make_boolean(mem, false);
-    }
-
     if (x_type != y_type) {
         return make_boolean(mem, false);
     }
 
-    if (x_type == boolean_code) {
-        return make_boolean(mem, boolean_val(mem, x) == boolean_val(mem, y));
+    if ((x_type == null_code) || (x_type == true_code) || (x_type == false_code)) {
+        return make_boolean(mem, true);
     }
 
     if (x_type == char_code) {
@@ -616,8 +612,12 @@ uint64_t xdisplay(memory *mem,
             fprintf(out, "()");
             break;
 
-        case boolean_code:
-            fprintf(out, mem->bytes[exp + 1] == 1 ? "#t" : "#f");
+        case true_code:
+            fprintf(out, "#t");
+            break;
+
+        case false_code:
+            fprintf(out, "#f");
             break;
 
         case number_code:
@@ -1289,7 +1289,7 @@ uint64_t maybe_gc(memory *mem, uint64_t state) {
                gc_callback,
                vc(mem, make_double(mem, mem->size), mem->nil)));
             calling_gc_callback = false;
-            assert((mem->bytes[r] != boolean_code) || boolean_val(mem, r));
+            assert(mem->bytes[r] != false_code);
         } else {
             state = 0;
         }

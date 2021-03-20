@@ -11,12 +11,13 @@ using nlohmann::json;
 namespace mce {
 
 const char null_code       = 'a';
-const char boolean_code    = 'b';
-const char number_code     = 'c';
-const char char_code       = 'd';
-const char string_code     = 'e';
-const char symbol_code     = 'f';
-const char vector_code     = 'g';
+const char true_code       = 'b';
+const char false_code      = 'c';
+const char number_code     = 'd';
+const char char_code       = 'e';
+const char string_code     = 'f';
+const char symbol_code     = 'g';
+const char vector_code     = 'h';
 
 const char unmemoized_code = '0';
 const char result_code     = '1';
@@ -1500,8 +1501,7 @@ json pickle_aux(boxed exp) {
     if (exp->empty()) {
         j.push_back(std::string(1, null_code));
     } else if (exp->contains<bool>()) {
-        j.push_back(std::string(1, boolean_code));
-        j.push_back(exp->cast<bool>() ? "t" : "f");
+        j.push_back(std::string(1, exp->cast<bool>() ? true_code : false_code));
     } else if (exp->contains<double>()) {
         j.push_back(std::string(1, number_code));
         j.push_back(exp->cast<double>());
@@ -1533,8 +1533,10 @@ std::string pickle(boxed exp) {
 
 boxed unpickle_aux(const json& j, std::shared_ptr<Runtime> runtime) {
     switch (j[0].get<std::string>()[0]) {
-    case boolean_code:
-        return box<bool>(j[1].get<std::string>() == "t", runtime);
+    case true_code:
+        return box<bool>(true, runtime);
+    case false_code:
+        return box<bool>(false, runtime);
     case number_code:
         return box<double>(j[1].get<double>(), runtime);
     case char_code:
@@ -1612,8 +1614,7 @@ void bpickle(boxed exp,
     if (exp->empty()) {
         v.push_back(null_code);
     } else if (exp->contains<bool>()) {
-        v.push_back(boolean_code);
-        v.push_back(exp->cast<bool>() ? 1 : 0);
+        v.push_back(exp->cast<bool>() ? true_code : false_code);
     } else if (exp->contains<double>()) {
         v.push_back(number_code);
         bpickle_aux(exp->cast<double>(), v);
@@ -1740,8 +1741,11 @@ boxed bunpickle(const unsigned char *s,
         case null_code:
             return box(runtime);
 
-        case boolean_code:
-            return box<bool>(s[i + 1] == 1, runtime);
+        case true_code:
+            return box<bool>(true, runtime);
+
+        case false_code:
+            return box<bool>(false, runtime);
 
         case number_code:
             return box<double>(*(double*)&s[i + 1], runtime);
