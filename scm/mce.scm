@@ -153,11 +153,17 @@
                            (loop (+ i 1) (cdr values))))))
         (vector v env)))
 
+(define (mark type)
+    (string-append marker-code "MCE-" (string-upcase (symbol->string type))))
+
+(define (marked? s)
+    (substring-at? s (string-append marker-code "MCE-") 0))
+
 (define (make-step-contn k env args)
-    (cons 'MCE-STEP-CONTN (cons k (cons env args))))
+    (cons (mark 'step-contn) (cons k (cons env args))))
 
 (define (step-contn? exp)
-    (and (pair? exp) (equal? (car exp) 'MCE-STEP-CONTN)))
+    (and (pair? exp) (equal? (car exp) (mark 'step-contn))))
 
 (define (step-contn-k exp)
     (cadr exp))
@@ -177,10 +183,10 @@
 (define (make-global-rtenv) (vector '#() '()))
 
 (define (yield-defn? args)
-    (and (not (null? args)) (equal? (car args) 'MCE-YIELD-DEFINITION)))
+    (and (not (null? args)) (equal? (car args) (mark 'yield-definition))))
 
 (define (get-procedure-defn proc)
-    (apply proc '(MCE-YIELD-DEFINITION)))
+    (apply proc (list (mark 'yield-definition))))
 
 (define (memoize-lambda proc defn)
     (lambda args
@@ -447,7 +453,8 @@
 (define (scan exp global-ctenv)
     (let* ((toplevels (car exp))
            (fixups (list '()))
-           (r (scan-aux (cadr exp) global-ctenv fixups)))
+           (r (scan-aux (cadr exp) global-ctenv fixups))
+           (f (lambda args (apply r args))))
         (let loop ((fixups (car fixups)))
             (if (not (null? fixups))
                 (let* ((fixup (car fixups))
@@ -457,26 +464,34 @@
                             (if (not toplevel)
                                 (error-lookup-not-found name))
                             (let* ((i (putin-ctenv! global-ctenv name))
-                                   (tlexp (list toplevels (cadr toplevel)))
-                                   (scanned (scan tlexp global-ctenv))
+                                   (fixups2 (list '()))
+                                   (initialize? (equal? (caadr toplevel) 'initialize))
+                                   (scanned (scan-aux (if initialize?
+                                                          (cadadr toplevel)
+                                                          (cadr toplevel))
+                                                      global-ctenv
+                                                      fixups2))
                                    (form1 (make-form define0 i scanned))
-                                   (form2 (make-form scseq0 form1 r)))
+                                   (form2 (make-form scseq0 form1 (if initialize? r f))))
                                 (if (symbol? (fixup))
                                     (error-lookup-not-found name))
-                                (set! r form2))))
+                                (set-cdr! fixups (append (cdr fixups) (car fixups2)))
+                                (if initialize?
+                                    (set! r form2)
+                                    (set! f form2)))))
                     (loop (cdr fixups)))))
-        r))
+        f))
 
 (define (step state)
     (applyvl (vector-ref state 0) (vector-ref state 1)))
 
 (define (result v)
-    (vector 'MCE-RESULT v))
+    (vector (mark 'result) v))
 
 (define (result? exp)
     (and (vector? exp)
          (= (vector-length exp) 2)
-         (equal? (vector-ref exp 0) 'MCE-RESULT)))
+         (equal? (vector-ref exp 0) (mark 'result))))
 
 (define (result-val exp)
     (vector-ref exp 1))
@@ -544,10 +559,10 @@
         (lambda args (handle-global-lambda args fn cf))))
 
 (define (transfer k env fn . args)
-    (sendl fn (cons 'MCE-TRANSFER args)))
+    (sendl fn (cons (mark 'transfer) args)))
 
 (define (transfer? exp)
-    (and (pair? exp) (equal? (car exp) 'MCE-TRANSFER)))
+    (and (pair? exp) (equal? (car exp) (mark 'transfer))))
 
 (define (transfer-args exp)
     (cdr exp))
@@ -562,12 +577,18 @@
                 (if err
                     (error-core-global-not-found sym)
                     #f)))
-        (let ((r (table-ref global-table sym)))
-            (if r
-                (ref-value r)
-                (if err
-                    (error-lookup-not-found sym)
-                    #f)))))
+        (begin (if (and (string? sym)
+                        (not (equal? (substring sym 0 1) symbol-code)))
+                   (error-lookup-not-found sym))
+               (let ((r (table-ref global-table
+                                   (if (string? sym)
+                                       (string->symbol (substring sym 1))
+                                       sym))))
+                   (if r
+                       (ref-value r)
+                       (if err
+                           (error-lookup-not-found sym)
+                           #f))))))
 
 (define (vector-index v vec i)
     (if (< i (vector-length vec))
@@ -607,9 +628,28 @@
     (vector-set! vec i v)
     '())
 
+(define (make-binary n)
+    (make-string n #\x00))
+
+(define binary? string?)
+
+(define binary-length string-length)
+
+(define (binary-ref b i)
+    (char->integer (string-ref b (inexact->exact i))))
+
+(define (binary-set! b i v)
+    (string-set! b (inexact->exact i) (integer->char (inexact->exact v))))
+
+(define (output-binary-to-stdout b start end)
+    (display-substring b start end (current-output-port)))
+
+(define (output-binary-to-stderr b start end)
+    (display-substring b start end (current-error-port)))
+
 (table-set! global-table 'result result)
-(table-set! global-table 'print print)
-(table-set! global-table 'eprint eprint)
+(table-set! global-table 'boolean? boolean?)
+(table-set! global-table 'number? number?)
 (table-set! global-table '< <)
 (table-set! global-table '> >)
 (table-set! global-table '+ +)
@@ -618,19 +658,14 @@
 (table-set! global-table '/ /)
 (table-set! global-table 'eq? eq?)
 (table-set! global-table '= =)
-(table-set! global-table 'abs abs)
+(table-set! global-table 'floor floor)
 (table-set! global-table 'procedure? procedure?)
 (table-set! global-table 'save mce-save)
 (table-set! global-table 'restore grestore)
-(table-set! global-table 'write write)
-(table-set! global-table 'write-state write)
-(table-set! global-table 'newline newline)
 (table-set! global-table 'transfer transfer) 
 (table-set! global-table 'apply applyx)
 (table-set! global-table 'getpid getpid)
 (table-set! global-table 'null? null?)
-(table-set! global-table 'string? string?)
-(table-set! global-table 'string=? string=?)
 (table-set! global-table 'make-vector make-vector)
 (table-set! global-table 'vector? vector?)
 (table-set! global-table 'vector-length vector-length)
@@ -640,6 +675,13 @@
 (table-set! global-table 'cf-test cf-test)
 (table-set! global-table 'transfer-test transfer-test)
 (table-set! global-table 'set-gc-callback! (lambda (v) '()))
+(table-set! global-table 'make-binary make-binary)
+(table-set! global-table 'binary? binary?)
+(table-set! global-table 'binary-length binary-length)
+(table-set! global-table 'binary-ref binary-ref)
+(table-set! global-table 'binary-set! binary-set!)
+(table-set! global-table 'output-binary-to-stdout output-binary-to-stdout)
+(table-set! global-table 'output-binary-to-stderr output-binary-to-stderr)
 
 (define core-globals (vector
     ; result needs to be accessible from core for when we run a
@@ -649,7 +691,11 @@
     ; apply is something only core can do
     applyx
 
+    ; we're keeping booleans in core
+    boolean?
+
     ; we're keeping numbers in core
+    number?
     <
     >
     +
@@ -657,7 +703,7 @@
     *
     /
     =
-    abs
+    floor
 
     ; we're keeping the empty list in core
     ; note that core type predicates could be moved into lang but
@@ -676,15 +722,18 @@
     ; we're keeping lambdas in core
     procedure?
 
+    ; we're using byte arrays (strings in Scheme) for everything else
+    make-binary
+    binary?
+    binary-length
+    binary-ref
+    binary-set!
+
     ; ------------------------------
 
     ; eq? will change later when some types are lifted into lang -
     ; we'll probably have a core-eq? for the types we keep in core
     eq?
-
-    ; these should go when we lift strings into lang
-    string?
-    string=?
 
     ; transfer can only be done in core but it might not be useful
     ; enough to keep - maybe make it optional
@@ -732,7 +781,7 @@
 
 (define (unmemoized? v)
     (and (= (vector-length v) 2)
-         (equal? (vector-ref v 0) 'MCE-UNMEMOIZED)))
+         (equal? (vector-ref v 0) (mark 'unmemoized))))
 
 (define (unmemoized-repexp v)
     (vector-ref v 1))
@@ -769,7 +818,7 @@
                (if ref
                    (ref-value ref)
                    (let ((entry (table-set! tab exp (make-vector 2))))
-                       (vector-set! entry 0 'MCE-UNMEMOIZED)
+                       (vector-set! entry 0 (mark 'unmemoized))
                        (vector-set! entry 1 (fn (get-procedure-defn exp)))
                        entry))))
           (else exp)))
@@ -780,11 +829,11 @@
         (fn exp)))
 
 (define (make-serialized n)
-    (vector 'MCE-SERIALIZED n))
+    (vector (mark 'serialized) n))
 
 (define (serialized? v)
     (and (= (vector-length v) 2)
-         (equal? (vector-ref v 0) 'MCE-SERIALIZED)))
+         (equal? (vector-ref v 0) (mark 'serialized))))
 
 (define (serialized-n v)
     (vector-ref v 1))
@@ -824,14 +873,17 @@
              (fn (lambda (x) (deserialize-aux x tab fn set-entry!))))
         (fn (vector-ref exp 0))))
 
-(define null-code    "a")
-(define true-code    "b")
-(define false-code   "c")
-(define number-code  "d")
-(define char-code    "e")
-(define string-code  "f")
-(define symbol-code  "g")
-(define vector-code  "h")
+(define null-code   "0")
+(define true-code   "1")
+(define false-code  "2")
+(define number-code "3")
+(define vector-code "4")
+; binary codes
+(define marker-code "A")
+; these are only valid when scanning
+(define char-code   "B")
+(define string-code "C")
+(define symbol-code "D")
 
 (define (pickle-aux exp #!key (is_scan #f))
    (cond ((null? exp)
@@ -840,22 +892,24 @@
           (list (if exp true-code false-code)))
          ((number? exp)
           (list number-code exp))
-         ((char? exp)
-          (list char-code (string exp)))
-         ((string? exp)
-          (list string-code exp))
-         ((symbol? exp)
-          (list symbol-code (symbol->string exp)))
-         ((and (pair? exp) is_scan)
-          (cons vector-code
-                (cons 2
-                      (list (pickle-aux (car exp) :is_scan is_scan)
-                            (pickle-aux (cdr exp) :is_scan is_scan)))))
          ((vector? exp)
           (cons vector-code
                 (cons (vector-length exp)
                       (map (lambda (v) (pickle-aux v :is_scan is_scan))
                            (vector->list exp)))))
+         ((and (pair? exp) is_scan)
+          (cons vector-code
+                (cons 2
+                      (list (pickle-aux (car exp) :is_scan is_scan)
+                            (pickle-aux (cdr exp) :is_scan is_scan)))))
+         ((and (char? exp) is_scan)
+          (string-append char-code (string exp)))
+         ((and (symbol? exp) is_scan)
+          (string-append symbol-code (symbol->string exp)))
+         ((string? exp)
+          (if (and is_scan (not (marked? exp)))
+              (string-append string-code exp)
+              exp))
          (else
           (error "pickle" "unknown expression" exp))))
 
@@ -865,25 +919,24 @@
         (get-output-string port)))
 
 (define (unpickle-aux exp)
-    (let ((code (car exp)))
-        (cond ((equal? code null-code)
-               '())
-              ((equal? code true-code)
-               #t)
-              ((equal? code false-code)
-               #f)
-              ((equal? code number-code)
-               (cadr exp))
-              ((equal? code char-code)
-               (string-ref (cadr exp) 0))
-              ((equal? code string-code)
-               (cadr exp))
-              ((equal? code symbol-code)
-               (string->symbol (cadr exp)))
-              ((equal? code vector-code)
-               (list->vector (map unpickle-aux (cddr exp))))
-              (else
-               (error "unpickle" "unknown expression" exp)))))
+    (cond ((pair? exp)
+           (let ((code (car exp)))
+               (cond ((equal? code null-code)
+                      '())
+                     ((equal? code true-code)
+                      #t)
+                     ((equal? code false-code)
+                      #f)
+                     ((equal? code number-code)
+                      (cadr exp))
+                     ((equal? code vector-code)
+                      (list->vector (map unpickle-aux (cddr exp))))
+                     (else
+                      (error "unpickle" "unknown expression" exp)))))
+          ((and (string? exp) (string>=? (substring exp 0 1) marker-code))
+           exp)
+          (else
+           (error "unpickle" "unknown expression" exp))))
 
 (define (unpickle s)
     (unpickle-aux (json-read (open-input-string s))))

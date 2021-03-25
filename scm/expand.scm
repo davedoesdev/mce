@@ -267,7 +267,7 @@
     ((toplevel (f . args) body ...)
      (f (lambda args body ...)))
     ((toplevel var val ...)
-     (var (begin val ...)))))
+     (var (initialize (begin val ...))))))
 ) (
 (toplevel (list . args) args)
 
@@ -299,7 +299,7 @@
                        (loop (+ i 1) (cdr els)))))))
 
 (toplevel (cons x y)
-;(vector x y))
+    ;(vector x y))
     (let ((v (make-vector 2)))
         (vector-set! v 0 x)
         (vector-set! v 1 y)
@@ -338,13 +338,95 @@
         l2
         (cons (car l1) (append (cdr l1) l2))))
 
-(toplevel eappend append)
-
 (toplevel (assoc k alist)
     (if (null? alist)
         #f
         (if (equal? (car (car alist)) k)
             (car alist)
             (assoc k (cdr alist)))))
+
+(toplevel (abs x)
+    (if (< x 0) (- x) x))
+
+(toplevel (modulo x y)
+    (let ((d (floor (/ x y))))
+        (- x (* y d))))
+
+(toplevel (char->integer c)
+    (binary-ref c 1))
+
+(toplevel (output-char-to-stdout c)
+    (output-binary-to-stdout c 1 2))
+
+(toplevel char-code (char->integer #\B))
+(toplevel string-code (char->integer #\C))
+
+(toplevel (char? x)
+    (and (binary? x) (= (binary-length x) 2) (= (binary-ref x 0) char-code)))
+
+(toplevel (string? x)
+    (and (binary? x) (> (binary-length x) 1) (= (binary-ref x 0) string-code)))
+
+(toplevel (display x)
+    (cond ((null? x)
+           (output-binary-to-stdout "()" 1 3))
+          ((boolean? x)
+           (output-binary-to-stdout (if x "#t" "#f") 1 3))
+          ((number? x)
+           (if (< x 0)
+               (output-char-to-stdout #\-))
+           (let* ((ax (abs x))
+                  (whole (floor ax))
+                  (p '()))
+               (let loop ((n whole))
+                   (let ((digit (modulo n 10))
+                         (b (make-binary 1)))
+                       (binary-set! b 0 (+ (char->integer #\0) digit))
+                       (set! p (cons b p))
+                       (let ((next (floor (/ n 10))))
+                           (if (= next 0)
+                               (for-each (lambda (b)
+                                             (output-binary-to-stdout b 0 1))
+                                         p)
+                               (loop next)))))
+                (let* ((digit (modulo (floor ax) 10))
+                       (n (- ax (- (floor ax) digit))))
+                    (if (> n digit)
+                        (begin (output-char-to-stdout #\.)
+                               (let loop ((i 0) (f (* n 10)) (zeros 0))
+                                   (let* ((digit (modulo (floor f) 10))
+                                          (n (- f (- (floor f) digit))))
+                                       (if (= digit 0)
+                                           (set! zeros (+ zeros 1))
+                                           (let ((b (make-binary 1)))
+                                               (repeat (lambda () (output-char-to-stdout #\0)) zeros)
+                                               (set! zeros 0)
+                                               (binary-set! b 0 (+ (char->integer #\0) digit))
+                                               (output-binary-to-stdout b 0 1)))
+                                       (if (and (< i 6) (> n digit))
+                                           (loop (+ i 1) (* n 10) zeros)))))))))
+          ((char? x)
+           (output-char-to-stdout x))
+          ((string? x)
+           (output-binary-to-stdout x 1 (binary-length x)))
+;escape for write
+;parentheses for lists? what about improper at end?
+;TODO in the other files
+          ))
+
+(toplevel (newline)
+    (output-char-to-stdout #\newline))
+
+(toplevel (for-each f l)
+    (if (not (null? l))
+        (begin (f (car l)) (for-each f (cdr l)))))
+
+(toplevel (repeat f n)
+    (if (not (= n 0))
+        (begin (f) (repeat f (- n 1)))))
+
+(toplevel (print . args)
+    (for-each display args)
+    (newline))
 ) 
 ,(read))))))

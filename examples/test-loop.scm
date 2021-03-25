@@ -1,4 +1,4 @@
-(let loop ((i 0))
-    (if (< i 10)
+(let loop ((i -20))
+    (if (< i 20)
         (begin (print i)
                (loop (+ i 1)))))
