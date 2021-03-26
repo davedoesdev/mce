@@ -682,6 +682,7 @@
 (table-set! global-table 'binary-set! binary-set!)
 (table-set! global-table 'output-binary-to-stdout output-binary-to-stdout)
 (table-set! global-table 'output-binary-to-stderr output-binary-to-stderr)
+(table-set! global-table 'error error)
 
 (define core-globals (vector
     ; result needs to be accessible from core for when we run a
@@ -728,6 +729,9 @@
     binary-length
     binary-ref
     binary-set!
+
+    ; errors are thrown by runtime
+    error
 
     ; ------------------------------
 

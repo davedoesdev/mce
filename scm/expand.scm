@@ -310,6 +310,11 @@
         (car args)
         (cons (car args) (apply cons* (cdr args)))))
 
+(toplevel (list-ref l i)
+    (if (= i 0)
+        (car l)
+        (list-ref (cdr l) (- i 1))))
+
 (toplevel eqv? eq?)
 
 (toplevel (equal? x y)
@@ -358,8 +363,15 @@
 (toplevel (output-char-to-stdout c)
     (output-binary-to-stdout c 1 2))
 
+(toplevel (output-string-to-stdout s)
+    (output-binary-to-stdout s 1 (binary-length s)))
+
+(toplevel (output-string-to-stderr s)
+    (output-binary-to-stderr s 1 (binary-length s)))
+
 (toplevel char-code (char->integer #\B))
 (toplevel string-code (char->integer #\C))
+(toplevel symbol-code (char->integer #\D))
 
 (toplevel (char? x)
     (and (binary? x) (= (binary-length x) 2) (= (binary-ref x 0) char-code)))
@@ -367,11 +379,26 @@
 (toplevel (string? x)
     (and (binary? x) (> (binary-length x) 1) (= (binary-ref x 0) string-code)))
 
+(toplevel (symbol? x)
+    (and (binary? x) (> (binary-length x) 1) (= (binary-ref x 0) symbol-code)))
+
+(toplevel (binary-copy b . args)
+    (let* ((numargs (length args))
+           (start (if (> numargs 0) (list-ref args 0) 0))
+           (end (if (> numargs 1) (list-ref args 1) (binary-length b)))
+           (len (- end start))
+           (r (make-binary len)))
+        (let loop ((i 0))
+            (if (< i len)
+                (begin (binary-set! r i (binary-ref b (+ start i)))
+                       (loop (+ i 1)))))
+        r))
+
 (toplevel (display x)
     (cond ((null? x)
-           (output-binary-to-stdout "()" 1 3))
+           (output-string-to-stdout "()"))
           ((boolean? x)
-           (output-binary-to-stdout (if x "#t" "#f") 1 3))
+           (output-string-to-stdout (if x "#t" "#f")))
           ((number? x)
            (if (< x 0)
                (output-char-to-stdout #\-))
@@ -407,12 +434,35 @@
                                            (loop (+ i 1) (* n 10) zeros)))))))))
           ((char? x)
            (output-char-to-stdout x))
-          ((string? x)
-           (output-binary-to-stdout x 1 (binary-length x)))
+          ((or (string? x) (symbol? x))
+           (output-string-to-stdout x))
 ;escape for write
-;parentheses for lists? what about improper at end?
 ;TODO in the other files
-          ))
+          ((pair? x)
+           (output-string-to-stdout "(")
+           (let loop ((x x))
+               (display (car x))
+               (let ((y (cdr x)))
+                   (if (pair? y)
+                       (begin (output-string-to-stdout " ")
+                              (loop y))
+                       (if (not (null? y))
+                           (begin (output-string-to-stdout " . ")
+                                  (display y))))))
+           (output-string-to-stdout ")"))
+          ((vector? x)
+           (output-string-to-stdout "#(")
+           (let loop ((i 0))
+               (if (< i (vector-length x))
+                   (begin (if (> i 0)
+                              (output-string-to-stdout " "))
+                          (display (vector-ref x i))
+                          (loop (+ i 1)))))
+           (output-string-to-stdout ")"))
+          ((procedure? x)
+           (output-string-to-stdout "#<procedure>"))
+          (else
+           (error "display" "unknown expression" x))))
 
 (toplevel (newline)
     (output-char-to-stdout #\newline))
