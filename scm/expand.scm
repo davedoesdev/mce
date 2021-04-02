@@ -267,7 +267,18 @@
     ((toplevel (f . args) body ...)
      (f (lambda args body ...)))
     ((toplevel var val ...)
-     (var (initialize (begin val ...))))))
+     (var initialize (begin val ...)))))
+
+(define-syntax toplevel-helper
+  (syntax-rules ()
+    ((toplevel-helper (f params ...) body ...)
+     (f helper (lambda (params ...) body ...)))
+    ((toplevel-helper (f params . rest) body ...)
+     (f helper (lambda (params . rest) body ...)))
+    ((toplevel-helper (f . args) body ...)
+     (f helper (lambda args body ...)))
+    ((toplevel-helper var val ...)
+     (var helper initialize (begin val ...)))))
 ) (
 (toplevel (list . args) args)
 
@@ -357,21 +368,27 @@
     (let ((d (floor (/ x y))))
         (- x (* y d))))
 
+(toplevel (<= x y)
+    (or (< x y) (= x y)))
+
+(toplevel (>= x y)
+    (or (> x y) (= x y)))
+
 (toplevel (char->integer c)
     (binary-ref c 1))
 
-(toplevel char-code (char->integer #\B))
-(toplevel string-code (char->integer #\C))
-(toplevel symbol-code (char->integer #\D))
+(toplevel-helper char-code (char->integer #\B))
+(toplevel-helper string-code (char->integer #\C))
+(toplevel-helper symbol-code (char->integer #\D))
 
 (toplevel (char? x)
     (and (binary? x) (= (binary-length x) 2) (= (binary-ref x 0) char-code)))
 
 (toplevel (string? x)
-    (and (binary? x) (> (binary-length x) 1) (= (binary-ref x 0) string-code)))
+    (and (binary? x) (> (binary-length x) 0) (= (binary-ref x 0) string-code)))
 
 (toplevel (symbol? x)
-    (and (binary? x) (> (binary-length x) 1) (= (binary-ref x 0) symbol-code)))
+    (and (binary? x) (> (binary-length x) 0) (= (binary-ref x 0) symbol-code)))
 
 (toplevel (binary-copy b . args)
     (let* ((numargs (length args))
@@ -395,27 +412,41 @@
 
 (toplevel (current-output-port)
     (lambda (x . args)
-        (cond ((char? x)
-               (output-binary-to-stdout x 1 2))
-              ((string? x)
-               (output-binary-to-stdout x 1 (binary-length x)))
-              ((binary? x)
+        (cond ((and (binary? x) (not (null? args)))
                (apply output-binary-to-stdout (cons x args)))
+              ((char? x)
+               (output-binary-to-stdout x 1 2))
+              ((or (symbol? x) (string? x))
+               (output-binary-to-stdout x 1 (binary-length x)))
               (else
                (error "current-output-port" "unknown expression" x)))))
 
 (toplevel (current-error-port)
     (lambda (x . args)
-        (cond ((char? x)
+        (cond ((and (binary? x) (not (null? args)))
+               (apply output-binary-to-stdout (cons x args)))
+              ((char? x)
                (output-binary-to-stderr x 1 2))
-              ((string? x)
+              ((or (symbol? x) (string? x))
                (output-binary-to-stderr x 1 (binary-length x)))
               ((binary? x)
                (apply output-binary-to-stderr (cons x args)))
               (else
                (error "current-error-port" "unknown expression" x)))))
 
-(toplevel (display-aux x port)
+(toplevel-helper hexchars "0123456789abcdef")
+
+(toplevel-helper (byte->binhex b)
+    (let ((bin (make-binary 2)))
+        (binary-set! bin 1 (binary-ref hexchars (+ 1 (modulo b 16))))
+        (binary-set! bin 0 (binary-ref hexchars (+ 1 (floor (/ b 16)))))
+        bin))
+
+(toplevel-helper (printable? i)
+    (and (>= i (char->integer #\space))
+         (<= i (char->integer #\~))))
+
+(toplevel-helper (display-aux x port is-write)
     (cond ((null? x)
            (port "()"))
           ((boolean? x)
@@ -454,22 +485,64 @@
                                        (if (and (< i 6) (> n digit))
                                            (loop (+ i 1) (* n 10) zeros)))))))))
           ((char? x)
-           (port x))
-          ((or (string? x) (symbol? x))
-           (port x))
-;escape for write
+           (if is-write
+               (let ((c (char->integer x)))
+                   (port "#\\")
+                   (if (printable? c)
+                       (port x)
+                       (begin (port "x" (port (byte->binhex c) 0 2)))))
+               (port x)))
+          ((string? x)
+           (if is-write
+               (let ((len (binary-length x)))
+                   (port #\")
+                   (let loop ((i 1))
+                       (if (< i len)
+                           (let ((c (binary-ref x i)))
+                               (cond ((or (= c (char->integer #\"))
+                                          (= c (char->integer #\\)))
+                                      (port "\\")
+                                      (port x i (+ i 1)))
+                                     ((printable? c)
+                                      (port x i (+ i 1)))
+                                     (else
+                                      (port "#\\x")
+                                      (port (byte->binhex c) 0 2)))
+                               (loop (+ i 1)))))
+                   (port #\"))
+               (port x)))
 ;TODO in the other files
+;equal/eq
+          ((symbol? x)
+           (if is-write
+               (let ((len (binary-length x)))
+                   (port #\|)
+                   (let loop ((i 1))
+                       (if (< i len)
+                           (let ((c (binary-ref x i)))
+                               (cond ((or (= c (char->integer #\|))
+                                          (= c (char->integer #\\)))
+                                      (port "\\")
+                                      (port x i (+ i 1)))
+                                     ((printable? c)
+                                      (port x i (+ i 1)))
+                                     (else
+                                      (port "#\\x")
+                                      (port (byte->binhex c) 0 2)))
+                               (loop (+ i 1)))))
+                   (port #\|))
+               (port x)))
           ((pair? x)
            (port "(")
            (let loop ((x x))
-               (display-aux (car x) port)
+               (display-aux (car x) port is-write)
                (let ((y (cdr x)))
                    (if (pair? y)
                        (begin (port " ")
                               (loop y))
                        (if (not (null? y))
                            (begin (port " . ")
-                                  (display-aux y port))))))
+                                  (display-aux y port is-write))))))
            (port ")"))
           ((vector? x)
            (port "#(")
@@ -477,7 +550,7 @@
                (if (< i (vector-length x))
                    (begin (if (> i 0)
                               (port " "))
-                          (display-aux (vector-ref x i) port)
+                          (display-aux (vector-ref x i) port is-write)
                           (loop (+ i 1)))))
            (port ")"))
           ((procedure? x)
@@ -485,17 +558,17 @@
           (else
            (error "display-aux" "unknown expression" x))))
 
-(toplevel (port-from-args args)
+(toplevel-helper (port-from-args args)
     (if (null? args) (current-output-port) (car args)))
 
 (toplevel (display x . args)
-    (display-aux x (port-from-args args)))
+    (display-aux x (port-from-args args) #f))
 
 (toplevel (newline . args)
     ((port-from-args args) #\newline))
 
-(toplevel (print-aux args port)
-    (for-each (lambda (x) (display-aux x port)) args)
+(toplevel-helper (print-aux args port)
+    (for-each (lambda (x) (display-aux x port #f)) args)
     (newline))
 
 (toplevel (print . args)
@@ -503,5 +576,8 @@
 
 (toplevel (eprint . args)
     (print-aux args (current-error-port)))
+
+(toplevel (write x . args)
+    (display-aux x (port-from-args args) #t))
 ) 
 ,(read))))))
