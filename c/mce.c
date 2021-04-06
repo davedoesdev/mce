@@ -112,7 +112,10 @@ bool calling_gc_callback = false;
 uint64_t gc_aux(memory *src, uint64_t state, memory *dest) {
     uint64_t size = dest->size;
 
+    assert(state < src->size);
     unsigned char code = src->bytes[state];
+
+    assert(dest->size < dest->capacity);
     dest->bytes[dest->size++] = code;
 
     switch (code) {
@@ -125,10 +128,14 @@ uint64_t gc_aux(memory *src, uint64_t state, memory *dest) {
             break;
 
         case char_code:
+            assert(state + 1 < src->size);
+            assert(dest->size < dest->capacity);
             dest->bytes[dest->size++] = src->bytes[state + 1];
             break;
 
         case number_code:
+            assert(state + sizeof(double) < src->size);
+            assert(dest->size + sizeof(double) - 1 < dest->capacity);
             memcpy(&dest->bytes[dest->size], &src->bytes[state + 1], sizeof(double));
             dest->size += sizeof(double);
             break;
@@ -144,13 +151,18 @@ uint64_t gc_aux(memory *src, uint64_t state, memory *dest) {
         }
 
         case vector_code: {
+            assert(state + 8 < src->size);
             uint64_t len = *(uint64_t*)&src->bytes[state + 1];
 
             src->bytes[state] = gc_code;
             *(uint64_t*)&src->bytes[state + 1] = dest->size - 1;
 
+            assert(dest->size + 7 < dest->capacity);
             *(uint64_t*)&dest->bytes[dest->size] = len;
             dest->size += 8;
+
+            assert(state + 8 + len * 8 < src->size);
+            assert(dest->size + len * 8 - 1 < dest->capacity);
 
             uint64_t pos = dest->size;
             dest->size += len * 8;
@@ -166,11 +178,13 @@ uint64_t gc_aux(memory *src, uint64_t state, memory *dest) {
         case result_code:
         case step_contn_code:
         case transfer_code: {
+            assert(state + 8 < src->size);
             uint64_t vec_state = *(uint64_t*)&src->bytes[state + 1];
 
             src->bytes[state] = gc_code;
             *(uint64_t*)&src->bytes[state + 1] = dest->size - 1;
 
+            assert(dest->size + 7 < dest->capacity);
             uint64_t pos = dest->size;
             dest->size += 8;
 
@@ -179,6 +193,7 @@ uint64_t gc_aux(memory *src, uint64_t state, memory *dest) {
         }
 
         case gc_code:
+            assert(state + 8 < src->size);
             return *(uint64_t*)&src->bytes[state + 1];
 
         default:
@@ -209,19 +224,24 @@ uint64_t make_vector(memory *mem, uint64_t n) {
 }
 
 uint64_t vector_size(memory *mem, uint64_t v) {
+    assert(v + 8 < mem->size);
     assert(mem->bytes[v] == vector_code);
     return *(uint64_t*)&mem->bytes[v + 1];
 }
 
 uint64_t vector_ref(memory *mem, uint64_t v, uint64_t i) {
+    assert(v + 8 < mem->size);
     assert(mem->bytes[v] == vector_code);
     assert(i < *(uint64_t*)&mem->bytes[v + 1]);
+    assert(v + 8 + i * 8 < mem->size);
     return *(uint64_t*)&mem->bytes[v + 9 + i * 8];
 }
 
 uint64_t vector_set(memory *mem, uint64_t v, uint64_t i, uint64_t val) {
+    assert(v + 8 < mem->size);
     assert(mem->bytes[v] == vector_code);
     assert(i < *(uint64_t*)&mem->bytes[v + 1]);
+    assert(v + 8 + i * 8 < mem->size);
     *(uint64_t*)&mem->bytes[v + 9 + i * 8] = val;
     return mem->nil;
 }
@@ -263,6 +283,7 @@ void vlist_set(memory *mem, uint64_t vl, uint64_t i, uint64_t val) {
 }
 
 double double_val(memory *mem, uint64_t state) {
+    assert(state + sizeof(double) < mem->size);
     assert(mem->bytes[state] == number_code);
     return *(double*)&mem->bytes[state + 1];
 }
@@ -275,6 +296,7 @@ uint64_t make_double(memory *mem, double v) {
 }
 
 bool boolean_val(memory *mem, uint64_t state) {
+    assert(state < mem->size);
     unsigned char code = mem->bytes[state];
     assert(code == true_code || code == false_code);
     return code == true_code;
@@ -389,6 +411,7 @@ uint64_t restore(memory *mem, uint64_t s) {
     uint64_t size = string_size(mem, s); 
     unsigned char *bytes = (unsigned char*) malloc(size);
     assert(bytes);
+    assert(s + 8 + size < mem->size);
     memcpy(bytes, &mem->bytes[s + 9], size);
 
     memory src = {
@@ -408,7 +431,8 @@ uint64_t restore(memory *mem, uint64_t s) {
 uint64_t vlist_to_vector(memory *mem, uint64_t vl, uint64_t len) {
     uint64_t v = make_uninitialised_vector(mem, len);
     uint64_t i = 0;
-    while ((mem->bytes[vl] == vector_code) && (i < len)) {
+    while (assert(vl < mem->size),
+           (i < len) && (mem->bytes[vl] == vector_code)) {
         vector_set(mem, v, i++, vector_ref(mem, vl, 0));
         vl = vector_ref(mem, vl, 1);
     }
@@ -432,7 +456,10 @@ uint64_t improper_extend_rtenv(memory *mem,
     uint64_t v = make_uninitialised_vector(mem, len);
     uint64_t i;
 
-    for (i = 0; (i < len) && (mem->bytes[values] != null_code); ++i) {
+    for (i = 0;
+         assert(values < mem->size),
+         (i < len) && (mem->bytes[values] != null_code);
+         ++i) {
         if (i == (len - 1)) {
             vector_set(mem, v, i, values);
         } else {
@@ -461,16 +488,19 @@ uint64_t make_step_contn(memory *mem, uint64_t k, uint64_t env, uint64_t args) {
 }
 
 uint64_t step_contn_k(memory *mem, uint64_t state) {
+    assert(state + 8 < mem->size);
     assert(mem->bytes[state] == step_contn_code);
     return vector_ref(mem, *(uint64_t*)&mem->bytes[state + 1], 0);
 }
 
 uint64_t step_contn_env(memory *mem, uint64_t state) {
+    assert(state + 8 < mem->size);
     assert(mem->bytes[state] == step_contn_code);
     return vector_ref(mem, *(uint64_t*)&mem->bytes[state + 1], 1);
 }
 
 uint64_t step_contn_args(memory *mem, uint64_t state) {
+    assert(state + 8 < mem->size);
     assert(mem->bytes[state] == step_contn_code);
     return vector_ref(mem, *(uint64_t*)&mem->bytes[state + 1], 2);
 }
@@ -486,6 +516,7 @@ uint64_t transfer(memory *mem, uint64_t args) {
 }
 
 uint64_t transfer_args(memory *mem, uint64_t state) {
+    assert(state + 8 < mem->size);
     assert(mem->bytes[state] == transfer_code);
     return vector_ref(mem, *(uint64_t*)&mem->bytes[state + 1], 0);
 }
@@ -504,7 +535,7 @@ uint64_t greater_than(memory *mem, uint64_t args) {
 
 uint64_t plus(memory *mem, uint64_t args) {
     double r = 0;
-    while (mem->bytes[args] == vector_code) {
+    while (assert(args < mem->size), mem->bytes[args] == vector_code) {
         r += double_val(mem, vector_ref(mem, args, 0));
         args = vector_ref(mem, args, 1);
     }
@@ -513,18 +544,23 @@ uint64_t plus(memory *mem, uint64_t args) {
 
 uint64_t minus(memory *mem, uint64_t args) {
     double n = double_val(mem, vector_ref(mem, args, 0));
-    if (mem->bytes[vector_ref(mem, args, 1)] != vector_code) {
+    args = vector_ref(mem, args, 1);
+    assert(args < mem->size);
+    if (mem->bytes[args] != vector_code) {
         return make_double(mem, -n);
     }
-    while (mem->bytes[args = vector_ref(mem, args, 1)] == vector_code) {
+    do {
         n -= double_val(mem, vector_ref(mem, args, 0));
-    }
+        args = vector_ref(mem, args, 1);
+        assert(args < mem->size);
+    } while (mem->bytes[args] == vector_code);
     return make_double(mem, n);
 }
 
 uint64_t multiply(memory *mem, uint64_t args) {
     double r = 1;
-    while (mem->bytes[args] == vector_code) {
+    while (assert(args < mem->size),
+           mem->bytes[args] == vector_code) {
         r *= double_val(mem, vector_ref(mem, args, 0));
         args = vector_ref(mem, args, 1);
     }
@@ -533,23 +569,31 @@ uint64_t multiply(memory *mem, uint64_t args) {
 
 uint64_t divide(memory *mem, uint64_t args) {
     double n = double_val(mem, vector_ref(mem, args, 0));
-    if (mem->bytes[vector_ref(mem, args, 1)] != vector_code) {
+    args = vector_ref(mem, args, 1);
+    assert(args < mem->size);
+    if (mem->bytes[args] != vector_code) {
         return make_double(mem, 1 / n);
     }
-    while (mem->bytes[args = vector_ref(mem, args, 1)] == vector_code) {
+    do {
         n /= double_val(mem, vector_ref(mem, args, 0));
-    }
+        args = vector_ref(mem, args, 1);
+        assert(args < mem->size);
+    } while (mem->bytes[args] == vector_code);
     return make_double(mem, n);
 }
 
 uint64_t is_null(memory *mem, uint64_t args) {
-    return make_boolean(mem,
-        mem->bytes[vector_ref(mem, args, 0)] == null_code);
+    uint64_t arg = vector_ref(mem, args, 0);
+    assert(arg < mem->size);
+    return make_boolean(mem, mem->bytes[arg] == null_code);
 }
 
 uint64_t is_eq(memory *mem, uint64_t args) {
     uint64_t x = vlist_ref(mem, args, 0);
     uint64_t y = vlist_ref(mem, args, 1);
+
+    assert(x < mem->size);
+    assert(y < mem->size);
 
     unsigned char x_type = mem->bytes[x];
     unsigned char y_type = mem->bytes[y];
@@ -582,18 +626,21 @@ uint64_t is_eq(memory *mem, uint64_t args) {
 }
 
 uint64_t is_string(memory *mem, uint64_t args) {
-    return make_boolean(mem,
-        mem->bytes[vector_ref(mem, args, 0)] == string_code);
+    uint64_t arg = vector_ref(mem, args, 0);
+    assert(arg < mem->size);
+    return make_boolean(mem, mem->bytes[arg] == string_code);
 }
 
 uint64_t is_vector(memory *mem, uint64_t args) {
-    return make_boolean(mem,
-        mem->bytes[vector_ref(mem, args, 0)] == vector_code);
+    uint64_t arg = vector_ref(mem, args, 0);
+    assert(arg < mem->size);
+    return make_boolean(mem, mem->bytes[arg] == vector_code);
 }
 
 uint64_t is_procedure(memory *mem, uint64_t args) {
-    return make_boolean(mem,
-        mem->bytes[vector_ref(mem, args, 0)] == unmemoized_code);
+    uint64_t arg = vector_ref(mem, args, 0);
+    assert(arg < mem->size);
+    return make_boolean(mem, mem->bytes[arg] == unmemoized_code);
 }
 
 uint64_t is_number_equal(memory *mem, uint64_t args) {
@@ -705,8 +752,11 @@ uint64_t gwrite(memory *mem, uint64_t args) {
 
 uint64_t write_state(memory *mem, uint64_t args) {
     uint64_t s = vector_ref(mem, args, 0);
+    assert(s + 8 < mem->size);
     assert(mem->bytes[s] == string_code);
-    fwrite(&mem->bytes[s + 1], 1, *(uint64_t*)&mem->bytes[s + 1] + 8, stdout);
+    uint64_t len = *(uint64_t*)&mem->bytes[s + 1];
+    assert(s + 8 + len < mem->size);
+    fwrite(&mem->bytes[s + 1], 1, 8 + len, stdout);
     return s;
 }
 
@@ -799,8 +849,10 @@ uint64_t global_lambda(memory *mem,
                        uint64_t form_args,
                        uint64_t args) {
     uint64_t defn = vlist_ref(mem, form_args, 0);
+    assert(defn < mem->size);
     double g = mem->bytes[defn] == number_code ? double_val(mem, defn) : -1;
 
+    assert(args < mem->size);
     if (mem->bytes[args] == transfer_code) {
         args = transfer_args(mem, args);
 
@@ -1109,6 +1161,7 @@ uint64_t letcc1(memory *mem,
                 uint64_t args) {
     uint64_t k = vlist_ref(mem, form_args, 0);
 
+    assert(args < mem->size);
     if (mem->bytes[args] == transfer_code) {
         return send(mem, k, transfer_args(mem, args));
     }
@@ -1250,6 +1303,7 @@ uint64_t handle_form(memory *mem,
 }
 
 uint64_t handle_unmemoized(memory *mem, uint64_t state, uint64_t args) {
+    assert(state + 8 < mem->size);
     assert(mem->bytes[state] == unmemoized_code);
     uint64_t exp = vector_ref(mem, *(uint64_t*)&mem->bytes[state + 1], 0);
     return handle_form(mem, double_val(mem, vector_ref(mem, exp, 0)), vector_ref(mem, exp, 1), args);
@@ -1271,7 +1325,7 @@ uint64_t maybe_gc(memory *mem, uint64_t state) {
         };
         assert(dest.bytes);
         gc(mem, state, &dest);
-        if (dest.bytes[dest.nil] != null_code) {
+        if ((dest.nil >= dest.size) || (dest.bytes[dest.nil] != null_code)) {
             assert(dest.size < dest.capacity);
             dest.nil = dest.size++;
             dest.bytes[dest.nil] = null_code;
@@ -1289,6 +1343,7 @@ uint64_t maybe_gc(memory *mem, uint64_t state) {
                gc_callback,
                vc(mem, make_double(mem, mem->size), mem->nil)));
             calling_gc_callback = false;
+            assert(r < mem->size);
             assert(mem->bytes[r] != false_code);
         } else {
             state = 0;
@@ -1302,13 +1357,16 @@ uint64_t step(memory *mem, uint64_t state) {
 }
 
 uint64_t run(memory *mem, uint64_t state) {
-    while (mem->bytes[state] != result_code) {
+    while (assert(state < mem->size),
+           mem->bytes[state] != result_code) {
         state = maybe_gc(mem, step(mem, state));
     }
+    assert(state + 8 < mem->size);
     return vector_ref(mem, *(uint64_t*)&mem->bytes[state + 1], 0);
 }
 
 uint64_t start(memory *mem, uint64_t state) {
+    assert(state < mem->size);
     if (mem->bytes[state] == unmemoized_code) {
         return run(mem, applyx(mem,
             make_form(mem, global_lambda_form,

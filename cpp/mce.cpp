@@ -1708,12 +1708,14 @@ void bconvert_out(std::istream &stream, std::shared_ptr<Runtime> runtime) {
 }
 
 boxed bunpickle(const unsigned char *s,
-                uint64_t i,
+                const size_t len,
+                const uint64_t i,
                 std::unordered_map<uint64_t, boxed>& refs,
                 std::shared_ptr<Runtime> runtime);
 
 boxed bunpickle(const unsigned char *s,
-                uint64_t i,
+                const size_t len,
+                const uint64_t i,
                 const std::string& marker,
                 std::unordered_map<uint64_t, boxed>& refs,
                 std::shared_ptr<Runtime> runtime) {
@@ -1721,14 +1723,16 @@ boxed bunpickle(const unsigned char *s,
     refs[i] = r;
     auto v = r->cast<vector>();
     (*v)->push_back(box<symbol>(marker, runtime));
-    for (auto el : **bunpickle(s, *(uint64_t*)&s[i + 1], refs, runtime)->cast<vector>()) {
+    assert(i + 8 < len);
+    for (auto el : **bunpickle(s, len, *(uint64_t*)&s[i + 1], refs, runtime)->cast<vector>()) {
         (*v)->push_back(el);
     }
     return r;
 }
 
 boxed bunpickle(const unsigned char *s,
-                uint64_t i,
+                const size_t len,
+                const uint64_t i,
                 std::unordered_map<uint64_t, boxed>& refs,
                 std::shared_ptr<Runtime> runtime) {
     auto ref = refs.find(i);
@@ -1736,7 +1740,7 @@ boxed bunpickle(const unsigned char *s,
         return ref->second;
     }
 
-// TODO: check s bounds - and in mce.c
+    assert(i < len);
     switch (s[i]) {
         case null_code:
             return box(runtime);
@@ -1748,42 +1752,53 @@ boxed bunpickle(const unsigned char *s,
             return box<bool>(false, runtime);
 
         case number_code:
+            assert(i + sizeof(double) < len);
             return box<double>(*(double*)&s[i + 1], runtime);
 
         case char_code:
+            assert(i + 1 < len);
             return box<char>(s[i + 1], runtime);
 
-        case string_code:
-            return box<std::string>(std::string(reinterpret_cast<const char*>(&s[i + 9]),
-                                                *(uint64_t*)&s[i + 1]),
+        case string_code: {
+            assert(i + 8 < len);
+            const auto size = *(uint64_t*)&s[i + 1];
+            assert(i + 8 + size < len);
+            return box<std::string>(std::string(reinterpret_cast<const char*>(&s[i + 9]), size),
                                     runtime);
+        }
 
-        case symbol_code:
-            return box<symbol>(std::string(reinterpret_cast<const char*>(&s[i + 9]),
-                                           *(uint64_t*)&s[i + 1]),
+        case symbol_code: {
+            assert(i + 8 < len);
+            const auto size = *(uint64_t*)&s[i + 1];
+            assert(i + 8 + size < len);
+            return box<symbol>(std::string(reinterpret_cast<const char*>(&s[i + 9]), size),
                                runtime);
+        }
 
         case vector_code: {
             auto r = make_vector(runtime);
             refs[i] = r;
             auto v = r->cast<vector>();
+            assert(i + 8 < len);
             for (uint64_t j = 0; j < *(uint64_t*)&s[i + 1]; ++j) {
-                (*v)->push_back(bunpickle(s, *(uint64_t*)&s[i + 9 + j * 8], refs, runtime));
+                const auto pos = i + 9 + j * 8;
+                assert(pos + 7 < len);
+                (*v)->push_back(bunpickle(s, len, *(uint64_t*)&s[pos], refs, runtime));
             }
             return r;    
         }
 
         case unmemoized_code:
-            return bunpickle(s, i, "MCE-UNMEMOIZED", refs, runtime);
+            return bunpickle(s, len, i, "MCE-UNMEMOIZED", refs, runtime);
 
         case result_code:
-            return bunpickle(s, i, "MCE-RESULT", refs, runtime);
+            return bunpickle(s, len, i, "MCE-RESULT", refs, runtime);
 
         case step_contn_code:
-            return bunpickle(s, i, "MCE-STEP-CONTN", refs, runtime);
+            return bunpickle(s, len, i, "MCE-STEP-CONTN", refs, runtime);
 
         case transfer_code:
-            return bunpickle(s, i, "MCE-TRANSFER", refs, runtime);
+            return bunpickle(s, len, i, "MCE-TRANSFER", refs, runtime);
 
         default:
             throw std::range_error("unknown bunpickle expression");
@@ -1793,7 +1808,7 @@ boxed bunpickle(const unsigned char *s,
 void bconvert_in(const std::string& s, std::shared_ptr<Runtime> runtime) {
     std::unordered_map<uint64_t, boxed> refs;
     json j = mce_save(bunpickle(
-        &reinterpret_cast<const unsigned char*>(s.c_str())[8], 0, refs, runtime));
+        &reinterpret_cast<const unsigned char*>(s.c_str())[8], s.size(), 0, refs, runtime));
     std::cout << j.dump();
 }
 
@@ -1805,7 +1820,7 @@ void bconvert_in(std::istream &stream, std::shared_ptr<Runtime> runtime) {
     stream.read(reinterpret_cast<char*>(v.data()), size);
 
     std::unordered_map<uint64_t, boxed> refs;
-    json j = mce_save(bunpickle(v.data(), 0, refs, runtime));
+    json j = mce_save(bunpickle(v.data(), v.size(), 0, refs, runtime));
     std::cout << j.dump();
 }
 
