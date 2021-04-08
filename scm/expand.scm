@@ -282,6 +282,10 @@
 ) (
 (toplevel (list . args) args)
 
+(toplevel (null? v)
+    (and (vector? v)
+         (= (vector-length v) 0)))
+
 (toplevel (pair? v)
     (and (vector? v)
          (= (vector-length v) 2)))
@@ -326,13 +330,21 @@
         (car l)
         (list-ref (cdr l) (- i 1))))
 
-(toplevel eqv? eq?)
+(toplevel (eqv? x y)
+    (cond ((eq? x y) #t)
+          ((and (binary? x) (binary? y))
+           (let ((len (binary-length x)))
+               (if (= (binary-length y) len)
+                   (let loop ((i 0))
+                       (cond ((= i len) #t)
+                             ((= (binary-ref x i) (binary-ref y i))
+                              (loop (+ i 1)))
+                             (else #f)))
+                   #f)))
+          (else #f)))
 
 (toplevel (equal? x y)
     (cond ((eqv? x y) #t)
-          ((and (string? x) (string? y)) (string=? x y))
-          ((and (pair? x) (pair? y))
-           (and (equal? (car x) (car y)) (equal? (cdr x) (cdr y))))
           ((and (vector? x) (vector? y))
            (let ((len (vector-length x)))
                (if (= (vector-length y) len)
@@ -511,8 +523,6 @@
                                (loop (+ i 1)))))
                    (port #\"))
                (port x)))
-;TODO in the other files
-;equal/eq
           ((symbol? x)
            (if is-write
                (let ((len (binary-length x)))

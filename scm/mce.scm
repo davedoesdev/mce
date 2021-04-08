@@ -82,7 +82,7 @@
            (index (inexact->exact (vector-ref i 1))))
         (if (< index (vector-length senv))
             (vector-ref senv index)
-            '())))
+            (vector))))
 
 (define (extend-vector vec index val)
     (let ((len (vector-length vec))
@@ -91,7 +91,7 @@
             (if (= i index)
                 (vector-set! newvec i val)
                 (begin (vector-set! newvec i
-                           (if (< i len) (vector-ref vec i) '()))
+                           (if (< i len) (vector-ref vec i) (vector)))
                        (loop (+ i 1)))))
         newvec))
 
@@ -113,29 +113,31 @@
     (let ((r '()) (pr '()))
         (let loop ((l l))
             (if (pair? l)
-                (let ((nr (vector (car l) '())))
+                (let ((nr (vector (car l) (vector))))
                     (if (null? r)
                         (begin (set! pr nr) (set! r nr))
                         (begin (vector-set! pr 1 nr) (set! pr nr)))
                     (loop (cdr l)))
-                (begin (if (null? r)
-                           (set! r l)
-                           (vector-set! pr 1 l))
-                       r)))))
+                (let ((v (if (null? l) (vector) l)))
+                    (if (null? r)
+                        (set! r v)
+                        (vector-set! pr 1 v))
+                    r)))))
 
 (define (vlist->list vl)
     (let ((r '()) (pr '()))
         (let loop ((vl vl))
-            (if (vector? vl)
+            (if (and (vector? vl) (= (vector-length vl) 2))
                 (let ((nr (cons (vector-ref vl 0) '())))
                     (if (null? r)
                         (begin (set! pr nr) (set! r nr))
                         (begin (set-cdr! pr nr) (set! pr nr)))
                     (loop (vector-ref vl 1)))
-                (begin (if (null? r)
-                           (set! r vl)
-                           (set-cdr! pr vl))
-                       r)))))
+                (let ((v (if (and (vector? vl) (= (vector-length vl) 0)) '() vl)))
+                    (if (null? r)
+                        (set! r v)
+                        (set-cdr! pr v))
+                    r)))))
 
 (define (applyvl f vl)
     (apply f (vlist->list vl)))
@@ -144,7 +146,7 @@
     (vector (list->vector values) env))
 
 (define (improper-extend-rtenv env len values)
-    (let ((v (make-vector len '())))
+    (let ((v (make-vector len (vector))))
         (let loop ((i 0) (values values))
             (if (and (< i len) (not (null? values)))
                 (if (= i (- len 1))
@@ -180,7 +182,7 @@
 (define (send k . v)
     (sendl k v))
 
-(define (make-global-rtenv) (vector '#() '()))
+(define (make-global-rtenv) (vector '#() (vector)))
 
 (define (yield-defn? args)
     (and (not (null? args)) (equal? (car args) (mark 'yield-definition))))
@@ -348,14 +350,14 @@
 
 (define (sclis exp ctenv fixups)
     (if (null? exp)
-        (make-form send-value '())
+        (make-form send-value (vector))
         (make-form sclis0
                    (scan-aux (car exp) ctenv fixups)
                    (sclis (cdr exp) ctenv fixups))))
 
 (define (scseq exp ctenv fixups)
     (if (null? exp)
-        (make-form send-value '())
+        (make-form send-value (vector))
         (let ((first (scan-aux (car exp) ctenv fixups)))
             (if (null? (cdr exp))
                 first
@@ -510,7 +512,7 @@
 
 (define (evalx k exp env)
     (let ((scanned (scan exp (make-global-ctenv))))
-        (send (make-form evalx-initial k env scanned) '())))
+        (send (make-form evalx-initial k env scanned) (vector))))
 
 (define (applyx k env fn args)
     (sendl fn (make-step-contn k env args)))
@@ -577,7 +579,7 @@
     (if (number? sym)
         (let ((r (if (< sym (vector-length core-globals))
                      (vector-ref core-globals (inexact->exact sym))
-                     '())))
+                     #f)))
             (if r
                 r
                 (if err
@@ -624,7 +626,7 @@
 
 (define (gvector-set! vec i v)
     (vector-set! vec i v)
-    '())
+    (vector))
 
 (define (make-binary n)
     (make-string n #\x00))
@@ -663,7 +665,6 @@
 (table-set! global-table 'transfer transfer) 
 (table-set! global-table 'apply applyx)
 (table-set! global-table 'getpid getpid)
-(table-set! global-table 'null? null?)
 (table-set! global-table 'make-vector make-vector)
 (table-set! global-table 'vector? vector?)
 (table-set! global-table 'vector-length vector-length)
@@ -672,7 +673,7 @@
 (table-set! global-table 'get-config get-config)
 (table-set! global-table 'cf-test cf-test)
 (table-set! global-table 'transfer-test transfer-test)
-(table-set! global-table 'set-gc-callback! (lambda (v) '()))
+(table-set! global-table 'set-gc-callback! (lambda (v) (vector)))
 (table-set! global-table 'make-binary make-binary)
 (table-set! global-table 'binary? binary?)
 (table-set! global-table 'binary-length binary-length)
@@ -703,13 +704,6 @@
     /
     =
     floor
-
-    ; we're keeping the empty list in core
-    ; note that core type predicates could be moved into lang but
-    ; (a) that would leak their type codes from core into lang for C engine
-    ; (b) they're intrinsic types in the other engines so can't be checked
-    ;     from lang level
-    null?
 
     ; we're keeping vectors in core
     make-vector
@@ -875,11 +869,10 @@
              (fn (lambda (x) (deserialize-aux x tab fn set-entry!))))
         (fn (vector-ref exp 0))))
 
-(define null-code   "0")
-(define true-code   "1")
-(define false-code  "2")
-(define number-code "3")
-(define vector-code "4")
+(define true-code   "0")
+(define false-code  "1")
+(define number-code "2")
+(define vector-code "3")
 ; binary codes
 (define marker-code "A")
 ; these are only valid when scanning
@@ -888,8 +881,8 @@
 (define symbol-code "D")
 
 (define (pickle-aux exp #!key (is_scan #f))
-   (cond ((null? exp)
-          (list null-code))
+   (cond ((and (null? exp) is_scan)
+          (list vector-code 0))
          ((boolean? exp)
           (list (if exp true-code false-code)))
          ((number? exp)
@@ -923,9 +916,7 @@
 (define (unpickle-aux exp)
     (cond ((pair? exp)
            (let ((code (car exp)))
-               (cond ((equal? code null-code)
-                      '())
-                     ((equal? code true-code)
+               (cond ((equal? code true-code)
                       #t)
                      ((equal? code false-code)
                       #f)
