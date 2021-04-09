@@ -954,16 +954,14 @@
 
 (define (start-parsed is_scan v args)
     (if is_scan
-        (write (mce-save (mce-eval v) :is_scan is_scan))
-        (if (string? v)
-            (let ((r (mce-restore v)))
-                (if (procedure? r)
-                    (apply r args)
-                    (run r)))
-            (mce-run v))))
+        (display (mce-save (mce-eval (read (open-input-string v))) :is_scan is_scan))
+        (let ((r (mce-restore v)))
+            (if (procedure? r)
+                (apply r args)
+                (run r)))))
 
 (define (start-stream stream #!key (is_scan #f) (args '()))
-    (start-parsed is_scan (read stream) args))
+    (start-parsed is_scan (read-string stream) args))
 
 (define (start-string s #!key (is_scan #f) (args '()))
     (start-parsed is_scan s args))
@@ -986,7 +984,7 @@
         (if execute
             (if (string-null? s)
                 (start-stream (current-input-port) :is_scan is_scan)
-                (start-parsed is_scan (json-read (open-input-string s)) '())))))
+                (start-string s :is_scan is_scan)))))
 
 (let ((runtime-ops (make-runtime-ops)))
     (runtime-ops-get-config-set! runtime-ops get-config)

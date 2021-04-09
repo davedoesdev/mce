@@ -4,7 +4,7 @@
         (if (= i 5)
             (begin (let/cc k
                        (eprint "save " (getpid))
-                       (write-binary-as-string (save (lambda () (k #t))))
+                       (display-binary (save (lambda () (k #t))))
                        (stop #f))
                    (eprint "restore " (getpid))))
         (if (< i 10)
