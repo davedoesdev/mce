@@ -3,4 +3,5 @@
     (set! b 3)
     (set! a 5)
     (print a b)
-    (print (save (lambda () '()))))
+    (display-binary (save (lambda () '())))
+    (newline))
