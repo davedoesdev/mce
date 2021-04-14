@@ -1,14 +1,14 @@
-import fs from 'fs';
 import util from 'util';
 const { promisify } = util;
-import os from 'os';
-const { EOL } = os;
 import yargs from 'yargs';
 
-export class Char extends String {}
-export class Symbol extends String {}
-
 export function make_runtime() {
+
+const true_code    = '0';
+const false_code   = '1';
+const number_code  = '2';
+const vector_code  = '3';
+const marker_code  = 'A';
 
 function vector_cmap(f, vec, tab, set_entry) {
     const ref = tab.get(vec);
@@ -22,14 +22,20 @@ function vector_cmap(f, vec, tab, set_entry) {
     return entry;
 }
 
+const mark_prefix = Buffer.from(marker_code + "MCE-");
+
+function mark(type) {
+    return Buffer.concat([mark_prefix, Buffer.from(type)]);
+}
+
+const yield_defn_mark = mark("YIELD-DEFINITION");
+
 function is_yield_defn(args) {
-    return args &&
-           (args[0] instanceof Symbol) &&
-           (args[0].toString() === 'MCE-YIELD-DEFINITION');
+    return args && Buffer.isBuffer(args[0]) && args[0].equals(yield_defn_mark);
 }
 
 function get_procedure_defn(proc) {
-    return proc([new Symbol('MCE-YIELD-DEFINITION'), null]);
+    return proc([yield_defn_mark, []]);
 }
 
 function memoize_lambda(proc, defn) {
@@ -64,15 +70,24 @@ function vlist_rest(vl, i) {
 
 function vlist_to_vector(vl) {
     let v = [];
-    while (vl !== null) {
-        v.push(vl[0]);
-        vl = vl[1];
+    while (true) {
+        if (Array.isArray(vl) && (vl.length === 2)) {
+            v.push(vl[0]);
+            vl = vl[1];
+        } else {
+            if (v.length === 0) {
+                v = vl;
+            } else if (!(Array.isArray(vl) && (vl.length == 0))) {
+                v.push(vl);
+            }
+            break;
+        }
     }
     return v;
 }
 
 function vector_to_vlist(v) {
-    let vl = null;
+    let vl = [];
     for (let i = v.length - 1; i >= 0; --i) {
         vl = [v[i], vl];
     }
@@ -81,29 +96,52 @@ function vector_to_vlist(v) {
 
 function rtenv_lookup(i, env) {
     const r = vlist_ref(env, i[0])[i[1]];
-    return r === undefined ? null : r;
+    return r === undefined ? [] : r;
 }
 
 function rtenv_setvar(i, val, env) {
     const v = vlist_ref(env, i[0]);
     const len = v.length;
     if (i[1] >= len) {
-        v.length = i[1] + 1;
-        v.fill(null, len);
+        for (let j = len; j < i[1]; ++j) {
+            v[j] = [];
+        }
     }
     v[i[1]] = val;
     return val;
 }
 
-class SymbolNotFoundError extends Error {
-    constructor(proc, sym) {
-        super(`${proc}: symbol not found: ${sym}`);
+class UnexpectedTypeError extends Error {
+    constructor(type, exp) {
+        super(`not a ${type}: ${exp}`);
     }
 }
 
-class UnknownDisplayExpressionError extends Error {
-    constructor(exp) {
-        super(`unknown display expression: ${exp}`);
+function check_type(x, pred, name) {
+    if (!pred(x)) {
+        throw new UnexpectedTypeError(name, x);
+    }
+}
+
+function check_type_is(x, type) {
+    check_type(x, x => typeof x === type, type);
+}
+
+class TooShortError extends Error {
+    constructor(exp, i) {
+        super(`too short for ${i} ref: ${exp}`);
+    }
+}
+
+function check_length(x, i) {
+    if (x.length <= i) {
+        throw new TooShortError(x, i);
+    }
+}
+
+class SymbolNotFoundError extends Error {
+    constructor(proc, sym) {
+        super(`${proc}: symbol not found: ${sym}`);
     }
 }
 
@@ -119,108 +157,23 @@ class UnknownUnpickleExpressionError extends Error {
     }
 }
 
-class UnexpectedType extends Error {
-    constructor(type, exp) {
-        super(`not a ${type}: ${exp}`);
-    }
-}
-
-function xdisplay(exp, out, is_write) {
-    if (exp === null) {
-        out.write('()');
-    } else if (typeof exp === 'boolean') {
-        out.write(exp ? '#t' : '#f');
-    } else if (typeof exp === 'number') {
-        out.write(exp.toString());
-    } else if (exp instanceof Char) {
-        if (is_write) {
-            out.write('#\\x');
-            out.write(exp.toString().charCodeAt(0).toString(16));
-        } else {
-            out.write(exp.toString());
-        }
-    } else if (typeof exp === 'string') {
-        if (is_write) {
-            out.write(JSON.stringify(exp));
-        } else {
-            out.write(exp);
-        }
-    } else if (exp instanceof Symbol) {
-        out.write(exp.toString());
-    } else if (Array.isArray(exp)) {
-        let first = true;
-        out.write('#(');
-        for (let v of exp) {
-            if (!first) {
-                out.write(' ');
-            }
-            first = false;
-            xdisplay(v, out, is_write);
-        }
-        out.write(')');
-    } else if (typeof exp === 'function') {
-        out.write('#<procedure>');
-    } else {
-        throw new UnknownDisplayExpressionError(exp);
-    }
-
-    return exp;
-}
-
-function newline(out) {
-    out.write(EOL);
-    return null;
-}
-
-function xprint(args, out) {
-    let r = null;
-    for (let arg of args) {
-        r = arg;
-        xdisplay(arg, out, false);
-    }
-    newline(out);
-    return r;
-}
-
-function print(...args) {
-    return xprint(args, process.stdout);
-}
-
-function eprint(...args) {
-    return xprint(args, process.stderr);
-}
-
-function xwrite(args, out) {
-    let r = null;
-    for (let arg of args) {
-        r = arg;
-        xdisplay(arg, out, true);
-    }
-    return r;
-}
-
-function write(...args) {
-    return xwrite(args, process.stdout);
-}
-
-function ewrite(...args) {
-    return xwrite(args, process.stderr);
-}
-
 function plus(...args) {
     let r = 0;
     for (let arg of args) {
+        check_type_is(arg, 'number');
         r += arg;
     }
     return r;
 }
 
 function minus(n, ...args) {
+    check_type_is(n, 'number');
     if (args.length === 0) {
         return -n;
     }
     for (let arg of args) {
-        n -= arg;
+        check_type_is(arg, 'number');
+       n -= arg;
     }
     return n;
 }
@@ -228,92 +181,104 @@ function minus(n, ...args) {
 function multiply(...args) {
     let r = 1;
     for (let arg of args) {
+        check_type_is(arg, 'number');
         r *= arg;
     }
     return r;
 }
 
 function divide(n, ...args) {
+    check_type_is(n, 'number');
     if (args.length === 0) {
         return 1 / n;
     }
     for (let arg of args) {
+        check_type_is(arg, 'number');
         n /= arg;
     }
     return n;
 }
 
 function less_than(x, y) {
+    check_type_is(x, 'number');
+    check_type_is(y, 'number');
     return x < y;
 }
 
 function greater_than(x, y) {
+    check_type_is(x, 'number');
+    check_type_is(y, 'number');
     return x > y;
-}
-
-function is_null(exp) {
-    return exp === null;
-}
-
-function is_string(exp) {
-    return typeof exp === 'string';
-}
-
-function make_vector(n) {
-    return new Array(n).fill(null);
-}
-
-function is_vector(exp) {
-    return Array.isArray(exp);
 }
 
 function is_procedure(exp) {
     return typeof exp === 'function';
 }
 
+function is_boolean(exp) {
+    return typeof exp === 'boolean';
+}
+
+function is_number(exp) {
+    return typeof exp === 'number';
+}
+
+function make_vector(n) {
+    check_type_is(n, 'number');
+    const v = new Array(n);
+    for (let i = 0; i < n; ++i) {
+        v[i] = [];
+    }
+    return v;
+}
+
 function vector_length(v) {
+    check_type(v, Array.isArray, 'vector');
     return v.length;
 }
 
 function vector_ref(v, i) {
+    check_type(v, Array.isArray, 'vector');
+    check_length(v, i);
     return v[i];
 }
 
 function vector_set(v, i, exp) {
+    check_type(v, Array.isArray, 'vector');
+    check_length(v, i);
     v[i] = exp;
-    return null;
+    return [];
 }
 
-function is_eq(x, y) {
-    if (((x instanceof Char) && (y instanceof Char)) ||
-        ((x instanceof Symbol) && (y instanceof Symbol))) {
-        return x.toString() === y.toString();
-    }
+function make_binary(n) {
+    check_type_is(n, 'number');
+    return Buffer.alloc(n);
+}
 
+function binary_length(b) {
+    check_type(b, Buffer.isBuffer, 'binary');
+    return b.length;
+}
+
+function binary_ref(b, i) {
+    check_type(b, Buffer.isBuffer, 'binary');
+    return b[i];
+}
+
+function binary_set(b, i, n) {
+    check_type(b, Buffer.isBuffer, 'binary');
+    check_type_is(i, 'number');
+    b[i] = n;
+    return [];
+}
+
+function is_same_object(x, y) {
     return x === y;
 }
 
 function is_number_equal(x, y) {
-    if (typeof x !== 'number') {
-        throw new UnexpectedType('number', x);
-    }
-
-    if (typeof y !== 'number') {
-        throw new UnexpectedType('number', y);
-    }
-
-    return x === y;
-}
-
-function is_string_equal(x, y) {
-    if (typeof x !== 'string') {
-        throw new UnexpectedType('string', x);
-    }
-
-    if (typeof y !== 'string') {
-        throw new UnexpectedType('string', y);
-    }
-
+    check_type_is(x, 'number');
+    check_type_is(y, 'number');
     return x === y;
 }
 
@@ -345,23 +310,31 @@ function get_config(k) {
     return v === undefined ? false : v;
 }
 
+function error(proc, msg, obj) {
+    throw Error(`${proc}: ${msg} -- ${obj}`);
+}
+
+function output_binary(stream, b, start, end) {
+    stream.write(b.slice(start, end));
+}
+
 const global_table = new Map([
-    ['print', print],
-    ['eprint', eprint],
-    ['write', write],
-    ['write-state', write],
-    ['ewrite', ewrite],
     ['save', mce_save],
-    ['restore', grestore],
+    ['restore', restore],
     ['getpid', getpid],
     ['get-config', get_config],
     ['cf-test', cf_test],
-    ['set-gc-callback!', () => null]
+    ['set-gc-callback!', () => null],
+    ['output-binary-to-stdout', (...args) => output_binary(process.stdout, ...args)],
+    ['output-binary-to-stderr', (...args) => output_binary(process.stderr, ...args)],
+    ['error', error]
 ]);
 
 const core_globals = [
         result,
         applyx,
+        is_boolean,
+        is_number,
         less_than,
         greater_than,
         plus,
@@ -369,17 +342,20 @@ const core_globals = [
         multiply,
         divide,
         is_number_equal,
-        null,
-        is_null,
+        Math.floor,
         make_vector,
-        is_vector,
+        Array.isArray,
         vector_length,
         vector_ref,
         vector_set,
         is_procedure,
-        is_eq,
-        is_string,
-        is_string_equal,
+        make_binary,
+        Buffer.isBuffer,
+        binary_length,
+        binary_ref,
+        binary_set,
+        error,
+        is_same_object,
         transfer,
         transfer_test
 ];
@@ -401,7 +377,7 @@ function unregister_global_function(name) {
 const kenvfn_set = new Set([
     applyx,
     transfer,
-    grestore
+    restore
 ]);
 
 function register_kenv_function(f) {
@@ -409,21 +385,21 @@ function register_kenv_function(f) {
 }
 
 function find_global(sym) {
-    const r = sym instanceof Symbol ? global_table.get(sym.toString()) : core_globals[sym];
+    const r = Buffer.isBuffer(sym) ? global_table.get(sym.toString('utf8', 1)) : core_globals[sym];
     if (r === undefined) {
         throw new SymbolNotFoundError('find_global', sym);
     }
     return r;
 }
 
+const step_contn_mark = mark('STEP-CONTN');
+
 function make_step_contn(k, env, args) {
-    return [new Symbol('MCE-STEP-CONTN'), [k, [env, args]]];
+    return [step_contn_mark, [k, [env, args]]];
 }
 
 function is_step_contn(args) {
-    return args &&
-           (args[0] instanceof Symbol) &&
-           (args[0].toString() === 'MCE-STEP-CONTN');
+    return args && Buffer.isBuffer(args[0]) && args[0].equals(step_contn_mark);
 }
 
 function step_contn_k(args) {
@@ -439,13 +415,13 @@ function step_contn_args(args) {
 }
 
 function make_global_rtenv() {
-    return [[], null];
+    return [[], []];
 }
 
+const transfer_mark = mark('TRANSFER');
+
 function is_transfer(args) {
-    return args &&
-           (args[0] instanceof Symbol) &&
-           (args[0].toString() === 'MCE-TRANSFER');
+    return args && Buffer.isBuffer(args[0]) && args[0].equals(transfer_mark);
 }
 
 function transfer_args(args) {
@@ -453,7 +429,7 @@ function transfer_args(args) {
 }
 
 function transfer(k, env, fn, ...args) {
-    return send(fn, [new Symbol('MCE-TRANSFER'), vector_to_vlist(args)]);
+    return send(fn, [transfer_mark, vector_to_vlist(args)]);
 }
 
 function globalize(x, args, cf) {
@@ -461,7 +437,7 @@ function globalize(x, args, cf) {
         return x;
     }
 
-    const defn = [constructed_function0, [args, [cf, null]]];
+    const defn = [constructed_function0, [args, [cf, []]]];
     const f2 = memoize_lambda(args => f(args), defn);
     const f = memoize_lambda(wrap_global_lambda(x, f2), defn);
     return f;
@@ -512,7 +488,7 @@ function wrap_global_lambda(fn, cf) {
 
 function lookup_global(n) {
     const r = find_global(n);
-    const defn = [global_lambda, [n, null]];
+    const defn = [global_lambda, [n, []]];
     const f2 = memoize_lambda(args => f(args), defn);
     const f = memoize_lambda(wrap_global_lambda(r, f2), defn);
     return f;
@@ -542,7 +518,7 @@ function handle_lambda(args, len, fn, env, extend_rtenv) {
         return send(fn, [
             step_contn_k(args), [
                 extend_rtenv(env, len, step_contn_args(args)),
-                null
+                []
             ]
         ]);
     }
@@ -550,7 +526,7 @@ function handle_lambda(args, len, fn, env, extend_rtenv) {
     return run(send(fn, [
         lookup_global(g_result), [
             extend_rtenv(env, len, args),
-            null
+            []
         ]
     ]));
 }
@@ -584,7 +560,7 @@ function send(k, vl) {
 }
 
 function sendv(k, v) {
-    return send(k, [v, null]);
+    return send(k, [v, []]);
 }
 
 const symbol_lookup = define_form((self, i) =>
@@ -617,26 +593,26 @@ const global_lambda = define_form((self, defn) =>
 const if0 = define_form((self, scan0, scan1, scan2) =>
     args => {
         const [k, env] = vlist_to_vector(args);
-        return send(scan0, [make_form(if1, k, env, scan1, scan2), [env, null]]);
+        return send(scan0, [make_form(if1, k, env, scan1, scan2), [env, []]]);
     });
 
 const if1 = define_form((self, k, env, scan1, scan2) =>
     args => {
         const [v] = vlist_to_vector(args);
         const f = v ? scan1 : scan2;
-        return send(f, [k, [env, null]]);
+        return send(f, [k, [env, []]]);
     });
 
 const sclis0 = define_form((self, first, rest) =>
     args => {
         const [k, env] = vlist_to_vector(args);
-        return send(first, [make_form(sclis1, k, env, rest), [env, null]]);
+        return send(first, [make_form(sclis1, k, env, rest), [env, []]]);
     });
 
 const sclis1 = define_form((self, k, env, rest) =>
     args => {
         const [v] = vlist_to_vector(args);
-        return send(rest, [make_form(sclis2, k, v), [env, null]]);
+        return send(rest, [make_form(sclis2, k, v), [env, []]]);
     });
 
 const sclis2 = define_form((self, k, v) =>
@@ -648,11 +624,11 @@ const sclis2 = define_form((self, k, v) =>
 const scseq0 = define_form((self, first, rest) =>
     args => {
         const [k, env] = vlist_to_vector(args);
-        return send(first, [make_form(scseq1, k, env, rest), [env, null]]);
+        return send(first, [make_form(scseq1, k, env, rest), [env, []]]);
     });
 
 const scseq1 = define_form((self, k, env, rest) =>
-    () => send(rest, [k, [env, null]]));
+    () => send(rest, [k, [env, []]]));
 
 const lambda0 = define_form((self, len, scanned) =>
     args => {
@@ -676,7 +652,7 @@ const letcc0 = define_form((self, scanned) =>
     args => {
         const [k, env] = vlist_to_vector(args);
         return send(scanned, [
-            k, [extend_rtenv(env, 1, [make_form(letcc1, k), null]), null]
+            k, [extend_rtenv(env, 1, [make_form(letcc1, k), []]), []]
         ]);
     });
 
@@ -686,7 +662,7 @@ const letcc1 = define_form((self, k) =>
 const define0 = define_form((self, i, scanned) =>
     args => {
         const [k, env] = vlist_to_vector(args);
-        return send(scanned, [make_form(define1, k, env, i), [env, null]]);
+        return send(scanned, [make_form(define1, k, env, i), [env, []]]);
     });
 
 const define1 = define_form((self, k, env, i) =>
@@ -698,7 +674,7 @@ const define1 = define_form((self, k, env, i) =>
 const application0 = define_form((self, scanned) =>
     args => {
         const [k, env] = vlist_to_vector(args);
-        return send(scanned, [make_form(application1, k, env), [env, null]]);
+        return send(scanned, [make_form(application1, k, env), [env, []]]);
     });
 
 const application1 = define_form((self, k, env) =>
@@ -708,7 +684,7 @@ const application1 = define_form((self, k, env) =>
     });
 
 const evalx_initial = define_form((self, k, env, scanned) =>
-    () => send(scanned, [k, [env, null]]));
+    () => send(scanned, [k, [env, []]]));
 
 function make_form(n, ...args) {
     const defn = [n, vector_to_vlist(args)];
@@ -723,10 +699,12 @@ function table_set(tab, v, entry) {
     return entry;
 }
 
+const unmemoized_mark = mark('UNMEMOIZED');
+
 function is_unmemoized(v) {
     return (v.length === 2) &&
-           (v[0] instanceof Symbol) &&
-           (v[0].toString() === 'MCE-UNMEMOIZED');
+           Buffer.isBuffer(v[0]) &&
+           v[0].equals(unmemoized_mark);
 }
 
 function unmemoized_repexp(v) {
@@ -771,7 +749,7 @@ function unmemoize_aux(exp, tab, fn) {
             return ref;
         }
         const entry = table_set(tab, exp, []);
-        entry.push(new Symbol('MCE-UNMEMOIZED'));
+        entry.push(unmemoized_mark);
         entry.push(fn(get_procedure_defn(exp)));
         return entry;
     }
@@ -784,14 +762,16 @@ function unmemoize(exp) {
     return fn(exp);
 }
 
+const serialized_mark = mark('SERIALIZED');
+
 function make_serialized(n) {
-    return [new Symbol('MCE-SERIALIZED'), n];
+    return [serialized_mark, n];
 }
 
 function is_serialized(v) {
     return (v.length === 2) &&
-           (v[0] instanceof Symbol) &&
-           (v[0].toString() === 'MCE-SERIALIZED');
+           Buffer.isBuffer(v[0]) &&
+           v[0].equals(serialized_mark);
 }
 
 function serialized_n(v) {
@@ -836,43 +816,24 @@ function deserialize(exp) {
     return fn(exp[0]);
 }
 
-const null_code    = 'a';
-const true_code    = 'b';
-const false_code   = 'c';
-const number_code  = 'd';
-const char_code    = 'e';
-const string_code  = 'f';
-const symbol_code  = 'g';
-const vector_code  = 'h';
-
 function pickle_aux(exp) {
-    const j = [];
-    if (exp === null) {
-        j.push(null_code);
-    } else if (typeof exp === 'boolean') {
-        j.push(exp ? true_code : false_code);
-    } else if (typeof exp === 'number') {
-        j.push(number_code);
-        j.push(exp);
-    } else if (exp instanceof Char) {
-        j.push(char_code);
-        j.push(exp.toString());
-    } else if (typeof exp === 'string') {
-        j.push(string_code);
-        j.push(exp);
-    } else if (exp instanceof Symbol) {
-        j.push(symbol_code);
-        j.push(exp.toString());
-    } else if (Array.isArray(exp)) {
-        j.push(vector_code);
-        j.push(exp.length);
-        for (let v of exp) {
-            j.push(pickle_aux(v));
-        }
-    } else {
-        throw new UnknownPickleExpressionError(exp);
+    if (typeof exp === 'boolean') {
+        return [exp ? true_code : false_code];
     }
-    return j;
+    if (typeof exp === 'number') {
+        return [number_code, exp];
+    }
+    if (Buffer.isBuffer(exp)) {
+        return exp.toString('base64');
+    }
+    if (Array.isArray(exp)) {
+        const r = [vector_code, exp.length];
+        for (let v of exp) {
+            r.push(pickle_aux(v));
+        }
+        return r;
+    }
+    throw new UnknownPickleExpressionError(exp);
 }
 
 function pickle(exp) {
@@ -880,26 +841,24 @@ function pickle(exp) {
 }
 
 function unpickle_aux(exp) {
-    switch (exp[0]) {
-    case null_code:
-        return null;
-    case true_code:
-        return true;
-    case false_code:
-        return false;
-    case number_code:
-        return exp[1];
-    case char_code:
-        return new Char(exp[1]);
-    case string_code:
-        return exp[1];
-    case symbol_code:
-        return new Symbol(exp[1]);
-    case vector_code:
-        return exp.slice(2).map(unpickle_aux);
-    default:
-        throw new UnknownUnpickleExpressionError(exp);
+    if (Array.isArray(exp)) {
+        switch (exp[0]) {
+        case true_code:
+            return true;
+        case false_code:
+            return false;
+        case number_code:
+            return exp[1];
+        case vector_code:
+            return exp.slice(2).map(unpickle_aux);
+        default:
+            throw new UnknownUnpickleExpressionError(exp);
+        }
     }
+    if (typeof exp === 'string') {
+        return Buffer.from(exp, 'base64');
+    }
+    throw new UnknownUnpickleExpressionError(exp);
 }
 
 function unpickle(s) {
@@ -907,26 +866,28 @@ function unpickle(s) {
 }
 
 function mce_save(exp) {
-    return pickle(serialize(unmemoize(exp)));
+    return Buffer.from(pickle(serialize(unmemoize(exp))));
 }
 
 function mce_restore(s) {
     return memoize(deserialize(unpickle(s)));
 }
 
-function grestore(k, env, s) {
+function restore(k, env, s) {
     return sendv(k, mce_restore(s));
 }
 
+const result_mark = mark('RESULT');
+
 function result(exp) {
-    return [new Symbol('MCE-RESULT'), exp];
+    return [result_mark, exp];
 }
 
 function is_result(exp) {
     return Array.isArray(exp) &&
            (exp.length === 2) &&
-           (exp[0] instanceof Symbol) &&
-           (exp[0].toString() === 'MCE-RESULT');
+           Buffer.isBuffer(exp[0]) &&
+           exp[0].equals(result_mark);
 }
 
 function result_val(exp) {
@@ -952,7 +913,7 @@ const read_all = promisify((stream, cb) => {
     stream.on('end', () => cb(null, Buffer.concat(bufs)));
 });
 
-async function start_string(s, args = null) {
+async function start_string_or_buffer(s, args = null) {
     const r = mce_restore(s);
     if (typeof r === 'function') {
         return await r(args);
@@ -961,7 +922,7 @@ async function start_string(s, args = null) {
 }
 
 async function start_stream(stream, args = null) {
-    return await start_string(JSON.parse(await read_all(stream)), args);
+    return await start_string_or_buffer(await read_all(stream), args);
 }
 
 async function start(argv) {
@@ -972,16 +933,18 @@ async function start(argv) {
         })
         .option('config', {
             describe: 'Set configuration',
-            type: 'string'
+            type: 'string',
+            array: true
         })
         .argv;
     if (args.config) {
-        const pos = args.config.indexOf('=');
-        set_config(args.config.substr(0, pos), args.config.substr(pos + 1));
+        for (let config of args.config) {
+            const pos = config.indexOf('=');
+            set_config(config.substr(0, pos), config.substr(pos + 1));
+        }
     }
     if (args.run) {
-        // yargs removes enclosing double quotes!
-        return await start_string(JSON.parse(`"${args.run}"`));
+        return await start_string(args.run);
     }
     return await start_stream(process.stdin);
 }
@@ -993,7 +956,7 @@ return {
     register_global_function,
     unregister_global_function,
     register_kenv_function,
-    start_string,
+    start_string_or_buffer,
     start_stream,
     start,
     send,

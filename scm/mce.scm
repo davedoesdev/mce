@@ -155,17 +155,21 @@
                            (loop (+ i 1) (cdr values))))))
         (vector v env)))
 
+(define mark-prefix (string-append marker-code "MCE-"))
+
 (define (mark type)
-    (string-append marker-code "MCE-" (string-upcase (symbol->string type))))
+    (string-append mark-prefix (string-upcase (symbol->string type))))
 
 (define (marked? s)
-    (substring-at? s (string-append marker-code "MCE-") 0))
+    (substring-at? s mark-prefix 0))
+
+(define step-contn-mark (mark 'step-contn))
 
 (define (make-step-contn k env args)
-    (cons (mark 'step-contn) (cons k (cons env args))))
+    (cons step-contn-mark (cons k (cons env args))))
 
 (define (step-contn? exp)
-    (and (pair? exp) (equal? (car exp) (mark 'step-contn))))
+    (and (pair? exp) (equal? (car exp) step-contn-mark)))
 
 (define (step-contn-k exp)
     (cadr exp))
@@ -184,11 +188,13 @@
 
 (define (make-global-rtenv) (vector '#() (vector)))
 
+(define yield-defn-mark (mark 'yield-definition))
+
 (define (yield-defn? args)
-    (and (not (null? args)) (equal? (car args) (mark 'yield-definition))))
+    (and (not (null? args)) (equal? (car args) yield-defn-mark)))
 
 (define (get-procedure-defn proc)
-    (apply proc (list (mark 'yield-definition))))
+    (apply proc (list yield-defn-mark)))
 
 (define (memoize-lambda proc defn)
     (lambda args
@@ -493,13 +499,15 @@
 (define (step state)
     (applyvl (vector-ref state 0) (vector-ref state 1)))
 
+(define result-mark (mark 'result))
+
 (define (result v)
-    (vector (mark 'result) v))
+    (vector result-mark v))
 
 (define (result? exp)
     (and (vector? exp)
          (= (vector-length exp) 2)
-         (equal? (vector-ref exp 0) (mark 'result))))
+         (equal? (vector-ref exp 0) result-mark)))
 
 (define (result-val exp)
     (vector-ref exp 1))
@@ -566,11 +574,13 @@
         (lambda args (handle-global-lambda-kenv args fn))
         (lambda args (handle-global-lambda args fn cf))))
 
+(define transfer-mark (mark 'transfer))
+
 (define (transfer k env fn . args)
-    (sendl fn (cons (mark 'transfer) args)))
+    (sendl fn (cons transfer-mark args)))
 
 (define (transfer? exp)
-    (and (pair? exp) (equal? (car exp) (mark 'transfer))))
+    (and (pair? exp) (equal? (car exp) transfer-mark)))
 
 (define (transfer-args exp)
     (cdr exp))
@@ -656,7 +666,7 @@
 (table-set! global-table '- -)
 (table-set! global-table '* *)
 (table-set! global-table '/ /)
-(table-set! global-table 'eq? eq?)
+(table-set! global-table 'same-object? eq?)
 (table-set! global-table '= =)
 (table-set! global-table 'floor floor)
 (table-set! global-table 'procedure? procedure?)
@@ -725,11 +735,8 @@
     ; errors are thrown by runtime
     error
 
-    ; ------------------------------
-
-    ; eq? will change later when some types are lifted into lang -
-    ; we'll probably have a core-eq? for the types we keep in core
-    eq?
+    ; eq? needs to know if objects are the same
+    eq? ; same-object?
 
     ; transfer can only be done in core but it might not be useful
     ; enough to keep - maybe make it optional
@@ -775,9 +782,11 @@
                         (begin (vector-set! entry i (f (vector-ref vec i)))
                                (loop (+ i 1)))))))))
 
+(define unmemoized-mark (mark 'unmemoized))
+
 (define (unmemoized? v)
     (and (= (vector-length v) 2)
-         (equal? (vector-ref v 0) (mark 'unmemoized))))
+         (equal? (vector-ref v 0) unmemoized-mark)))
 
 (define (unmemoized-repexp v)
     (vector-ref v 1))
@@ -814,7 +823,7 @@
                (if ref
                    (ref-value ref)
                    (let ((entry (table-set! tab exp (make-vector 2))))
-                       (vector-set! entry 0 (mark 'unmemoized))
+                       (vector-set! entry 0 unmemoized-mark)
                        (vector-set! entry 1 (fn (get-procedure-defn exp)))
                        entry))))
           (else exp)))
@@ -824,12 +833,14 @@
              (fn (lambda (x) (unmemoize-aux x tab fn))))
         (fn exp)))
 
+(define serialized-mark (mark 'serialized))
+
 (define (make-serialized n)
-    (vector (mark 'serialized) n))
+    (vector serialized-mark n))
 
 (define (serialized? v)
     (and (= (vector-length v) 2)
-         (equal? (vector-ref v 0) (mark 'serialized))))
+         (equal? (vector-ref v 0) serialized-mark)))
 
 (define (serialized-n v)
     (vector-ref v 1))
@@ -873,7 +884,10 @@
 (define false-code  "1")
 (define number-code "2")
 (define vector-code "3")
-; binary codes
+; binary codes; probably best to stick with A-Z so result of
+; save (json) can't be confused: json will start with 0-9, 
+; 'n' for null, '[', '{]', '"', whitespace, 't' for true,
+; 'f' for false
 (define marker-code "A")
 ; these are only valid when scanning
 (define char-code   "B")
@@ -952,19 +966,16 @@
 (define (mce-run exp)
     (run (mce-eval exp)))
 
-(define (start-parsed is_scan v args)
+(define (start-string s #!key (is_scan #f) (args '()))
     (if is_scan
-        (display (mce-save (mce-eval (read (open-input-string v))) :is_scan is_scan))
-        (let ((r (mce-restore v)))
+        (display (mce-save (mce-eval (read (open-input-string s))) :is_scan is_scan))
+        (let ((r (mce-restore s)))
             (if (procedure? r)
                 (apply r args)
                 (run r)))))
 
 (define (start-stream stream #!key (is_scan #f) (args '()))
-    (start-parsed is_scan (read-string stream) args))
-
-(define (start-string s #!key (is_scan #f) (args '()))
-    (start-parsed is_scan s args))
+    (start-string (read-string stream) :is_scan is_scan :args args))
 
 (define (start argv)
     (let ((is_scan (string-suffix? "scan" (car argv)))
