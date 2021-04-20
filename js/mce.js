@@ -11,6 +11,9 @@ const vector_code  = '3';
 const marker_code  = 'A';
 
 function vector_cmap(f, vec, tab, set_entry) {
+    if (vec.length === 0) {
+        return vec;
+    }
     const ref = tab.get(vec);
     if (ref !== undefined) {
         return ref;
@@ -938,7 +941,7 @@ async function start(argv) {
     if (args.config) {
         for (let config of args.config) {
             const pos = config.indexOf('=');
-            set_config(config.substr(0, pos), config.substr(pos + 1));
+            set_config(config.substr(0, pos), Buffer.from(config.substr(pos + 1)));
         }
     }
     if (args.run) {

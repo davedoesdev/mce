@@ -13,18 +13,31 @@ struct box_type { typedef T type; };
 
 class Runtime;
 
+class RuntimeInfo {
+public:
+    explicit RuntimeInfo() :
+        runtime(std::make_shared<Runtime>()) {}
+
+    inline std::shared_ptr<Runtime> get_runtime() const {
+        return runtime;
+    }
+
+private:
+    std::shared_ptr<Runtime> runtime;
+};
+
 // Adapted from boost::any but without the need for type_traits
 class Box {
 public:
     template<typename T>
-    explicit Box(const T& v, std::shared_ptr<Runtime> runtime) :
+    explicit Box(const T& v, const RuntimeInfo& info) :
         content(new holder<T>(v)),
-        runtime(runtime) {
+        info(info) {
     }
 
     explicit Box(const Box& b) :
         content(b.content->clone()),
-        runtime(b.runtime) {
+        info(b.info) {
     }
 
     ~Box() {
@@ -55,8 +68,8 @@ public:
             content->address(typeid(typename box_type<T>::type)));
     }
 
-    std::shared_ptr<Runtime> get_runtime() {
-        return runtime;
+    RuntimeInfo get_runtime_info() {
+        return info;
     }
 
 private:
@@ -103,7 +116,7 @@ private:
     };
 
     placeholder *content;
-    std::shared_ptr<Runtime> runtime;
+    RuntimeInfo info;
 };
 
 typedef std::shared_ptr<Box> boxed;
@@ -114,10 +127,10 @@ typedef std::shared_ptr<func> lambda;
 
 template<typename R>
 R make_lambda(std::function<function> fn,
-              std::shared_ptr<Runtime> runtime,
+              const RuntimeInfo& info,
               bool has_defn = false);
 
-class Runtime : public std::enable_shared_from_this<Runtime> {
+class Runtime {
 private:
     size_t gc_threshold;
     void break_cycles();
@@ -132,9 +145,9 @@ private:
 
     std::unordered_map<std::string, boxed> config_table;
 
-    friend boxed make_vector(std::shared_ptr<Runtime> runtime);
+    friend boxed make_vector(const RuntimeInfo& info);
     friend lambda make_lambda<lambda>(std::function<function> fn,
-                                      std::shared_ptr<Runtime> runtime,
+                                      const RuntimeInfo& info,
                                       bool has_defn);
 
     std::unordered_map<std::string, function*> global_table;
@@ -142,10 +155,10 @@ private:
     std::unordered_set<function*> kenvfn_set;
 
 public:
-    Runtime();
+    explicit Runtime();
 
     void set_gc_threshold(size_t v);
-    void maybe_gc();
+    void maybe_gc(const RuntimeInfo& info);
 
     boxed get_config(const std::string& k);
     void set_config(const std::string& k, boxed v);

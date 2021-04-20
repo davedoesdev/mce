@@ -82,7 +82,7 @@
            (index (inexact->exact (vector-ref i 1))))
         (if (< index (vector-length senv))
             (vector-ref senv index)
-            (vector))))
+            '#())))
 
 (define (extend-vector vec index val)
     (let ((len (vector-length vec))
@@ -91,7 +91,7 @@
             (if (= i index)
                 (vector-set! newvec i val)
                 (begin (vector-set! newvec i
-                           (if (< i len) (vector-ref vec i) (vector)))
+                           (if (< i len) (vector-ref vec i) '#()))
                        (loop (+ i 1)))))
         newvec))
 
@@ -113,12 +113,12 @@
     (let ((r '()) (pr '()))
         (let loop ((l l))
             (if (pair? l)
-                (let ((nr (vector (car l) (vector))))
+                (let ((nr (vector (car l) '#())))
                     (if (null? r)
                         (begin (set! pr nr) (set! r nr))
                         (begin (vector-set! pr 1 nr) (set! pr nr)))
                     (loop (cdr l)))
-                (let ((v (if (null? l) (vector) l)))
+                (let ((v (if (null? l) '#() l)))
                     (if (null? r)
                         (set! r v)
                         (vector-set! pr 1 v))
@@ -146,7 +146,7 @@
     (vector (list->vector values) env))
 
 (define (improper-extend-rtenv env len values)
-    (let ((v (make-vector len (vector))))
+    (let ((v (make-vector len '#())))
         (let loop ((i 0) (values values))
             (if (and (< i len) (not (null? values)))
                 (if (= i (- len 1))
@@ -186,7 +186,7 @@
 (define (send k . v)
     (sendl k v))
 
-(define (make-global-rtenv) (vector '#() (vector)))
+(define (make-global-rtenv) (vector '#() '#()))
 
 (define yield-defn-mark (mark "YIELD-DEFINITION"))
 
@@ -356,14 +356,14 @@
 
 (define (sclis exp ctenv fixups)
     (if (null? exp)
-        (make-form send-value (vector))
+        (make-form send-value '#())
         (make-form sclis0
                    (scan-aux (car exp) ctenv fixups)
                    (sclis (cdr exp) ctenv fixups))))
 
 (define (scseq exp ctenv fixups)
     (if (null? exp)
-        (make-form send-value (vector))
+        (make-form send-value '#())
         (let ((first (scan-aux (car exp) ctenv fixups)))
             (if (null? (cdr exp))
                 first
@@ -520,7 +520,7 @@
 
 (define (evalx k exp env)
     (let ((scanned (scan exp (make-global-ctenv))))
-        (send (make-form evalx-initial k env scanned) (vector))))
+        (send (make-form evalx-initial k env scanned) '#())))
 
 (define (applyx k env fn args)
     (sendl fn (make-step-contn k env args)))
@@ -636,7 +636,7 @@
 
 (define (gvector-set! vec i v)
     (vector-set! vec i v)
-    (vector))
+    '#())
 
 (define (make-binary n)
     (make-string n #\x00))
@@ -683,7 +683,7 @@
 (table-set! global-table 'get-config get-config)
 (table-set! global-table 'cf-test cf-test)
 (table-set! global-table 'transfer-test transfer-test)
-(table-set! global-table 'set-gc-callback! (lambda (v) (vector)))
+(table-set! global-table 'set-gc-callback! (lambda (v) '#()))
 (table-set! global-table 'make-binary make-binary)
 (table-set! global-table 'binary? binary?)
 (table-set! global-table 'binary-length binary-length)
@@ -771,16 +771,21 @@
     (ref-value (table-ref config-table k)))
 
 (define (vector-cmap f vec tab set-entry!)
-    (let ((ref (table-ref tab vec)))
-        (if ref
-            (ref-value ref)
-            (let* ((len (vector-length vec))
-                   (entry (set-entry! tab vec (make-vector len))))
-                (let loop ((i 0))
-                    (if (= i len)
-                        entry
-                        (begin (vector-set! entry i (f (vector-ref vec i)))
-                               (loop (+ i 1)))))))))
+    ; note: in compiled program, two '#() instance compare eq? true
+    ; other engines may modify empty vector for efficiency (setvar)
+    ; so if we serialize then all empty vectors will end up being modified
+    (if (= (vector-length vec) 0)
+        vec
+        (let ((ref (table-ref tab vec)))
+            (if ref
+                (ref-value ref)
+                (let* ((len (vector-length vec))
+                       (entry (set-entry! tab vec (make-vector len))))
+                    (let loop ((i 0))
+                        (if (= i len)
+                            entry
+                            (begin (vector-set! entry i (f (vector-ref vec i)))
+                                   (loop (+ i 1))))))))))
 
 (define unmemoized-mark (mark "UNMEMOIZED"))
 
