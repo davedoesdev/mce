@@ -4,63 +4,93 @@
 #include <utility>
 #include "mce.hpp"
 #include "json.hpp"
+#include "base64.hpp"
 #include "cxxopts.hpp"
 
 using nlohmann::json;
 
 namespace mce {
 
-const char null_code       = 'a';
-const char true_code       = 'b';
-const char false_code      = 'c';
-const char number_code     = 'd';
-const char char_code       = 'e';
-const char string_code     = 'f';
-const char symbol_code     = 'g';
-const char vector_code     = 'h';
+const char true_code       = '0';
+const char false_code      = '1';
+const char number_code     = '2';
+const char vector_code     = '3';
 
-const char unmemoized_code = '0';
-const char result_code     = '1';
-const char step_contn_code = '2';
-const char transfer_code   = '3';
+const char marker_code     = 'A';
 
-symbol::symbol(const std::string& s) : std::string(s) {}
+const char binary_code     = 'a';
+const char unmemoized_code = 'b';
+const char result_code     = 'c';
+const char step_contn_code = 'd';
+const char transfer_code   = 'e';
 
-inline boxed box(std::shared_ptr<Runtime> runtime) {
-    return std::make_shared<Box>(runtime);
+typedef std::vector<uint8_t> binary;
+
+const auto mark_prefix = {
+    static_cast<uint8_t>(marker_code),
+    static_cast<uint8_t>('M'),
+    static_cast<uint8_t>('C'),
+    static_cast<uint8_t>('E'),
+    static_cast<uint8_t>('-')
+};
+
+template<size_t size>
+std::shared_ptr<binary> mark(const char (&type)[size]) {
+    auto b = std::make_shared<binary>(mark_prefix);
+    b->insert(b->end(), type, type + size - 1);
+    return b;
 }
 
-template<typename T>
-struct box_arg { typedef T type; };
+const auto yield_defn_mark = mark("YIELD-DEFINITION");
+const auto step_contn_mark = mark("STEP-CONTN");
+const auto transfer_mark = mark("TRANSFER");
+const auto result_mark = mark("RESULT");
+const auto unmemoized_mark = mark("UNMEMOIZED");
+const auto serialized_mark = mark("SERIALIZED");
 
 template<typename T>
-inline boxed box(const typename box_arg<T>::type& a,
-                 std::shared_ptr<Runtime> runtime) {
+inline boxed box(const typename box_type<T>::type& a, std::shared_ptr<Runtime> runtime) {
     return std::make_shared<Box>(a, runtime);
 }
 
 template<>
-inline boxed box<std::string>(const std::string& s,
-                              std::shared_ptr<Runtime> runtime) {
-    return box<std::shared_ptr<std::string>>(std::make_shared<std::string>(s), runtime);
-}
-
-template<>
-struct box_arg<symbol>{ typedef std::string type; };
-template<>
-inline boxed box<symbol>(const std::string& s,
-                         std::shared_ptr<Runtime> runtime) {
-    return box<std::shared_ptr<symbol>>(std::make_shared<symbol>(s), runtime);
-}
-
-template<>
-struct box_type<std::string> { typedef std::shared_ptr<std::string> type; };
-
-template<>
-struct box_type<symbol> { typedef std::shared_ptr<symbol> type; };
+struct box_type<binary> { typedef std::shared_ptr<binary> type; };
 
 template<>
 struct box_type<vector> { typedef std::shared_ptr<vector> type; };
+
+void debug_log(boxed exp, std::ostream& out, bool is_write) {
+    if (exp->contains<bool>()) {
+        out << (exp->cast<bool>() ? "#t" : "#f");
+    } else if (exp->contains<double>()) {
+        out << exp->cast<double>();
+    } else if (exp->contains<binary>()) {
+        auto b = exp->cast<binary>();
+        auto s = std::string(b->begin(), b->end());
+        if (is_write) {
+            json j = s;
+            out << j.dump();
+        } else {
+            out << s;
+        }
+    } else if (exp->contains<vector>()) {
+        bool first = true;
+        out << "#(";
+        auto vec = exp->cast<vector>();
+        for (auto const& v : **vec) {
+            if (!first) {
+                out << " ";
+            }
+            first = false;
+            debug_log(v, out, is_write);
+        }
+        out << ")";
+    } else if (exp->contains<lambda>()) {
+        out << "#<procedure>";
+    } else {
+        throw std::range_error("unknown expression");
+    }
+}
 
 struct CMapHash {
     std::size_t operator()(const boxed& a) const noexcept {
@@ -82,14 +112,6 @@ struct CMapHash {
 
 struct CMapEqual {
     bool operator()(const boxed& x, const boxed& y) const noexcept {
-        if (x->empty()) {
-            return y->empty();
-        }
-
-        if (y->empty()) {
-            return false;
-        }
-
         if (!x->contains_type_of(*y)) {
             return false;
         }
@@ -121,7 +143,7 @@ boxed make_vector(std::shared_ptr<Runtime> runtime) {
         delete vptr;
     });
     runtime->allocated.vectors[v.get()] = v;
-    return box<std::shared_ptr<vector>>(v, runtime);
+    return box<vector>(v, runtime);
 }
 
 boxed vc(boxed first, boxed second) {
@@ -203,7 +225,9 @@ void Runtime::add_stats(std::vector<std::vector<size_t>>& stats) {
 }
 
 std::string mce_save(boxed exp);
-boxed mce_restore(const std::string& s, std::shared_ptr<Runtime> runtime);
+
+template<typename Input>
+boxed mce_restore(Input& s, std::shared_ptr<Runtime> runtime);
 
 void Runtime::maybe_gc() {
     if (((allocated.vectors.size() > gc_threshold) ||
@@ -226,7 +250,7 @@ void Runtime::maybe_gc() {
             auto const& v = entry.second.lock();
             assert(v); // deleter in make_vector should remove unreferenced vectors
             saved_indices[v.get()] = (*saved_allocations)->size();
-            (*saved_allocations)->push_back(box<std::shared_ptr<vector>>(v, shared_from_this()));
+            (*saved_allocations)->push_back(box<vector>(v, shared_from_this()));
         }
 
         // For each lambda, add it to the boxed vector and remember its position.
@@ -243,7 +267,7 @@ void Runtime::maybe_gc() {
         // Note: This process itself will have created more objects with cycles but
         // they will all be destroyed when we break cycles since we know there will
         // be nowhere else referencing them.
-        auto saved = mce_save(box<std::shared_ptr<vector>>(saved_allocations, shared_from_this()));
+        auto saved = mce_save(box<vector>(saved_allocations, shared_from_this()));
         // We don't need the boxed vector any more.
         saved_allocations.reset();
 
@@ -290,7 +314,7 @@ void Runtime::maybe_gc() {
         saved_indices.clear();
 
         // Save the new boxed vector into a string.
-        saved = mce_save(box<std::shared_ptr<vector>>(saved_allocations, shared_from_this()));
+        saved = mce_save(box<vector>(saved_allocations, shared_from_this()));
         saved_allocations.reset();
 
         // Break the cycles again.
@@ -328,7 +352,7 @@ void Runtime::maybe_gc() {
             std::unique_ptr<bool, void(*)(bool*)> cleanup(&calling_gc_callback, [](bool *p) {
                 *p = false;
             });
-            auto r = (**gc_callback->cast<lambda>())(vc(a, box(shared_from_this())));
+            auto r = (**gc_callback->cast<lambda>())(vc(a, make_vector(shared_from_this())));
             assert(!r->contains<bool>() || r->cast<bool>());
         }
     }
@@ -356,10 +380,22 @@ boxed vlist_to_vector(boxed vl) {
     auto a = make_vector(vl->get_runtime());
     auto v = a->cast<vector>();
 
-    while (vl->contains<vector>()) {
-        auto v2 = vl->cast<vector>();
-        (*v)->push_back((*v2)->at(0));
-        vl = (*v2)->at(1);
+    while (true) {
+        const auto is_vector = vl->contains<vector>();
+        const auto v2 = is_vector ? vl->cast<vector>() : nullptr;
+        const auto size = is_vector ? (*v2)->size() : 0;
+
+        if (is_vector && (size == 2)) {
+            (*v)->push_back((*v2)->at(0));
+            vl = (*v2)->at(1);
+        } else {
+            if ((*v)->empty()) {
+                a = vl;
+            } else if (!(is_vector && (size == 0))) {
+                (*v)->push_back(vl);
+            }
+            break;
+        }
     }
 
     return a;
@@ -392,91 +428,14 @@ bool is_yield_defn(boxed args) {
         return false;
     }
     auto first = vlist_ref(args, 0);
-    return first->contains<symbol>() &&
-           (*first->cast<symbol>() == "MCE-YIELD-DEFINITION");
+    return first->contains<binary>() &&
+           (*first->cast<binary>() == *yield_defn_mark);
 }
 
 boxed get_procedure_defn(boxed proc) {
     auto runtime = proc->get_runtime();
     return (**proc->cast<lambda>())(
-        vc(box<symbol>("MCE-YIELD-DEFINITION", runtime), box(runtime)));
-}
-
-boxed xdisplay(boxed exp, std::ostream& out, bool is_write) {
-    if (exp->empty()) {
-        out << "()";
-    } else {
-        if (exp->contains<bool>()) {
-            out << (exp->cast<bool>() ? "#t" : "#f");
-        } else if (exp->contains<double>()) {
-            out << exp->cast<double>();
-        } else if (exp->contains<char>()) {
-            auto c = exp->cast<char>();
-            if (is_write) {
-                out << "#\\x" << std::hex << static_cast<int>(c);
-            } else {
-                out << c;
-            }
-        } else if (exp->contains<std::string>()) {
-            auto s = exp->cast<std::string>();
-            if (is_write) {
-                json j = *s;
-                out << j.dump();
-            } else {
-                out << *s;
-            }
-        } else if (exp->contains<symbol>()) {
-            out << *exp->cast<symbol>();
-        } else if (exp->contains<vector>()) {
-            auto bnil = box(exp->get_runtime());
-            bool first = true;
-            out << "#(";
-            auto vec = exp->cast<vector>();
-            for (auto const& v : **vec) {
-                if (!first) {
-                    out << " ";
-                }
-                first = false;
-                xdisplay(v, out, is_write);
-            }
-            out << ")";
-        } else if (exp->contains<lambda>()) {
-            out << "#<procedure>";
-        } else {
-            throw std::range_error("unknown display expression");
-        }
-    }
-    return exp;
-}
-
-boxed xdisplay_args(boxed args, std::ostream& out, bool is_write) {
-    auto bnil = box(args->get_runtime());
-    auto r = bnil;
-    while (args->contains<vector>()) {
-        auto v = args->cast<vector>();
-        r = xdisplay((*v)->at(0), out, is_write);
-        args = (*v)->at(1);
-    }
-    if (!is_write) {
-        out << std::endl;
-    }
-    return r;
-}
-
-boxed print(boxed args) {
-    return xdisplay_args(args, std::cout, false);
-}
-
-boxed eprint(boxed args) {
-    return xdisplay_args(args, std::cerr, false);
-}
-
-boxed write(boxed args) {
-    return xdisplay_args(args, std::cout, true);
-}
-
-boxed ewrite(boxed args) {
-    return xdisplay_args(args, std::cerr, true);
+        vc(box<binary>(yield_defn_mark, runtime), make_vector(runtime)));
 }
 
 boxed unmemoize(boxed exp);
@@ -484,14 +443,12 @@ boxed serialize(boxed exp);
 
 boxed memoize_lambda(lambda proc, boxed defn) {
     return make_lambda<boxed>([proc, defn](boxed args) -> boxed {
-        //print(cons(serialize(unmemoize(args)), box(args->get_runtime())));
         if (is_yield_defn(args)) {
             if (defn->contains<lambda>()) {
-                return (**defn->cast<lambda>())(box(args->get_runtime()));
+                return (**defn->cast<lambda>())(make_vector(args->get_runtime()));
             }
             return defn;
         }
-        //print(cons(serialize(unmemoize(defn)), box(defn->get_runtime())));
         return (**proc)(args);
     }, defn->get_runtime(), true);
 }
@@ -505,7 +462,7 @@ boxed send(boxed k, boxed args) {
 }
 
 boxed sendv(boxed k, boxed v) {
-    return send(k, vc(v, box(v->get_runtime())));
+    return send(k, vc(v, make_vector(v->get_runtime())));
 }
 
 boxed rtenv_lookup(boxed i, boxed env) {
@@ -516,7 +473,7 @@ boxed rtenv_lookup(boxed i, boxed env) {
     if (second < (*v)->size()) {
         return (**v)[second];
     }
-    return box(i->get_runtime());
+    return make_vector(i->get_runtime());
 }
 
 boxed rtenv_setvar(boxed i, boxed val, boxed env) {
@@ -524,10 +481,16 @@ boxed rtenv_setvar(boxed i, boxed val, boxed env) {
     auto first = (*iv)->at(0)->cast<double>();
     auto second = (*iv)->at(1)->cast<double>();
     auto v = vlist_ref(env, first)->cast<vector>();
-    if (second >= (*v)->size()) {
-        (*v)->resize(second + 1, box(i->get_runtime()));
+    auto len = (*v)->size();
+    if (second >= len) {
+        auto runtime = i->get_runtime();
+        for (auto j = len; j < second; ++j) {
+            (*v)->push_back(make_vector(runtime));
+        }
+        (*v)->push_back(val);
+    } else {
+        (**v)[second] = val;
     }
-    (**v)[second] = val;
     return val;
 }
 
@@ -549,7 +512,7 @@ boxed send_value(boxed args) {
 }
 
 boxed make_step_contn(boxed k, boxed env, boxed args) {
-    return vc(box<symbol>("MCE-STEP-CONTN", k->get_runtime()), vc(k, vc(env, args)));
+    return vc(box<binary>(step_contn_mark, k->get_runtime()), vc(k, vc(env, args)));
 }
 
 bool is_step_contn(boxed args) {
@@ -557,8 +520,8 @@ bool is_step_contn(boxed args) {
         return false;
     }
     auto first = vlist_ref(args, 0);
-    return first->contains<symbol>() &&
-           (*first->cast<symbol>() == "MCE-STEP-CONTN");
+    return first->contains<binary>() &&
+           (*first->cast<binary>() == *step_contn_mark);
 }
 
 boxed step_contn_k(boxed args) {
@@ -578,8 +541,8 @@ bool is_transfer(boxed args) {
         return false;
     }
     auto first = vlist_ref(args, 0);
-    return first->contains<symbol>() &&
-           (*first->cast<symbol>() == "MCE-TRANSFER");
+    return first->contains<binary>() &&
+           (*first->cast<binary>() == *transfer_mark);
 }
 
 boxed transfer_args(boxed args) {
@@ -588,11 +551,11 @@ boxed transfer_args(boxed args) {
 
 boxed transfer(boxed args) {
     return send(vlist_ref(args, 2),
-        vc(box<symbol>("MCE-TRANSFER", args->get_runtime()), vlist_rest(args, 2)));
+        vc(box<binary>(transfer_mark, args->get_runtime()), vlist_rest(args, 2)));
 }
 
 boxed make_global_rtenv(std::shared_ptr<Runtime> runtime) {
-    return vc(make_vector(runtime), box(runtime));
+    return vc(make_vector(runtime), make_vector(runtime));
 }
 
 boxed applyx(boxed k, boxed env, boxed fn, boxed args) {
@@ -603,7 +566,7 @@ boxed result(boxed args) {
     auto runtime = args->get_runtime();
     auto a = make_vector(runtime);
     auto v = a->cast<vector>();
-    (*v)->push_back(box<symbol>("MCE-RESULT", runtime));
+    (*v)->push_back(box<binary>(result_mark, runtime));
     (*v)->push_back(vlist_ref(args, 0));
     return a;
 }
@@ -614,8 +577,8 @@ bool is_result(boxed exp) {
     }
     auto v = exp->cast<vector>();
     return ((*v)->size() == 2) &&
-           (**v)[0]->contains<symbol>() &&
-           (*(**v)[0]->cast<symbol>() == "MCE-RESULT");
+           (**v)[0]->contains<binary>() &&
+           (*(**v)[0]->cast<binary>() == *result_mark);
 }
 
 boxed result_val(boxed exp) {
@@ -636,8 +599,8 @@ boxed greater_than(boxed args) {
 
 boxed plus(boxed args) {
     double r = 0;
-    while (args->contains<vector>()) {
-        auto v = args->cast<vector>();
+    std::shared_ptr<vector> v;
+    while ((*(v = args->cast<vector>()))->size() == 2) {
         r += (*v)->at(0)->cast<double>();
         args = (*v)->at(1);
     }
@@ -647,11 +610,10 @@ boxed plus(boxed args) {
 boxed minus(boxed args) {
     auto v = args->cast<vector>();
     double n = (*v)->at(0)->cast<double>();
-    if (!(*v)->at(1)->contains<vector>()) {
+    if ((*(*v)->at(1)->cast<vector>())->size() != 2) {
         return box<double>(-n, args->get_runtime());
     }
-    while ((args = (*v)->at(1))->contains<vector>()) {
-        v = args->cast<vector>();
+    while ((*(v = (*v)->at(1)->cast<vector>()))->size() == 2) {
         n -= (*v)->at(0)->cast<double>();
     }
     return box<double>(n, args->get_runtime());
@@ -659,8 +621,8 @@ boxed minus(boxed args) {
 
 boxed multiply(boxed args) {
     double r = 1;
-    while (args->contains<vector>()) {
-        auto v = args->cast<vector>();
+    std::shared_ptr<vector> v;
+    while ((*(v = args->cast<vector>()))->size() == 2) {
         r *= (*v)->at(0)->cast<double>();
         args = (*v)->at(1);
     }
@@ -670,23 +632,17 @@ boxed multiply(boxed args) {
 boxed divide(boxed args) {
     auto v = args->cast<vector>();
     double n = (*v)->at(0)->cast<double>();
-    if (!(*v)->at(1)->contains<vector>()) {
+    if ((*(*v)->at(1)->cast<vector>())->size() != 2) {
         return box<double>(1 / n, args->get_runtime());
     }
-    while ((args = (*v)->at(1))->contains<vector>()) {
-        v = args->cast<vector>();
+    while ((*(v = (*v)->at(1)->cast<vector>()))->size() == 2) {
         n /= (*v)->at(0)->cast<double>();
     }
     return box<double>(n, args->get_runtime());
 }
 
-boxed is_null(boxed args) {
-    return box<bool>(vlist_ref(args, 0)->empty(), args->get_runtime());
-}
-
-boxed is_string(boxed args) {
-    auto a = vlist_ref(args, 0);
-    return box<bool>(a->contains<std::string>(), args->get_runtime());
+boxed gfloor(boxed args) {
+    return box<double>(floor(vlist_ref(args, 0)->cast<double>()), args->get_runtime());
 }
 
 boxed is_procedure(boxed args) {
@@ -694,12 +650,24 @@ boxed is_procedure(boxed args) {
     return box<bool>(a->contains<lambda>(), args->get_runtime());
 }
 
+boxed is_boolean(boxed args) {
+    auto a = vlist_ref(args, 0);
+    return box<bool>(a->contains<bool>(), args->get_runtime());
+}
+
+boxed is_number(boxed args) {
+    auto a = vlist_ref(args, 0);
+    return box<bool>(a->contains<double>(), args->get_runtime());
+}
+
 boxed make_vector(boxed args) {
     auto n = vlist_ref(args, 0)->cast<double>();
     auto runtime = args->get_runtime();
     auto a = make_vector(runtime);
     auto v = a->cast<vector>();
-    (*v)->resize(n, box(runtime));
+    for (auto i = n; i >= 1; --i) {
+        (*v)->push_back(make_vector(runtime));
+    }
     return a;
 }
 
@@ -725,14 +693,39 @@ boxed vector_set(boxed args) {
     auto i = vlist_ref(args, 1);
     auto exp = vlist_ref(args, 2);
     (*a->cast<vector>())->at(i->cast<double>()) = exp;
-    return box(args->get_runtime());
+    return make_vector(args->get_runtime());
 }
 
-boxed is_string_equal(boxed args) {
-    auto x = vlist_ref(args, 0);
-    auto y = vlist_ref(args, 1);
-    return box<bool>(*x->cast<std::string>() == *y->cast<std::string>(),
-                     args->get_runtime());
+boxed make_binary(boxed args) {
+    auto n = vlist_ref(args, 0)->cast<double>();
+    auto b = std::make_shared<binary>(n);
+    return box<binary>(b, args->get_runtime());
+}
+
+boxed is_binary(boxed args) {
+    auto a = vlist_ref(args, 0);
+    return box<bool>(a->contains<binary>(), args->get_runtime());
+}
+
+boxed binary_length(boxed args) {
+    auto a = vlist_ref(args, 0);
+    return box<double>(static_cast<double>(a->cast<binary>()->size()),
+                       args->get_runtime());
+}
+
+boxed binary_ref(boxed args) {
+    auto a = vlist_ref(args, 0);
+    auto i = vlist_ref(args, 1);
+    return box<double>(a->cast<binary>()->at(i->cast<double>()),
+                       args->get_runtime());
+}
+
+boxed binary_set(boxed args) {
+    auto a = vlist_ref(args, 0);
+    auto i = vlist_ref(args, 1);
+    auto n = vlist_ref(args, 2);
+    a->cast<binary>()->at(i->cast<double>()) = n->cast<double>();
+    return make_vector(args->get_runtime());
 }
 
 boxed is_number_equal(boxed args) {
@@ -742,43 +735,18 @@ boxed is_number_equal(boxed args) {
                      args->get_runtime());
 }
 
-boxed is_eq(boxed args) {
+boxed is_same_object(boxed args) {
     auto x = vlist_ref(args, 0);
     auto y = vlist_ref(args, 1);
 
     auto runtime = args->get_runtime();
 
-    if (x->empty()) {
-        return box<bool>(y->empty(), runtime);
-    }
-
-    if (y->empty()) {
-        return box<bool>(false, runtime);
-    }
-
     if (!x->contains_type_of(*y)) {
         return box<bool>(false, runtime);
     }
 
-    if (x->contains<bool>()) {
-        return box<bool>(x->cast<bool>() == y->cast<bool>(), runtime);
-    }
-
-    if (x->contains<char>()) {
-        return box<bool>(x->cast<char>() == y->cast<char>(), runtime);
-    }
-
-    if (x->contains<double>()) {
-        return box<bool>(x->cast<double>() == y->cast<double>(), runtime);
-    }
-
-    if (x->contains<std::string>()) {
-        return box<bool>(
-            x->cast<std::string>() == y->cast<std::string>(), runtime);
-    }
-
-    if (x->contains<symbol>()) {
-        return box<bool>(*x->cast<symbol>() == *y->cast<symbol>(), runtime);
+    if (x->contains<binary>()) {
+        return box<bool>(x->cast<binary>() == y->cast<binary>(), runtime);
     }
 
     if (x->contains<vector>()) {
@@ -800,12 +768,14 @@ boxed gapplyx(boxed args) {
 }
 
 boxed save(boxed args) {
-    return box<std::string>(mce_save(vlist_ref(args, 0)), args->get_runtime());
+    const auto& state = mce_save(vlist_ref(args, 0));
+    auto b = std::make_shared<binary>(state.begin(), state.end());
+    return box<binary>(b, args->get_runtime());
 }
 
 boxed restore(boxed args) {
     return sendv(vlist_ref(args, 0),
-                 mce_restore(*vlist_ref(args, 2)->cast<std::string>(),
+                 mce_restore(*vlist_ref(args, 2)->cast<binary>(),
                              args->get_runtime()));
 }
 
@@ -813,16 +783,45 @@ boxed getpid(boxed args) {
     return box<double>(static_cast<double>(::getpid()), args->get_runtime());
 }
 
+boxed output_binary(boxed args, FILE *stream) {
+    const auto b = vlist_ref(args, 0)->cast<binary>();
+    const auto start = static_cast<size_t>(vlist_ref(args, 1)->cast<double>());
+    const auto end = static_cast<size_t>(vlist_ref(args, 2)->cast<double>());
+    fwrite(b->data() + start, end - start, 1, stream);
+    return make_vector(args->get_runtime());
+}
+
+boxed output_binary_to_stdout(boxed args) {
+    return output_binary(args, stdout);
+}
+
+boxed output_binary_to_stderr(boxed args) {
+    return output_binary(args, stderr);
+}
+
+boxed error(boxed args) {
+    const auto proc = vlist_ref(args, 0)->cast<binary>();
+    const auto msg = vlist_ref(args, 1)->cast<binary>();
+    throw std::runtime_error(std::string(proc->begin() + 1, proc->end()) + ": " +
+                             std::string(msg->begin() + 1, msg->end()));
+}
+
 boxed Runtime::get_config(const std::string& k) {
     auto it = config_table.find(k);
     if (it == config_table.end()) {
-        return box<bool>(false, shared_from_this());
+        return nullptr;
     }
     return it->second;
 }
 
 boxed get_config(boxed args) {
-    return args->get_runtime()->get_config(*vlist_ref(args, 0)->cast<std::string>());
+    auto b = vlist_ref(args, 0)->cast<binary>();
+    const auto runtime = args->get_runtime();
+    const auto r = runtime->get_config(std::string(b->begin() + 1, b->end()));
+    if (r) {
+        return r;
+    }
+    return box<bool>(false, runtime);
 }
 
 void Runtime::set_config(const std::string& k, boxed v) {
@@ -836,7 +835,7 @@ void Runtime::set_gc_callback(boxed v) {
 boxed set_gc_callback(boxed args) {
     auto runtime = args->get_runtime();
     runtime->set_gc_callback(vlist_ref(args, 0));
-    return box(runtime);
+    return make_vector(runtime);
 }
 
 function* Runtime::get_global_function(const std::string& name) {
@@ -845,6 +844,13 @@ function* Runtime::get_global_function(const std::string& name) {
         return nullptr;
     }
     return it->second;
+}
+
+function* Runtime::get_global_function(const double i) {
+    if (i < core_globals.size()) {
+        return core_globals[i];
+    }
+    return nullptr;
 }
 
 void Runtime::register_global_function(const std::string& name, function f) {
@@ -859,17 +865,22 @@ void Runtime::register_kenv_function(function f) {
     kenvfn_set.insert(f);
 }
 
-boxed find_global(const symbol& sym, std::shared_ptr<Runtime> runtime) {
-    auto it = runtime->global_table.find(sym);
-    if (it == runtime->global_table.end()) {
+bool Runtime::is_kenv_function(function f) {
+    return kenvfn_set.find(f) != kenvfn_set.end();
+}
+
+boxed find_global(const binary& b, std::shared_ptr<Runtime> runtime) {
+    const auto sym = std::string(b.begin() + 1, b.end());
+    const auto f = runtime->get_global_function(sym);
+    if (!f) {
         // out_of_range doesn't show sym when serialized
         throw std::range_error(sym);
     }
-    return make_lambda<boxed>(it->second, runtime);
+    return make_lambda<boxed>(f, runtime);
 }
 
 boxed find_global(const double i, std::shared_ptr<Runtime> runtime) {
-    const auto f = runtime->core_globals.at(i);
+    const auto f = runtime->get_global_function(i);
     if (!f) {
         throw std::range_error(std::to_string(i));
     }
@@ -880,7 +891,7 @@ boxed find_global(boxed b) {
     if (b->contains<double>()) {
         return find_global(b->cast<double>(), b->get_runtime());
     }
-    return find_global(*b->cast<symbol>(), b->get_runtime());
+    return find_global(*b->cast<binary>(), b->get_runtime());
 }
 
 boxed step(boxed state) {
@@ -936,7 +947,7 @@ boxed wrap_global_lambda(boxed fn, boxed cf) {
     auto p = (*l)->target<function*>();
     auto runtime = fn->get_runtime();
 
-    if (p && (runtime->kenvfn_set.find(*p) != runtime->kenvfn_set.end())) {
+    if (p && runtime->is_kenv_function(*p)) {
         return make_lambda<boxed>([fn](boxed args) -> boxed {
             return handle_global_lambda_kenv(args, fn);
         }, runtime);
@@ -953,17 +964,27 @@ boxed extend_rtenv(boxed env, size_t, boxed values) {
 
 boxed improper_extend_rtenv(boxed env, size_t len, boxed values) {
     auto runtime = env->get_runtime();
-    auto bnil = box(runtime);
     auto av = make_vector(runtime);
     auto v = av->cast<vector>();
-    for (size_t i = 0; (i < len) && !values->empty(); ++i) {
-        if (i == (len - 1)) {
-            (*v)->push_back(values);
-        } else {
-            (*v)->push_back(vlist_ref(values, 0));
-            values = vlist_rest(values, 0);
+    size_t i = 0;
+
+    while (true) {
+        const auto is_vector = values->contains<vector>();
+        const auto v2 = is_vector ? values->cast<vector>() : nullptr;
+        const auto size = is_vector ? (*v2)->size() : 0;
+
+        if ((i == (len - 1)) || !is_vector || (size != 2)) {
+            if (!is_vector || (size != 0)) {
+                (*v)->push_back(values);
+            }
+            break;
         }
+
+        (*v)->push_back(vlist_ref(values, 0));
+        values = vlist_rest(values, 0);
+        ++i;
     }
+
     return vc(av, env);
 }
 
@@ -973,17 +994,16 @@ boxed handle_lambda(boxed args,
                     boxed env,
                     extend_rtenv_fn extend_rtenv) {
     auto runtime = args->get_runtime();
-    auto bnil = box(runtime);
 
     if (is_step_contn(args)) {
         return send(fn, vc(step_contn_k(args),
                            vc(extend_rtenv(env, len, step_contn_args(args)),
-                              bnil)));
+                              make_vector(runtime))));
     }
 
     return run(send(fn, vc(lookup_global(runtime->g_result, runtime),
                            vc(extend_rtenv(env, len, args),
-                              bnil))));
+                              make_vector(runtime)))));
 }
 
 boxed handle_contn_lambda(boxed args, boxed k) {
@@ -1009,7 +1029,7 @@ boxed evalx_initial(boxed args) {
     auto env = vlist_ref(args, 2);
     auto scanned = vlist_ref(args, 3);
     return make_lambda<boxed>([k, env, scanned](boxed) -> boxed {
-        return send(scanned, vc(k, vc(env, box(k->get_runtime()))));
+        return send(scanned, vc(k, vc(env, make_vector(k->get_runtime()))));
     }, args->get_runtime());
 }
 
@@ -1071,7 +1091,7 @@ boxed make_form(boxed n, boxed args) {
     auto defn = vc(n, args);
     auto runtime = args->get_runtime();
 
-    auto f = box(runtime);
+    auto f = make_vector(runtime);
     auto f2 = memoize_lambda(make_lambda<lambda>([f](boxed args) -> boxed {
         return (**f->cast<lambda>())(args);
     }, runtime), defn);
@@ -1096,8 +1116,8 @@ boxed aform(enum forms n, std::shared_ptr<Runtime> runtime) {
 boxed lookup_global(const double i, std::shared_ptr<Runtime> runtime) {
     auto r = find_global(i, runtime);
     auto defn = vc(aform(forms::global_lambda, runtime),
-                   vc(box<double>(i, runtime), box(runtime)));
-    auto f = box(runtime);
+                   vc(box<double>(i, runtime), make_vector(runtime)));
+    auto f = make_vector(runtime);
     auto f2 = memoize_lambda(make_lambda<lambda>([f](boxed args) -> boxed {
         return (**f->cast<lambda>())(args);
     }, runtime), defn);
@@ -1112,8 +1132,8 @@ boxed globalize(boxed x, boxed args, boxed cf) {
 
     auto runtime = x->get_runtime();
     auto defn = vc(aform(forms::constructed_function0, runtime),
-                   vc(args, vc(cf, box(runtime))));
-    auto f = box(runtime);
+                   vc(args, vc(cf, make_vector(runtime))));
+    auto f = make_vector(runtime);
     auto f2 = memoize_lambda(make_lambda<lambda>([f](boxed args) -> boxed {
         return (**f->cast<lambda>())(args);
     }, runtime), defn);
@@ -1125,7 +1145,7 @@ boxed constructed_function0(boxed args) {
     auto args2 = vlist_ref(args, 1);
     auto cf = vlist_ref(args, 2);
     return make_lambda<boxed>([args2, cf](boxed args3) -> boxed {
-        return applyx(make_form(forms::constructed_function1, vc(args3, box(args3->get_runtime()))),
+        return applyx(make_form(forms::constructed_function1, vc(args3, make_vector(args3->get_runtime()))),
                       make_global_rtenv(args3->get_runtime()), cf, args2);
     }, args->get_runtime());
 }
@@ -1146,7 +1166,7 @@ boxed if1(boxed args) {
     return make_lambda<boxed>([k, env, scan1, scan2](boxed args) -> boxed {
         auto v = vlist_ref(args, 0)->cast<bool>();
         auto f = v ? scan1 : scan2;
-        return send(f, vc(k, vc(env, box(args->get_runtime()))));
+        return send(f, vc(k, vc(env, make_vector(args->get_runtime()))));
     }, args->get_runtime());
 }
 
@@ -1157,11 +1177,11 @@ boxed if0(boxed args) {
     return make_lambda<boxed>([scan0, scan1, scan2](boxed args) -> boxed {
         auto k = vlist_ref(args, 0);
         auto env = vlist_ref(args, 1);
-        auto bnil = box(args->get_runtime());
+        auto runtime = args->get_runtime();
         return send(scan0,
             vc(make_form(forms::if1,
-                         vc(k, vc(env, vc(scan1, vc(scan2, bnil))))),
-               vc(env, bnil)));
+                         vc(k, vc(env, vc(scan1, vc(scan2, make_vector(runtime)))))),
+               vc(env, make_vector(runtime))));
     }, args->get_runtime());
 }
 
@@ -1180,10 +1200,10 @@ boxed sclis1(boxed args) {
     auto rest = vlist_ref(args, 3);
     return make_lambda<boxed>([k, env, rest](boxed args) -> boxed {
         auto v = vlist_ref(args, 0);
-        auto bnil = box(args->get_runtime());
+        auto runtime = args->get_runtime();
         return send(rest,
-            vc(make_form(forms::sclis2, vc(k, vc(v, bnil))),
-               vc(env, bnil)));
+            vc(make_form(forms::sclis2, vc(k, vc(v, make_vector(runtime)))),
+               vc(env, make_vector(runtime))));
     }, args->get_runtime());
 }
 
@@ -1193,11 +1213,11 @@ boxed sclis0(boxed args) {
     return make_lambda<boxed>([first, rest](boxed args) -> boxed {
         auto k = vlist_ref(args, 0);
         auto env = vlist_ref(args, 1);
-        auto bnil = box(args->get_runtime());
+        auto runtime = args->get_runtime();
         return send(first,
             vc(make_form(forms::sclis1,
-                         vc(k, vc(env, vc(rest, bnil)))),
-               vc(env, bnil)));
+                         vc(k, vc(env, vc(rest, make_vector(runtime))))),
+               vc(env, make_vector(runtime))));
     }, args->get_runtime());
 }
 
@@ -1206,7 +1226,7 @@ boxed scseq1(boxed args) {
     auto env = vlist_ref(args, 2);
     auto rest = vlist_ref(args, 3);
     return make_lambda<boxed>([k, env, rest](boxed) -> boxed {
-        return send(rest, vc(k, vc(env, box(k->get_runtime()))));
+        return send(rest, vc(k, vc(env, make_vector(k->get_runtime()))));
     }, args->get_runtime());
 }
 
@@ -1216,11 +1236,11 @@ boxed scseq0(boxed args) {
     return make_lambda<boxed>([first, rest](boxed args) -> boxed {
         auto k = vlist_ref(args, 0);
         auto env = vlist_ref(args, 1);
-        auto bnil = box(args->get_runtime());
+        auto runtime = args->get_runtime();
         return send(first,
             vc(make_form(forms::scseq1,
-                         vc(k, vc(env, vc(rest, bnil)))),
-               vc(env, bnil)));
+                         vc(k, vc(env, vc(rest, make_vector(runtime))))),
+               vc(env, make_vector(runtime))));
     }, args->get_runtime());
 }
 
@@ -1239,10 +1259,9 @@ boxed lambda0(boxed args) {
     return make_lambda<boxed>([len, scanned](boxed args) -> boxed {
         auto k = vlist_ref(args, 0);
         auto env = vlist_ref(args, 1);
-        auto bnil = box(args->get_runtime());
         return sendv(k,
-                     make_form(forms::lambda1,
-                               vc(len, vc(scanned, vc(env, bnil)))));
+            make_form(forms::lambda1,
+                      vc(len, vc(scanned, vc(env, make_vector(args->get_runtime()))))));
     }, args->get_runtime());
 }
 
@@ -1261,10 +1280,9 @@ boxed improper_lambda0(boxed args) {
     return make_lambda<boxed>([len, scanned](boxed args) -> boxed {
         auto k = vlist_ref(args, 0);
         auto env = vlist_ref(args, 1);
-        auto bnil = box(args->get_runtime());
         return sendv(k,
-                     make_form(forms::improper_lambda1,
-                               vc(len, vc(scanned, vc(env, bnil)))));
+            make_form(forms::improper_lambda1,
+                      vc(len, vc(scanned, vc(env, make_vector(args->get_runtime()))))));
     }, args->get_runtime());
 }
 
@@ -1280,14 +1298,14 @@ boxed letcc0(boxed args) {
     return make_lambda<boxed>([scanned](boxed args) -> boxed {
         auto k = vlist_ref(args, 0);
         auto env = vlist_ref(args, 1);
-        auto bnil = box(args->get_runtime());
+        auto runtime = args->get_runtime();
         return send(scanned,
             vc(k,
                vc(extend_rtenv(env,
                                1,
-                               vc(make_form(forms::letcc1, vc(k, bnil)),
-                                  bnil)),
-                  bnil)));
+                               vc(make_form(forms::letcc1, vc(k, make_vector(runtime))),
+                                  make_vector(runtime))),
+                  make_vector(runtime))));
     }, args->get_runtime());
 }
 
@@ -1307,10 +1325,10 @@ boxed define0(boxed args) {
     return make_lambda<boxed>([i, scanned](boxed args) -> boxed {
         auto k = vlist_ref(args, 0);
         auto env = vlist_ref(args, 1);
-        auto bnil = box(args->get_runtime());
+        auto runtime = args->get_runtime();
         return send(scanned,
-            vc(make_form(forms::define1, vc(k, vc(env, vc(i, bnil)))),
-               vc(env, bnil)));
+            vc(make_form(forms::define1, vc(k, vc(env, vc(i, make_vector(runtime))))),
+               vc(env, make_vector(runtime))));
     }, args->get_runtime());
 }
 
@@ -1328,17 +1346,17 @@ boxed application0(boxed args) {
     return make_lambda<boxed>([scanned](boxed args) -> boxed {
         auto k = vlist_ref(args, 0);
         auto env = vlist_ref(args, 1);
-        auto bnil = box(args->get_runtime());
+        auto runtime = args->get_runtime();
         return send(scanned,
-            vc(make_form(forms::application1, vc(k, vc(env, bnil))),
-               vc(env, bnil)));
+            vc(make_form(forms::application1, vc(k, vc(env, make_vector(runtime)))),
+               vc(env, make_vector(runtime))));
     }, args->get_runtime());
 }
 
 bool is_unmemoized(std::shared_ptr<vector> v) {
     return ((*v)->size() == 2) &&
-           (**v)[0]->contains<symbol>() &&
-           (*(**v)[0]->cast<symbol>() == "MCE-UNMEMOIZED");
+           (**v)[0]->contains<binary>() &&
+           (*(**v)[0]->cast<binary>() == *unmemoized_mark);
 }
 
 boxed unmemoized_repexp(std::shared_ptr<vector> v) {
@@ -1351,8 +1369,8 @@ boxed memoize_aux(boxed exp, cmap_table& tab, map_fn fn) {
         if (is_unmemoized(v)) {
             auto repexp = unmemoized_repexp(v);
             auto runtime = exp->get_runtime();
-            auto r = box(runtime);
-            auto f = box(runtime);
+            auto r = make_vector(runtime);
+            auto f = make_vector(runtime);
             auto entry = table_set(tab, exp, memoize_lambda(
                 make_lambda<lambda>([f](boxed args) -> boxed {
                     return (**f->cast<lambda>())(args);
@@ -1396,7 +1414,7 @@ boxed unmemoize_aux(boxed exp, cmap_table& tab, map_fn fn) {
         auto entry = table_set(tab, exp, make_vector(runtime));
         auto v = entry->cast<vector>();
 
-        (*v)->push_back(box<symbol>("MCE-UNMEMOIZED", runtime));
+        (*v)->push_back(box<binary>(unmemoized_mark, runtime));
         (*v)->push_back(fn(get_procedure_defn(exp)));
 
         return entry;
@@ -1417,7 +1435,7 @@ boxed make_serialized(size_t n, std::shared_ptr<Runtime> runtime) {
     auto a = make_vector(runtime);
     auto v = a->cast<vector>();
 
-    (*v)->push_back(box<symbol>("MCE-SERIALIZED", runtime));
+    (*v)->push_back(box<binary>(serialized_mark, runtime));
     (*v)->push_back(box<double>(static_cast<double>(n), runtime));
 
     return a;
@@ -1425,8 +1443,8 @@ boxed make_serialized(size_t n, std::shared_ptr<Runtime> runtime) {
 
 bool is_serialized(std::shared_ptr<vector> v) {
     return ((*v)->size() == 2) &&
-           (**v)[0]->contains<symbol>() &&
-           (*(**v)[0]->cast<symbol>() == "MCE-SERIALIZED");
+           (**v)[0]->contains<binary>() &&
+           (*(**v)[0]->cast<binary>() == *serialized_mark);
 }
 
 bool is_serialized(boxed exp) {
@@ -1498,22 +1516,13 @@ boxed deserialize(boxed exp) {
 
 json pickle_aux(boxed exp) {
     json j;
-    if (exp->empty()) {
-        j.push_back(std::string(1, null_code));
-    } else if (exp->contains<bool>()) {
+    if (exp->contains<bool>()) {
         j.push_back(std::string(1, exp->cast<bool>() ? true_code : false_code));
     } else if (exp->contains<double>()) {
         j.push_back(std::string(1, number_code));
         j.push_back(exp->cast<double>());
-    } else if (exp->contains<char>()) {
-        j.push_back(std::string(1, char_code));
-        j.push_back(std::string(1, exp->cast<char>()));
-    } else if (exp->contains<std::string>()) {
-        j.push_back(std::string(1, string_code));
-        j.push_back(*exp->cast<std::string>());
-    } else if (exp->contains<symbol>()) {
-        j.push_back(std::string(1, symbol_code));
-        j.push_back(*exp->cast<symbol>());
+    } else if (exp->contains<binary>()) {
+        j = base64::encode(*exp->cast<binary>());
     } else if (exp->contains<vector>()) {
         j.push_back(std::string(1, vector_code));
         auto vec = exp->cast<vector>();
@@ -1532,108 +1541,109 @@ std::string pickle(boxed exp) {
 }
 
 boxed unpickle_aux(const json& j, std::shared_ptr<Runtime> runtime) {
-    switch (j[0].get<std::string>()[0]) {
-    case true_code:
-        return box<bool>(true, runtime);
-    case false_code:
-        return box<bool>(false, runtime);
-    case number_code:
-        return box<double>(j[1].get<double>(), runtime);
-    case char_code:
-        return box<char>(j[1].get<std::string>()[0], runtime);
-    case string_code:
-        return box<std::string>(j[1].get<std::string>(), runtime);
-    case symbol_code:
-        return box<symbol>(j[1].get<std::string>(), runtime);
-    case vector_code: {
-        auto a = make_vector(runtime);
-        auto v = a->cast<vector>();
-        auto size = j.size();
-        (*v)->resize(size - 2);
-        for (json::size_type i = 2; i < size; ++i) {
-            (*v)->at(i - 2) = unpickle_aux(j[i], runtime);
+    if (j.is_array()) {
+        switch (j[0].get<std::string>()[0]) {
+        case true_code:
+            return box<bool>(true, runtime);
+        case false_code:
+            return box<bool>(false, runtime);
+        case number_code:
+            return box<double>(j[1].get<double>(), runtime);
+        case vector_code: {
+            auto a = make_vector(runtime);
+            auto v = a->cast<vector>();
+            auto size = j.size();
+            (*v)->resize(size - 2);
+            for (json::size_type i = 2; i < size; ++i) {
+                (*v)->at(i - 2) = unpickle_aux(j[i], runtime);
+            }
+            return a;
         }
-        return a;
+        default:
+            throw std::range_error("unknown unpickle expression");
+        }
     }
-    default:
-        return box(runtime);
+    if (j.is_string()) {
+        return box<binary>(
+            std::make_shared<binary>(base64::decode(j.get<std::string>())),
+            runtime);
     }
+    throw std::range_error("unknown unpickle expression");
 }
 
-boxed unpickle(const std::string& s, std::shared_ptr<Runtime> runtime) {
-    return unpickle_aux(json::parse(s), runtime);
+json parse(const std::string& s) {
+    return json::parse(s);
+}
+
+json parse(const binary& b) {
+    return json::parse(b.data(), b.data() + b.size());
+}
+
+json parse(std::istream& stream) {
+    json j;
+    stream >> j;
+    return j;
+}
+
+template<typename Input>
+boxed unpickle(Input& s, std::shared_ptr<Runtime> runtime) {
+    return unpickle_aux(parse(s), runtime);
 }
 
 std::string mce_save(boxed exp) {
     return pickle(serialize(unmemoize(exp)));
 }
 
-boxed mce_restore(const std::string& s, std::shared_ptr<Runtime> runtime) {
+template<typename Input>
+boxed mce_restore(Input& s, std::shared_ptr<Runtime> runtime) {
     return memoize(deserialize(unpickle(s, runtime)));
 }
 
-boxed start(const std::string& s, boxed args) {
+template<typename Input>
+boxed start(Input& s, boxed args) {
     auto runtime = args->get_runtime();
     auto r = mce_restore(s, runtime);
-    if (r->contains<lambda>()) {
-        return (**r->cast<lambda>())(args);
+    if (r->template contains<lambda>()) {
+        return (**r->template cast<lambda>())(args);
     }
     return run(r);
 }
 
-boxed start(std::istream &stream, boxed args) {
-    json j;
-    stream >> j;
-    return start(j.get<std::string>(), args);
-}
-
 // Copy binary representation to vector
 template<typename T>
-void bpickle_aux(const T& data, std::vector<unsigned char>& v) {
+void bpickle_aux(const T& data, std::vector<uint8_t>& v) {
     for (size_t i = 0; i < sizeof(data); ++i) {
-        v.push_back(reinterpret_cast<const unsigned char*>(&data)[i]);
+        v.push_back(reinterpret_cast<const uint8_t*>(&data)[i]);
     }
 }
 
 // Copy index to another given position in a vector
-void bpickle_aux(std::vector<unsigned char>& v, size_t pos, uint64_t ref) {
+void bpickle_aux(std::vector<uint8_t>& v, size_t pos, uint64_t ref) {
     for (size_t i = 0; i < sizeof(ref); ++i) {
-        v[pos + i] = reinterpret_cast<const unsigned char*>(&ref)[i];
+        v[pos + i] = reinterpret_cast<const uint8_t*>(&ref)[i];
     }
 }
 
 // Copy current size of vector to another given position in the vector
-void bpickle_aux(std::vector<unsigned char>& v, size_t pos) {
+void bpickle_aux(std::vector<uint8_t>& v, size_t pos) {
     bpickle_aux(v, pos, v.size());
 }
 
 void bpickle(boxed exp,
              std::vector<uint64_t>& refs,
-             std::vector<unsigned char>& v,
+             std::vector<uint8_t>& v,
              size_t vec_offset) {
-    if (exp->empty()) {
-        v.push_back(null_code);
-    } else if (exp->contains<bool>()) {
+    if (exp->contains<bool>()) {
         v.push_back(exp->cast<bool>() ? true_code : false_code);
     } else if (exp->contains<double>()) {
         v.push_back(number_code);
         bpickle_aux(exp->cast<double>(), v);
-    } else if (exp->contains<char>()) {
-        v.push_back(char_code);
-        bpickle_aux(exp->cast<char>(), v);
-    } else if (exp->contains<std::string>()) {
-        v.push_back(string_code);
-        auto s = exp->cast<std::string>();
-        bpickle_aux(static_cast<uint64_t>(s->size()), v);
-        for (auto const& c : *s) {
-            bpickle_aux(c, v);
-        }
-    } else if (exp->contains<symbol>()) {
-        v.push_back(symbol_code);
-        auto s = exp->cast<symbol>();
-        bpickle_aux(static_cast<uint64_t>(s->size()), v);
-        for (auto const& c : *s) {
-            bpickle_aux(c, v);
+    } else if (exp->contains<binary>()) {
+        v.push_back(binary_code);
+        auto bin = exp->cast<binary>();
+        bpickle_aux(static_cast<uint64_t>(bin->size()), v);
+        for (auto const& b : *bin) {
+            bpickle_aux(b, v);
         }
     } else if (exp->contains<vector>()) {
         auto vec = exp->cast<vector>();
@@ -1684,15 +1694,17 @@ void bpickle(boxed exp,
     }
 }
 
-void bconvert_out(const std::string& s, std::shared_ptr<Runtime> runtime) {
-    auto exp = serialize(unmemoize(mce_restore(s, runtime)))->cast<vector>();
+template<typename Input>
+void bconvert_out(Input& s, std::shared_ptr<Runtime> runtime) {
+    auto exp = serialize(unmemoize(mce_restore(s, runtime)))->template cast<vector>();
 
     std::vector<uint64_t> refs;
-    std::vector<unsigned char> v;
+    std::vector<uint8_t> v;
     bpickle((*exp)->at(0), refs, v, 0);
 
-    if (refs.size() != (*exp)->at(1)->cast<double>()) {
-    std::cerr << refs.size() << " " << (*exp)->at(1)->cast<double>() << std::endl;
+    const auto nrefs = (*exp)->at(1)->template cast<double>();
+    if (refs.size() != nrefs) {
+        //std::cerr << refs.size() << " " << nrefs << std::endl;
         throw std::length_error("unexpected number of references");
     }
 
@@ -1701,28 +1713,22 @@ void bconvert_out(const std::string& s, std::shared_ptr<Runtime> runtime) {
     std::cout.write(reinterpret_cast<const char*>(v.data()), v.size());
 }
 
-void bconvert_out(std::istream &stream, std::shared_ptr<Runtime> runtime) {
-    json j;
-    stream >> j;
-    return bconvert_out(j.get<std::string>(), runtime);
-}
-
-boxed bunpickle(const unsigned char *s,
+boxed bunpickle(const uint8_t *s,
                 const size_t len,
                 const uint64_t i,
                 std::unordered_map<uint64_t, boxed>& refs,
                 std::shared_ptr<Runtime> runtime);
 
-boxed bunpickle(const unsigned char *s,
+boxed bunpickle(const uint8_t *s,
                 const size_t len,
                 const uint64_t i,
-                const std::string& marker,
+                boxed mark,
                 std::unordered_map<uint64_t, boxed>& refs,
                 std::shared_ptr<Runtime> runtime) {
     auto r = make_vector(runtime);
     refs[i] = r;
     auto v = r->cast<vector>();
-    (*v)->push_back(box<symbol>(marker, runtime));
+    (*v)->push_back(mark);
     assert(i + 8 < len);
     for (auto el : **bunpickle(s, len, *(uint64_t*)&s[i + 1], refs, runtime)->cast<vector>()) {
         (*v)->push_back(el);
@@ -1730,7 +1736,7 @@ boxed bunpickle(const unsigned char *s,
     return r;
 }
 
-boxed bunpickle(const unsigned char *s,
+boxed bunpickle(const uint8_t *s,
                 const size_t len,
                 const uint64_t i,
                 std::unordered_map<uint64_t, boxed>& refs,
@@ -1742,9 +1748,6 @@ boxed bunpickle(const unsigned char *s,
 
     assert(i < len);
     switch (s[i]) {
-        case null_code:
-            return box(runtime);
-
         case true_code:
             return box<bool>(true, runtime);
 
@@ -1755,24 +1758,11 @@ boxed bunpickle(const unsigned char *s,
             assert(i + sizeof(double) < len);
             return box<double>(*(double*)&s[i + 1], runtime);
 
-        case char_code:
-            assert(i + 1 < len);
-            return box<char>(s[i + 1], runtime);
-
-        case string_code: {
+        case binary_code: {
             assert(i + 8 < len);
             const auto size = *(uint64_t*)&s[i + 1];
             assert(i + 8 + size < len);
-            return box<std::string>(std::string(reinterpret_cast<const char*>(&s[i + 9]), size),
-                                    runtime);
-        }
-
-        case symbol_code: {
-            assert(i + 8 < len);
-            const auto size = *(uint64_t*)&s[i + 1];
-            assert(i + 8 + size < len);
-            return box<symbol>(std::string(reinterpret_cast<const char*>(&s[i + 9]), size),
-                               runtime);
+            return box<binary>(std::make_shared<binary>(&s[i + 9], &s[i + 9 + size]), runtime);
         }
 
         case vector_code: {
@@ -1789,16 +1779,16 @@ boxed bunpickle(const unsigned char *s,
         }
 
         case unmemoized_code:
-            return bunpickle(s, len, i, "MCE-UNMEMOIZED", refs, runtime);
+            return bunpickle(s, len, i, box<binary>(unmemoized_mark, runtime), refs, runtime);
 
         case result_code:
-            return bunpickle(s, len, i, "MCE-RESULT", refs, runtime);
+            return bunpickle(s, len, i, box<binary>(result_mark, runtime), refs, runtime);
 
         case step_contn_code:
-            return bunpickle(s, len, i, "MCE-STEP-CONTN", refs, runtime);
+            return bunpickle(s, len, i, box<binary>(step_contn_mark, runtime), refs, runtime);
 
         case transfer_code:
-            return bunpickle(s, len, i, "MCE-TRANSFER", refs, runtime);
+            return bunpickle(s, len, i, box<binary>(transfer_mark, runtime), refs, runtime);
 
         default:
             throw std::range_error("unknown bunpickle expression");
@@ -1808,7 +1798,7 @@ boxed bunpickle(const unsigned char *s,
 void bconvert_in(const std::string& s, std::shared_ptr<Runtime> runtime) {
     std::unordered_map<uint64_t, boxed> refs;
     json j = mce_save(bunpickle(
-        &reinterpret_cast<const unsigned char*>(s.c_str())[8], s.size(), 0, refs, runtime));
+        &reinterpret_cast<const uint8_t*>(s.c_str())[8], s.size(), 0, refs, runtime));
     std::cout << j.dump();
 }
 
@@ -1816,7 +1806,7 @@ void bconvert_in(std::istream &stream, std::shared_ptr<Runtime> runtime) {
     uint64_t size;
     stream.read(reinterpret_cast<char*>(&size), sizeof(size));
 
-    std::vector<unsigned char> v(size);
+    std::vector<uint8_t> v(size);
     stream.read(reinterpret_cast<char*>(v.data()), size);
 
     std::unordered_map<uint64_t, boxed> refs;
@@ -1836,7 +1826,7 @@ boxed start(int argc, char *argv[]) {
          cxxopts::value<std::string>())
         ("config",
          "Set configuration",
-         cxxopts::value<std::string>())
+         cxxopts::value<std::vector<std::string>>())
         ("bconvert-out",
          "Convert CPS form or state to binary format",
          cxxopts::value<std::string>()->implicit_value(""))
@@ -1847,16 +1837,17 @@ boxed start(int argc, char *argv[]) {
     auto runtime = std::make_shared<Runtime>();
     if (opts.count("help")) {
         std::cout << options.help() << std::endl;
-        return box(runtime);
+        return make_vector(runtime);
     }
     runtime->set_gc_threshold(opts["gc-threshold"].as<size_t>());
     if (opts.count("config")) {
-        auto kv = opts["config"].as<std::string>();
-        auto pos = kv.find('=');
-        runtime->set_config(kv.substr(0, pos), box<std::string>(kv.substr(pos + 1), runtime));
+        for (auto kv : opts["config"].as<std::vector<std::string>>()) {
+            auto pos = kv.find('=');
+            runtime->set_config(kv.substr(0, pos), box<std::string>(kv.substr(pos + 1), runtime));
+        }
     }
     if (opts.count("run")) {
-        return start(json::parse(opts["run"].as<std::string>()), box(runtime));
+        return start<const std::string>(opts["run"].as<std::string>(), make_vector(runtime));
     }
     if (opts.count("bconvert-out")) {
         auto state = opts["bconvert-out"].as<std::string>();
@@ -1865,7 +1856,7 @@ boxed start(int argc, char *argv[]) {
         } else {
             bconvert_out(state, runtime);
         }
-        return box(runtime);
+        return make_vector(runtime);
     }
     if (opts.count("bconvert-in")) {
         auto state = opts["bconvert-in"].as<std::string>();
@@ -1874,9 +1865,9 @@ boxed start(int argc, char *argv[]) {
         } else {
             bconvert_in(state, runtime);
         }
-        return box(runtime);
+        return make_vector(runtime);
     }
-    return start(std::cin, box(runtime));
+    return start<std::istream>(std::cin, make_vector(runtime));
 }
 
 boxed cf_test(boxed args) {
@@ -1884,7 +1875,7 @@ boxed cf_test(boxed args) {
     auto x = vlist_ref(args, 1);
     if (n == 0) {
         return make_lambda<boxed>([x](boxed args) {
-            return cf_test(vc(vlist_ref(args, 0), vc(x, box(args->get_runtime()))));
+            return cf_test(vc(vlist_ref(args, 0), vc(x, make_vector(args->get_runtime()))));
         }, args->get_runtime());
     }
     return box<double>(x->cast<double>() + n, args->get_runtime());
@@ -1902,21 +1893,21 @@ Runtime::Runtime() :
     gc_threshold(10000),
     calling_gc_callback(false),
     global_table {
-        { "print", print },
-        { "eprint", eprint },
-        { "write", write },
-        { "write-state", write },
-        { "ewrite", write },
         { "save", save },
         { "restore", restore },
         { "getpid", getpid },
         { "get-config", mce::get_config },
         { "cf-test", cf_test },
-        { "set-gc-callback!", mce::set_gc_callback }
+        { "set-gc-callback!", mce::set_gc_callback },
+        { "output-binary-to-stdout", output_binary_to_stdout },
+        { "output-binary-to-stderr", output_binary_to_stderr },
+        { "error", error }
     },
     core_globals {
         result,
         gapplyx,
+        is_boolean,
+        is_number,
         less_than,
         greater_than,
         plus,
@@ -1924,25 +1915,28 @@ Runtime::Runtime() :
         multiply,
         divide,
         is_number_equal,
-        nullptr,
-        is_null,
+        gfloor,
         make_vector,
         is_vector,
         vector_length,
         vector_ref,
         vector_set,
         is_procedure,
-        is_eq,
-        is_string,
-        is_string_equal,
+        make_binary,
+        is_binary,
+        binary_length,
+        binary_ref,
+        binary_set,
+        error,
+        is_same_object,
         transfer,
         transfer_test
     },
-    kenvfn_set({
+    kenvfn_set {
         gapplyx,
         transfer,
         restore
-    }),
+    },
     g_result(std::find(core_globals.begin(), core_globals.end(), result) -
              core_globals.begin()) {}
 

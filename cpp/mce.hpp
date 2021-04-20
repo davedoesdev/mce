@@ -16,11 +16,6 @@ class Runtime;
 // Adapted from boost::any but without the need for type_traits
 class Box {
 public:
-    explicit Box(std::shared_ptr<Runtime> runtime) :
-        content(nullptr),
-        runtime(runtime) {
-    }
-
     template<typename T>
     explicit Box(const T& v, std::shared_ptr<Runtime> runtime) :
         content(new holder<T>(v)),
@@ -28,7 +23,7 @@ public:
     }
 
     explicit Box(const Box& b) :
-        content(b.content ? b.content->clone() : nullptr),
+        content(b.content->clone()),
         runtime(b.runtime) {
     }
 
@@ -39,10 +34,6 @@ public:
     Box& operator=(const Box& b) {
         Box(b).swap(*this);
         return *this;
-    }
-
-    bool empty() {
-        return content == nullptr;
     }
 
     template<typename T>
@@ -57,7 +48,7 @@ public:
 
     template<typename T>
     typename box_type<T>::type cast() {
-        if (empty()) {
+        if (content == nullptr) {
             throw std::range_error("bad box cast");
         }
         return *static_cast<typename box_type<T>::type*>(
@@ -126,11 +117,6 @@ R make_lambda(std::function<function> fn,
               std::shared_ptr<Runtime> runtime,
               bool has_defn = false);
 
-class symbol : public std::string {
-public:
-    symbol(const std::string& s);
-};
-
 class Runtime : public std::enable_shared_from_this<Runtime> {
 private:
     size_t gc_threshold;
@@ -144,18 +130,16 @@ private:
         std::unordered_map<func*, std::pair<bool, std::weak_ptr<func>>> functions;
     } allocated;
 
-    std::unordered_map<std::string, function*> global_table;
-    std::vector<function*> core_globals;
-    std::unordered_set<function*> kenvfn_set;
     std::unordered_map<std::string, boxed> config_table;
 
     friend boxed make_vector(std::shared_ptr<Runtime> runtime);
     friend lambda make_lambda<lambda>(std::function<function> fn,
                                       std::shared_ptr<Runtime> runtime,
                                       bool has_defn);
-    friend boxed find_global(const symbol& sym, std::shared_ptr<Runtime> runtime);
-    friend boxed find_global(const double i, std::shared_ptr<Runtime> runtime);
-    friend boxed wrap_global_lambda(boxed fn, boxed cf);
+
+    std::unordered_map<std::string, function*> global_table;
+    std::vector<function*> core_globals;
+    std::unordered_set<function*> kenvfn_set;
 
 public:
     Runtime();
@@ -169,10 +153,12 @@ public:
     void set_gc_callback(boxed v);
 
     function* get_global_function(const std::string& name);
+    function* get_global_function(const double i);
     void register_global_function(const std::string& name, function f);
     void unregister_global_function(const std::string& name);
 
     void register_kenv_function(function f);
+    bool is_kenv_function(function f);
 
     const double g_result;
 };

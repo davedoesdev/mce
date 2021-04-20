@@ -22,10 +22,8 @@ function vector_cmap(f, vec, tab, set_entry) {
     return entry;
 }
 
-const mark_prefix = Buffer.from(marker_code + "MCE-");
-
 function mark(type) {
-    return Buffer.concat([mark_prefix, Buffer.from(type)]);
+    return Buffer.from(marker_code + "MCE-" + type);
 }
 
 const yield_defn_mark = mark("YIELD-DEFINITION");
@@ -944,7 +942,7 @@ async function start(argv) {
         }
     }
     if (args.run) {
-        return await start_string(args.run);
+        return await start_string_or_buffer(args.run);
     }
     return await start_stream(process.stdin);
 }

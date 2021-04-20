@@ -158,12 +158,12 @@
 (define mark-prefix (string-append marker-code "MCE-"))
 
 (define (mark type)
-    (string-append mark-prefix (string-upcase (symbol->string type))))
+    (string-append mark-prefix type))
 
 (define (marked? s)
     (substring-at? s mark-prefix 0))
 
-(define step-contn-mark (mark 'step-contn))
+(define step-contn-mark (mark "STEP-CONTN"))
 
 (define (make-step-contn k env args)
     (cons step-contn-mark (cons k (cons env args))))
@@ -188,7 +188,7 @@
 
 (define (make-global-rtenv) (vector '#() (vector)))
 
-(define yield-defn-mark (mark 'yield-definition))
+(define yield-defn-mark (mark "YIELD-DEFINITION"))
 
 (define (yield-defn? args)
     (and (not (null? args)) (equal? (car args) yield-defn-mark)))
@@ -499,7 +499,7 @@
 (define (step state)
     (applyvl (vector-ref state 0) (vector-ref state 1)))
 
-(define result-mark (mark 'result))
+(define result-mark (mark "RESULT"))
 
 (define (result v)
     (vector result-mark v))
@@ -574,7 +574,7 @@
         (lambda args (handle-global-lambda-kenv args fn))
         (lambda args (handle-global-lambda args fn cf))))
 
-(define transfer-mark (mark 'transfer))
+(define transfer-mark (mark "TRANSFER"))
 
 (define (transfer k env fn . args)
     (sendl fn (cons transfer-mark args)))
@@ -782,7 +782,7 @@
                         (begin (vector-set! entry i (f (vector-ref vec i)))
                                (loop (+ i 1)))))))))
 
-(define unmemoized-mark (mark 'unmemoized))
+(define unmemoized-mark (mark "UNMEMOIZED"))
 
 (define (unmemoized? v)
     (and (= (vector-length v) 2)
@@ -833,7 +833,7 @@
              (fn (lambda (x) (unmemoize-aux x tab fn))))
         (fn exp)))
 
-(define serialized-mark (mark 'serialized))
+(define serialized-mark (mark "SERIALIZED"))
 
 (define (make-serialized n)
     (vector serialized-mark n))
