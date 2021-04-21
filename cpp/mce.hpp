@@ -12,22 +12,32 @@ template<typename T>
 struct box_type { typedef T type; };
 
 class Runtime;
+class Box;
+typedef std::shared_ptr<Box> boxed;
 
 class RuntimeInfo {
 public:
-    explicit RuntimeInfo() :
-        runtime(std::make_shared<Runtime>()) {}
+    explicit RuntimeInfo();
 
     inline std::shared_ptr<Runtime> get_runtime() const {
         return runtime;
     }
 
+    inline boxed get_nil() const {
+        return nil;
+    }
+
 private:
+    explicit RuntimeInfo(std::shared_ptr<Runtime> runtime, boxed nil);
+
     std::shared_ptr<Runtime> runtime;
+    boxed nil;
+
+    friend class Box;
 };
 
 // Adapted from boost::any but without the need for type_traits
-class Box {
+class Box : public std::enable_shared_from_this<Box> {
 public:
     template<typename T>
     explicit Box(const T& v, const RuntimeInfo& info) :
@@ -36,6 +46,7 @@ public:
     }
 
     explicit Box(const Box& b) :
+        std::enable_shared_from_this<Box>(),
         content(b.content->clone()),
         info(b.info) {
     }
@@ -68,8 +79,11 @@ public:
             content->address(typeid(typename box_type<T>::type)));
     }
 
-    RuntimeInfo get_runtime_info() {
-        return info;
+    inline RuntimeInfo get_runtime_info() {
+        if (info.get_nil()) {
+            return info;
+        }
+        return RuntimeInfo(info.get_runtime(), shared_from_this());
     }
 
 private:
@@ -119,7 +133,6 @@ private:
     RuntimeInfo info;
 };
 
-typedef std::shared_ptr<Box> boxed;
 typedef std::shared_ptr<std::vector<boxed>> vector;
 typedef boxed function(boxed);
 typedef std::shared_ptr<std::function<function>> func;
@@ -158,7 +171,7 @@ public:
     explicit Runtime();
 
     void set_gc_threshold(size_t v);
-    void maybe_gc(const RuntimeInfo& info);
+    void maybe_gc(boxed x);
 
     boxed get_config(const std::string& k);
     void set_config(const std::string& k, boxed v);

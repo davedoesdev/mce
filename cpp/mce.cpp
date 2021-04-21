@@ -247,10 +247,12 @@ std::string mce_save(boxed exp);
 template<typename Input>
 boxed mce_restore(Input& s, const RuntimeInfo& info);
 
-void Runtime::maybe_gc(const RuntimeInfo& info) {
+void Runtime::maybe_gc(boxed x) {
     if (((allocated.vectors.size() > gc_threshold) ||
          (allocated.functions.size() > gc_threshold)) &&
         !calling_gc_callback) {
+        const auto& info = x->get_runtime_info();
+
         std::vector<std::vector<size_t>> stats;
         add_stats(stats);
         // First we need to find which objects are still pointed to.
@@ -370,7 +372,7 @@ void Runtime::maybe_gc(const RuntimeInfo& info) {
             std::unique_ptr<bool, void(*)(bool*)> cleanup(&calling_gc_callback, [](bool *p) {
                 *p = false;
             });
-            auto r = (**gc_callback->cast<lambda>())(vc(a, make_vector(info)));
+            auto r = (**gc_callback->cast<lambda>())(vc(a, info.get_nil()));
             assert(!r->contains<bool>() || r->cast<bool>());
         }
     }
@@ -457,7 +459,7 @@ bool is_yield_defn(boxed args) {
 boxed get_procedure_defn(boxed proc) {
     const auto& info = proc->get_runtime_info();
     return (**proc->cast<lambda>())(
-        vc(box<binary>(yield_defn_mark, info), make_vector(info)));
+        vc(box<binary>(yield_defn_mark, info), info.get_nil()));
 }
 
 boxed unmemoize(boxed exp);
@@ -467,7 +469,7 @@ boxed memoize_lambda(lambda proc, boxed defn) {
     return make_lambda<boxed>([proc, defn](boxed args) -> boxed {
         if (is_yield_defn(args)) {
             if (defn->contains<lambda>()) {
-                return (**defn->cast<lambda>())(make_vector(args->get_runtime_info()));
+                return (**defn->cast<lambda>())(args->get_runtime_info().get_nil());
             }
             return defn;
         }
@@ -484,7 +486,7 @@ boxed send(boxed k, boxed args) {
 }
 
 boxed sendv(boxed k, boxed v) {
-    return send(k, vc(v, make_vector(v->get_runtime_info())));
+    return send(k, vc(v, v->get_runtime_info().get_nil()));
 }
 
 boxed rtenv_lookup(boxed i, boxed env) {
@@ -495,7 +497,7 @@ boxed rtenv_lookup(boxed i, boxed env) {
     if (second < (*v)->size()) {
         return (**v)[second];
     }
-    return make_vector(i->get_runtime_info());
+    return i->get_runtime_info().get_nil();
 }
 
 boxed rtenv_setvar(boxed i, boxed val, boxed env) {
@@ -505,9 +507,9 @@ boxed rtenv_setvar(boxed i, boxed val, boxed env) {
     auto v = vlist_ref(env, first)->cast<vector>();
     auto len = (*v)->size();
     if (second >= len) {
-        const auto& info = i->get_runtime_info();
+        const auto nil = i->get_runtime_info().get_nil();
         for (auto j = len; j < second; ++j) {
-            (*v)->push_back(make_vector(info));
+            (*v)->push_back(nil);
         }
         (*v)->push_back(val);
     } else {
@@ -576,8 +578,9 @@ boxed transfer(boxed args) {
         vc(box<binary>(transfer_mark, args->get_runtime_info()), vlist_rest(args, 2)));
 }
 
-boxed make_global_rtenv(const RuntimeInfo& info) {
-    return vc(make_vector(info), make_vector(info));
+boxed make_global_rtenv(boxed x) {
+    const auto& info = x->get_runtime_info();
+    return vc(make_vector(info), info.get_nil());
 }
 
 boxed applyx(boxed k, boxed env, boxed fn, boxed args) {
@@ -684,11 +687,11 @@ boxed is_number(boxed args) {
 
 boxed make_vector(boxed args) {
     auto n = vlist_ref(args, 0)->cast<double>();
-    const auto& info = args->get_runtime_info();
-    auto a = make_vector(info);
+    auto a = make_vector(args->get_runtime_info());
     auto v = a->cast<vector>();
+    const auto nil = args->get_runtime_info().get_nil();
     for (auto i = n; i >= 1; --i) {
-        (*v)->push_back(make_vector(info));
+        (*v)->push_back(nil);
     }
     return a;
 }
@@ -715,7 +718,7 @@ boxed vector_set(boxed args) {
     auto i = vlist_ref(args, 1);
     auto exp = vlist_ref(args, 2);
     (*a->cast<vector>())->at(i->cast<double>()) = exp;
-    return make_vector(args->get_runtime_info());
+    return args->get_runtime_info().get_nil();
 }
 
 boxed make_binary(boxed args) {
@@ -747,7 +750,7 @@ boxed binary_set(boxed args) {
     auto i = vlist_ref(args, 1);
     auto n = vlist_ref(args, 2);
     a->cast<binary>()->at(i->cast<double>()) = n->cast<double>();
-    return make_vector(args->get_runtime_info());
+    return args->get_runtime_info().get_nil();
 }
 
 boxed is_number_equal(boxed args) {
@@ -810,7 +813,7 @@ boxed output_binary(boxed args, FILE *stream) {
     const auto start = static_cast<size_t>(vlist_ref(args, 1)->cast<double>());
     const auto end = static_cast<size_t>(vlist_ref(args, 2)->cast<double>());
     fwrite(b->data() + start, end - start, 1, stream);
-    return make_vector(args->get_runtime_info());
+    return args->get_runtime_info().get_nil();
 }
 
 boxed output_binary_to_stdout(boxed args) {
@@ -857,7 +860,7 @@ void Runtime::set_gc_callback(boxed v) {
 boxed set_gc_callback(boxed args) {
     const auto& info = args->get_runtime_info();
     info.get_runtime()->set_gc_callback(vlist_ref(args, 0));
-    return make_vector(info);
+    return info.get_nil();
 }
 
 function* Runtime::get_global_function(const std::string& name) {
@@ -921,12 +924,11 @@ boxed step(boxed state) {
 }
 
 boxed run(boxed state) {
-    const auto& info = state->get_runtime_info();
-    const auto runtime = info.get_runtime();
+    const auto runtime = state->get_runtime_info().get_runtime();
 
     while (!is_result(state)) {
         state = step(state);
-        runtime->maybe_gc(info);
+        runtime->maybe_gc(state);
     }
 
     return result_val(state);
@@ -950,7 +952,7 @@ boxed handle_global_lambda(boxed args, boxed fn, boxed cf) {
     return globalize((**f)(args), args, cf);
 }
 
-boxed lookup_global(const double i, const RuntimeInfo& info);
+boxed lookup_global(const double i, boxed x);
 
 boxed handle_global_lambda_kenv(boxed args, boxed fn) {
     if (is_step_contn(args)) {
@@ -959,9 +961,8 @@ boxed handle_global_lambda_kenv(boxed args, boxed fn) {
                               step_contn_args(args))));
     }
 
-    const auto& info = args->get_runtime_info();
-    return run(send(fn, vc(lookup_global(info.get_runtime()->g_result, info),
-                           vc(make_global_rtenv(info),
+    return run(send(fn, vc(lookup_global(args->get_runtime_info().get_runtime()->g_result, args),
+                           vc(make_global_rtenv(args),
                               args))));
 }
 
@@ -1016,16 +1017,17 @@ boxed handle_lambda(boxed args,
                     boxed env,
                     extend_rtenv_fn extend_rtenv) {
     const auto& info = args->get_runtime_info();
+    const auto nil = info.get_nil();
 
     if (is_step_contn(args)) {
         return send(fn, vc(step_contn_k(args),
                            vc(extend_rtenv(env, len, step_contn_args(args)),
-                              make_vector(info))));
+                              nil)));
     }
 
-    return run(send(fn, vc(lookup_global(info.get_runtime()->g_result, info),
+    return run(send(fn, vc(lookup_global(info.get_runtime()->g_result, args),
                            vc(extend_rtenv(env, len, args),
-                              make_vector(info)))));
+                              nil))));
 }
 
 boxed handle_contn_lambda(boxed args, boxed k) {
@@ -1051,7 +1053,7 @@ boxed evalx_initial(boxed args) {
     auto env = vlist_ref(args, 2);
     auto scanned = vlist_ref(args, 3);
     return make_lambda<boxed>([k, env, scanned](boxed) -> boxed {
-        return send(scanned, vc(k, vc(env, make_vector(k->get_runtime_info()))));
+        return send(scanned, vc(k, vc(env, k->get_runtime_info().get_nil())));
     }, args->get_runtime_info());
 }
 
@@ -1113,7 +1115,7 @@ boxed make_form(boxed n, boxed args) {
     auto defn = vc(n, args);
     const auto& info = args->get_runtime_info();
 
-    auto f = make_vector(info);
+    auto f = box<double>(0, info);
     auto f2 = memoize_lambda(make_lambda<lambda>([f](boxed args) -> boxed {
         return (**f->cast<lambda>())(args);
     }, info), defn);
@@ -1135,11 +1137,12 @@ boxed aform(enum forms n, const RuntimeInfo& info) {
     return box<double>(static_cast<double>(n), info);
 }
 
-boxed lookup_global(const double i, const RuntimeInfo& info) {
+boxed lookup_global(const double i, boxed x) {
+    const auto& info = x->get_runtime_info();
     auto r = find_global(i, info);
     auto defn = vc(aform(forms::global_lambda, info),
-                   vc(box<double>(i, info), make_vector(info)));
-    auto f = make_vector(info);
+                   vc(box<double>(i, info), info.get_nil()));
+    auto f = box<double>(0, info);
     auto f2 = memoize_lambda(make_lambda<lambda>([f](boxed args) -> boxed {
         return (**f->cast<lambda>())(args);
     }, info), defn);
@@ -1154,8 +1157,8 @@ boxed globalize(boxed x, boxed args, boxed cf) {
 
     const auto& info = x->get_runtime_info();
     auto defn = vc(aform(forms::constructed_function0, info),
-                   vc(args, vc(cf, make_vector(info))));
-    auto f = make_vector(info);
+                   vc(args, vc(cf, info.get_nil())));
+    auto f = box<double>(0, info);
     auto f2 = memoize_lambda(make_lambda<lambda>([f](boxed args) -> boxed {
         return (**f->cast<lambda>())(args);
     }, info), defn);
@@ -1167,9 +1170,9 @@ boxed constructed_function0(boxed args) {
     auto args2 = vlist_ref(args, 1);
     auto cf = vlist_ref(args, 2);
     return make_lambda<boxed>([args2, cf](boxed args3) -> boxed {
-        const auto& info = args3->get_runtime_info();
-        return applyx(make_form(forms::constructed_function1, vc(args3, make_vector(info))),
-                      make_global_rtenv(info), cf, args2);
+        return applyx(make_form(forms::constructed_function1,
+                                vc(args3, args3->get_runtime_info().get_nil())),
+                      make_global_rtenv(args3), cf, args2);
     }, args->get_runtime_info());
 }
 
@@ -1189,7 +1192,7 @@ boxed if1(boxed args) {
     return make_lambda<boxed>([k, env, scan1, scan2](boxed args) -> boxed {
         auto v = vlist_ref(args, 0)->cast<bool>();
         auto f = v ? scan1 : scan2;
-        return send(f, vc(k, vc(env, make_vector(args->get_runtime_info()))));
+        return send(f, vc(k, vc(env, args->get_runtime_info().get_nil())));
     }, args->get_runtime_info());
 }
 
@@ -1200,11 +1203,11 @@ boxed if0(boxed args) {
     return make_lambda<boxed>([scan0, scan1, scan2](boxed args) -> boxed {
         auto k = vlist_ref(args, 0);
         auto env = vlist_ref(args, 1);
-        const auto& info = args->get_runtime_info();
+        const auto nil = args->get_runtime_info().get_nil();
         return send(scan0,
             vc(make_form(forms::if1,
-                         vc(k, vc(env, vc(scan1, vc(scan2, make_vector(info)))))),
-               vc(env, make_vector(info))));
+                         vc(k, vc(env, vc(scan1, vc(scan2, nil))))),
+               vc(env, nil)));
     }, args->get_runtime_info());
 }
 
@@ -1223,10 +1226,10 @@ boxed sclis1(boxed args) {
     auto rest = vlist_ref(args, 3);
     return make_lambda<boxed>([k, env, rest](boxed args) -> boxed {
         auto v = vlist_ref(args, 0);
-        const auto& info = args->get_runtime_info();
+        const auto nil = args->get_runtime_info().get_nil();
         return send(rest,
-            vc(make_form(forms::sclis2, vc(k, vc(v, make_vector(info)))),
-               vc(env, make_vector(info))));
+            vc(make_form(forms::sclis2, vc(k, vc(v, nil))),
+               vc(env, nil)));
     }, args->get_runtime_info());
 }
 
@@ -1236,11 +1239,11 @@ boxed sclis0(boxed args) {
     return make_lambda<boxed>([first, rest](boxed args) -> boxed {
         auto k = vlist_ref(args, 0);
         auto env = vlist_ref(args, 1);
-        const auto& info = args->get_runtime_info();
+        const auto nil = args->get_runtime_info().get_nil();
         return send(first,
             vc(make_form(forms::sclis1,
-                         vc(k, vc(env, vc(rest, make_vector(info))))),
-               vc(env, make_vector(info))));
+                         vc(k, vc(env, vc(rest, nil)))),
+               vc(env, nil)));
     }, args->get_runtime_info());
 }
 
@@ -1249,7 +1252,7 @@ boxed scseq1(boxed args) {
     auto env = vlist_ref(args, 2);
     auto rest = vlist_ref(args, 3);
     return make_lambda<boxed>([k, env, rest](boxed) -> boxed {
-        return send(rest, vc(k, vc(env, make_vector(k->get_runtime_info()))));
+        return send(rest, vc(k, vc(env, k->get_runtime_info().get_nil())));
     }, args->get_runtime_info());
 }
 
@@ -1259,11 +1262,11 @@ boxed scseq0(boxed args) {
     return make_lambda<boxed>([first, rest](boxed args) -> boxed {
         auto k = vlist_ref(args, 0);
         auto env = vlist_ref(args, 1);
-        const auto& info = args->get_runtime_info();
+        const auto nil = args->get_runtime_info().get_nil();
         return send(first,
             vc(make_form(forms::scseq1,
-                         vc(k, vc(env, vc(rest, make_vector(info))))),
-               vc(env, make_vector(info))));
+                         vc(k, vc(env, vc(rest, nil)))),
+               vc(env, nil)));
     }, args->get_runtime_info());
 }
 
@@ -1284,7 +1287,7 @@ boxed lambda0(boxed args) {
         auto env = vlist_ref(args, 1);
         return sendv(k,
             make_form(forms::lambda1,
-                      vc(len, vc(scanned, vc(env, make_vector(args->get_runtime_info()))))));
+                      vc(len, vc(scanned, vc(env, args->get_runtime_info().get_nil())))));
     }, args->get_runtime_info());
 }
 
@@ -1305,7 +1308,7 @@ boxed improper_lambda0(boxed args) {
         auto env = vlist_ref(args, 1);
         return sendv(k,
             make_form(forms::improper_lambda1,
-                      vc(len, vc(scanned, vc(env, make_vector(args->get_runtime_info()))))));
+                      vc(len, vc(scanned, vc(env, args->get_runtime_info().get_nil())))));
     }, args->get_runtime_info());
 }
 
@@ -1321,14 +1324,14 @@ boxed letcc0(boxed args) {
     return make_lambda<boxed>([scanned](boxed args) -> boxed {
         auto k = vlist_ref(args, 0);
         auto env = vlist_ref(args, 1);
-        const auto& info = args->get_runtime_info();
+        const auto nil = args->get_runtime_info().get_nil();
         return send(scanned,
             vc(k,
                vc(extend_rtenv(env,
                                1,
-                               vc(make_form(forms::letcc1, vc(k, make_vector(info))),
-                                  make_vector(info))),
-                  make_vector(info))));
+                               vc(make_form(forms::letcc1, vc(k, nil)),
+                                  nil)),
+                  nil)));
     }, args->get_runtime_info());
 }
 
@@ -1348,10 +1351,10 @@ boxed define0(boxed args) {
     return make_lambda<boxed>([i, scanned](boxed args) -> boxed {
         auto k = vlist_ref(args, 0);
         auto env = vlist_ref(args, 1);
-        const auto& info = args->get_runtime_info();
+        const auto nil = args->get_runtime_info().get_nil();
         return send(scanned,
-            vc(make_form(forms::define1, vc(k, vc(env, vc(i, make_vector(info))))),
-               vc(env, make_vector(info))));
+            vc(make_form(forms::define1, vc(k, vc(env, vc(i, nil)))),
+               vc(env, nil)));
     }, args->get_runtime_info());
 }
 
@@ -1369,10 +1372,10 @@ boxed application0(boxed args) {
     return make_lambda<boxed>([scanned](boxed args) -> boxed {
         auto k = vlist_ref(args, 0);
         auto env = vlist_ref(args, 1);
-        const auto& info = args->get_runtime_info();
+        const auto nil = args->get_runtime_info().get_nil();
         return send(scanned,
-            vc(make_form(forms::application1, vc(k, vc(env, make_vector(info)))),
-               vc(env, make_vector(info))));
+            vc(make_form(forms::application1, vc(k, vc(env, nil))),
+               vc(env, nil)));
     }, args->get_runtime_info());
 }
 
@@ -1392,8 +1395,8 @@ boxed memoize_aux(boxed exp, cmap_table& tab, map_fn fn) {
         if (is_unmemoized(v)) {
             auto repexp = unmemoized_repexp(v);
             auto info = exp->get_runtime_info();
-            auto r = make_vector(info);
-            auto f = make_vector(info);
+            auto r = box<double>(0, info);
+            auto f = box<double>(0, info);
             auto entry = table_set(tab, exp, memoize_lambda(
                 make_lambda<lambda>([f](boxed args) -> boxed {
                     return (**f->cast<lambda>())(args);
@@ -1576,9 +1579,8 @@ boxed unpickle_aux(const json& j, const RuntimeInfo& info) {
             auto a = make_vector(info);
             auto v = a->cast<vector>();
             auto size = j.size();
-            (*v)->resize(size - 2);
             for (json::size_type i = 2; i < size; ++i) {
-                (*v)->at(i - 2) = unpickle_aux(j[i], info);
+                (*v)->push_back(unpickle_aux(j[i], info));
             }
             return a;
         }
@@ -1860,7 +1862,7 @@ boxed start(int argc, char *argv[]) {
     const auto runtime = info.get_runtime();
     if (opts.count("help")) {
         std::cout << options.help() << std::endl;
-        return make_vector(info);
+        return info.get_nil();
     }
     runtime->set_gc_threshold(opts["gc-threshold"].as<size_t>());
     if (opts.count("config")) {
@@ -1872,7 +1874,7 @@ boxed start(int argc, char *argv[]) {
         }
     }
     if (opts.count("run")) {
-        return start<const std::string>(opts["run"].as<std::string>(), make_vector(info));
+        return start<const std::string>(opts["run"].as<std::string>(), info.get_nil());
     }
     if (opts.count("bconvert-out")) {
         auto state = opts["bconvert-out"].as<std::string>();
@@ -1881,7 +1883,7 @@ boxed start(int argc, char *argv[]) {
         } else {
             bconvert_out(state, info);
         }
-        return make_vector(info);
+        return info.get_nil();
     }
     if (opts.count("bconvert-in")) {
         auto state = opts["bconvert-in"].as<std::string>();
@@ -1890,9 +1892,9 @@ boxed start(int argc, char *argv[]) {
         } else {
             bconvert_in(state, info);
         }
-        return make_vector(info);
+        return info.get_nil();
     }
-    return start<std::istream>(std::cin, make_vector(info));
+    return start<std::istream>(std::cin, info.get_nil());
 }
 
 boxed cf_test(boxed args) {
@@ -1900,16 +1902,15 @@ boxed cf_test(boxed args) {
     auto x = vlist_ref(args, 1);
     if (n == 0) {
         return make_lambda<boxed>([x](boxed args) {
-            return cf_test(vc(vlist_ref(args, 0), vc(x, make_vector(args->get_runtime_info()))));
+            return cf_test(vc(vlist_ref(args, 0), vc(x, args->get_runtime_info().get_nil())));
         }, args->get_runtime_info());
     }
     return box<double>(x->cast<double>() + n, args->get_runtime_info());
 }
 
 boxed transfer_test(boxed args) {
-    const auto& info = args->get_runtime_info();
-    return applyx(lookup_global(info.get_runtime()->g_result, info),
-                  make_global_rtenv(info),
+    return applyx(lookup_global(args->get_runtime_info().get_runtime()->g_result, args),
+                  make_global_rtenv(args),
                   vlist_ref(args, 0),
                   vlist_rest(args, 0));
 }
@@ -1968,5 +1969,13 @@ Runtime::Runtime() :
 void Runtime::set_gc_threshold(size_t v) {
     gc_threshold = v;
 }
+
+RuntimeInfo::RuntimeInfo(std::shared_ptr<Runtime> runtime, boxed nil) :
+    runtime(runtime),
+    nil(nil) {}
+
+RuntimeInfo::RuntimeInfo() :
+    runtime(std::make_shared<Runtime>()),
+    nil(make_vector(RuntimeInfo(runtime, nullptr))) {}
 
 }

@@ -10,6 +10,8 @@ const number_code  = '2';
 const vector_code  = '3';
 const marker_code  = 'A';
 
+const nil = [];
+
 function vector_cmap(f, vec, tab, set_entry) {
     if (vec.length === 0) {
         return vec;
@@ -36,7 +38,7 @@ function is_yield_defn(args) {
 }
 
 function get_procedure_defn(proc) {
-    return proc([yield_defn_mark, []]);
+    return proc([yield_defn_mark, nil]);
 }
 
 function memoize_lambda(proc, defn) {
@@ -88,7 +90,7 @@ function vlist_to_vector(vl) {
 }
 
 function vector_to_vlist(v) {
-    let vl = [];
+    let vl = nil;
     for (let i = v.length - 1; i >= 0; --i) {
         vl = [v[i], vl];
     }
@@ -97,7 +99,7 @@ function vector_to_vlist(v) {
 
 function rtenv_lookup(i, env) {
     const r = vlist_ref(env, i[0])[i[1]];
-    return r === undefined ? [] : r;
+    return r === undefined ? nil : r;
 }
 
 function rtenv_setvar(i, val, env) {
@@ -105,7 +107,7 @@ function rtenv_setvar(i, val, env) {
     const len = v.length;
     if (i[1] >= len) {
         for (let j = len; j < i[1]; ++j) {
-            v[j] = [];
+            v[j] = nil;
         }
     }
     v[i[1]] = val;
@@ -228,7 +230,7 @@ function make_vector(n) {
     check_type_is(n, 'number');
     const v = new Array(n);
     for (let i = 0; i < n; ++i) {
-        v[i] = [];
+        v[i] = nil;
     }
     return v;
 }
@@ -248,7 +250,7 @@ function vector_set(v, i, exp) {
     check_type(v, Array.isArray, 'vector');
     check_length(v, i);
     v[i] = exp;
-    return [];
+    return nil;
 }
 
 function make_binary(n) {
@@ -270,7 +272,7 @@ function binary_set(b, i, n) {
     check_type(b, Buffer.isBuffer, 'binary');
     check_type_is(i, 'number');
     b[i] = n;
-    return [];
+    return nil;
 }
 
 function is_same_object(x, y) {
@@ -416,7 +418,7 @@ function step_contn_args(args) {
 }
 
 function make_global_rtenv() {
-    return [[], []];
+    return [[], nil];
 }
 
 const transfer_mark = mark('TRANSFER');
@@ -438,7 +440,7 @@ function globalize(x, args, cf) {
         return x;
     }
 
-    const defn = [constructed_function0, [args, [cf, []]]];
+    const defn = [constructed_function0, [args, [cf, nil]]];
     const f2 = memoize_lambda(args => f(args), defn);
     const f = memoize_lambda(wrap_global_lambda(x, f2), defn);
     return f;
@@ -489,7 +491,7 @@ function wrap_global_lambda(fn, cf) {
 
 function lookup_global(n) {
     const r = find_global(n);
-    const defn = [global_lambda, [n, []]];
+    const defn = [global_lambda, [n, nil]];
     const f2 = memoize_lambda(args => f(args), defn);
     const f = memoize_lambda(wrap_global_lambda(r, f2), defn);
     return f;
@@ -519,7 +521,7 @@ function handle_lambda(args, len, fn, env, extend_rtenv) {
         return send(fn, [
             step_contn_k(args), [
                 extend_rtenv(env, len, step_contn_args(args)),
-                []
+                nil
             ]
         ]);
     }
@@ -527,7 +529,7 @@ function handle_lambda(args, len, fn, env, extend_rtenv) {
     return run(send(fn, [
         lookup_global(g_result), [
             extend_rtenv(env, len, args),
-            []
+            nil
         ]
     ]));
 }
@@ -561,7 +563,7 @@ function send(k, vl) {
 }
 
 function sendv(k, v) {
-    return send(k, [v, []]);
+    return send(k, [v, nil]);
 }
 
 const symbol_lookup = define_form((self, i) =>
@@ -594,26 +596,26 @@ const global_lambda = define_form((self, defn) =>
 const if0 = define_form((self, scan0, scan1, scan2) =>
     args => {
         const [k, env] = vlist_to_vector(args);
-        return send(scan0, [make_form(if1, k, env, scan1, scan2), [env, []]]);
+        return send(scan0, [make_form(if1, k, env, scan1, scan2), [env, nil]]);
     });
 
 const if1 = define_form((self, k, env, scan1, scan2) =>
     args => {
         const [v] = vlist_to_vector(args);
         const f = v ? scan1 : scan2;
-        return send(f, [k, [env, []]]);
+        return send(f, [k, [env, nil]]);
     });
 
 const sclis0 = define_form((self, first, rest) =>
     args => {
         const [k, env] = vlist_to_vector(args);
-        return send(first, [make_form(sclis1, k, env, rest), [env, []]]);
+        return send(first, [make_form(sclis1, k, env, rest), [env, nil]]);
     });
 
 const sclis1 = define_form((self, k, env, rest) =>
     args => {
         const [v] = vlist_to_vector(args);
-        return send(rest, [make_form(sclis2, k, v), [env, []]]);
+        return send(rest, [make_form(sclis2, k, v), [env, nil]]);
     });
 
 const sclis2 = define_form((self, k, v) =>
@@ -625,11 +627,11 @@ const sclis2 = define_form((self, k, v) =>
 const scseq0 = define_form((self, first, rest) =>
     args => {
         const [k, env] = vlist_to_vector(args);
-        return send(first, [make_form(scseq1, k, env, rest), [env, []]]);
+        return send(first, [make_form(scseq1, k, env, rest), [env, nil]]);
     });
 
 const scseq1 = define_form((self, k, env, rest) =>
-    () => send(rest, [k, [env, []]]));
+    () => send(rest, [k, [env, nil]]));
 
 const lambda0 = define_form((self, len, scanned) =>
     args => {
@@ -653,7 +655,7 @@ const letcc0 = define_form((self, scanned) =>
     args => {
         const [k, env] = vlist_to_vector(args);
         return send(scanned, [
-            k, [extend_rtenv(env, 1, [make_form(letcc1, k), []]), []]
+            k, [extend_rtenv(env, 1, [make_form(letcc1, k), nil]), nil]
         ]);
     });
 
@@ -663,7 +665,7 @@ const letcc1 = define_form((self, k) =>
 const define0 = define_form((self, i, scanned) =>
     args => {
         const [k, env] = vlist_to_vector(args);
-        return send(scanned, [make_form(define1, k, env, i), [env, []]]);
+        return send(scanned, [make_form(define1, k, env, i), [env, nil]]);
     });
 
 const define1 = define_form((self, k, env, i) =>
@@ -675,7 +677,7 @@ const define1 = define_form((self, k, env, i) =>
 const application0 = define_form((self, scanned) =>
     args => {
         const [k, env] = vlist_to_vector(args);
-        return send(scanned, [make_form(application1, k, env), [env, []]]);
+        return send(scanned, [make_form(application1, k, env), [env, nil]]);
     });
 
 const application1 = define_form((self, k, env) =>
@@ -685,7 +687,7 @@ const application1 = define_form((self, k, env) =>
     });
 
 const evalx_initial = define_form((self, k, env, scanned) =>
-    () => send(scanned, [k, [env, []]]));
+    () => send(scanned, [k, [env, nil]]));
 
 function make_form(n, ...args) {
     const defn = [n, vector_to_vlist(args)];
