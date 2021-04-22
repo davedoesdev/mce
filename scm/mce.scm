@@ -78,8 +78,8 @@
         (vlist-ref (vector-ref vl 1) (- i 1))))
 
 (define (rtenv-lookup i env)
-    (let* ((senv (vlist-ref env (inexact->exact (vector-ref i 0))))
-           (index (inexact->exact (vector-ref i 1))))
+    (let* ((senv (vlist-ref env (vector-ref i 0)))
+           (index (vector-ref i 1)))
         (if (< index (vector-length senv))
             (vector-ref senv index)
             '#())))
@@ -101,9 +101,9 @@
         (vlist-set! vl (- i 1) v)))
 
 (define (rtenv-setvar! i val env)
-    (let* ((sindex (inexact->exact (vector-ref i 0)))
+    (let* ((sindex (vector-ref i 0))
            (senv (vlist-ref env sindex))
-           (index (inexact->exact (vector-ref i 1))))
+           (index (vector-ref i 1)))
         (if (< index (vector-length senv))
             (vector-set! senv index val)
             (vlist-set! env sindex (extend-vector senv index val))))
@@ -349,7 +349,7 @@
     (letrec*
         ((defn (list->vlist (cons n args)))
          (f2 (memoize-lambda (lambda args (apply f args)) defn))
-         (f (memoize-lambda (apply (vector-ref forms (inexact->exact n))
+         (f (memoize-lambda (apply (vector-ref forms n)
                                    (cons f2 args))
                             defn)))
         f))
@@ -588,7 +588,7 @@
 (define (find-global sym #!optional (err #t))
     (if (number? sym)
         (let ((r (if (< sym (vector-length core-globals))
-                     (vector-ref core-globals (inexact->exact sym))
+                     (vector-ref core-globals sym)
                      #f)))
             (if r
                 r
@@ -646,10 +646,10 @@
 (define binary-length string-length)
 
 (define (binary-ref b i)
-    (char->integer (string-ref b (inexact->exact i))))
+    (char->integer (string-ref b i)))
 
 (define (binary-set! b i v)
-    (string-set! b (inexact->exact i) (integer->char (inexact->exact v))))
+    (string-set! b i (integer->char (inexact->exact v))))
 
 (define (output-binary-to-stdout b start end)
     (display-substring b start end (current-output-port)))
@@ -870,7 +870,7 @@
 (define (deserialize-aux exp tab fn set-entry!)
     (if (vector? exp)
         (if (serialized? exp)
-            (ref-value (table-ref tab (inexact->exact (serialized-n exp))))
+            (ref-value (table-ref tab (serialized-n exp)))
             (vector-cmap fn exp tab set-entry!))
         exp))
 
@@ -940,7 +940,9 @@
                      ((equal? code false-code)
                       #f)
                      ((equal? code number-code)
-                      (cadr exp))
+                      (let* ((n (cadr exp))
+                             (en (inexact->exact n)))
+                          (if (= n en) en n)))
                      ((equal? code vector-code)
                       (list->vector (map unpickle-aux (cddr exp))))
                      (else

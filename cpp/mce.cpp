@@ -209,7 +209,7 @@ void Runtime::break_cycles() {
     }
 
     // Break cycles. This modifies the objects but we've already saved them into a
-    // string above which we'll restore later. The other end of the cycle will be
+    // string which we'll restore later. The other end of the cycle will be
     // pointing to the outer shared pointer so when we reset the inner shared pointer
     // the chain will be broken since the other end won't be keeping the inner
     // object alive any more.
@@ -1003,8 +1003,8 @@ boxed improper_extend_rtenv(boxed env, size_t len, boxed values) {
             break;
         }
 
-        (*v)->push_back(vlist_ref(values, 0));
-        values = vlist_rest(values, 0);
+        (*v)->push_back((*v2)->at(0));
+        values = (*v2)->at(1);
         ++i;
     }
 
@@ -1859,11 +1859,11 @@ boxed start(int argc, char *argv[]) {
          cxxopts::value<std::string>()->implicit_value(""));
     auto opts = options.parse(argc, argv);
     RuntimeInfo info;
-    const auto runtime = info.get_runtime();
     if (opts.count("help")) {
         std::cout << options.help() << std::endl;
         return info.get_nil();
     }
+    const auto runtime = info.get_runtime();
     runtime->set_gc_threshold(opts["gc-threshold"].as<size_t>());
     if (opts.count("config")) {
         for (auto kv : opts["config"].as<std::vector<std::string>>()) {
@@ -1872,9 +1872,6 @@ boxed start(int argc, char *argv[]) {
             runtime->set_config(kv.substr(0, pos),
                                 box<binary>(std::make_shared<binary>(val.begin(), val.end()), info));
         }
-    }
-    if (opts.count("run")) {
-        return start<const std::string>(opts["run"].as<std::string>(), info.get_nil());
     }
     if (opts.count("bconvert-out")) {
         auto state = opts["bconvert-out"].as<std::string>();
@@ -1893,6 +1890,9 @@ boxed start(int argc, char *argv[]) {
             bconvert_in(state, info);
         }
         return info.get_nil();
+    }
+    if (opts.count("run")) {
+        return start<const std::string>(opts["run"].as<std::string>(), info.get_nil());
     }
     return start<std::istream>(std::cin, info.get_nil());
 }
