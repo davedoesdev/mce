@@ -1,0 +1,1 @@
+(print (get-config "foo"))

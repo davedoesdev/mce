@@ -7,9 +7,9 @@
     },
     "license": "MIT",
     "dependencies": {
-        "@davedoesdev/mce": "^0.0.4",
-        "jsdom": "^16.3.0",
-        "sodium-native": "^3.2.0",
+        "@davedoesdev/mce": "^0.0.5",
+        "jsdom": "^16.5.3",
+        "sodium-native": "^3.2.1",
         "sodium-plus": "^0.9.0"
     }
 }

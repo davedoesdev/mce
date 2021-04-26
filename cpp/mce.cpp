@@ -1869,8 +1869,7 @@ boxed start(int argc, char *argv[]) {
         for (auto kv : opts["config"].as<std::vector<std::string>>()) {
             auto pos = kv.find('=');
             auto val = kv.substr(pos + 1);
-            runtime->set_config(kv.substr(0, pos),
-                                box<binary>(std::make_shared<binary>(val.begin(), val.end()), info));
+            runtime->set_config(kv.substr(0, pos), mce_restore(val, info));
         }
     }
     if (opts.count("bconvert-out")) {

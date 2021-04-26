@@ -2,7 +2,6 @@
     (library packrat)
     (export 
         (make-runtime)
-        (get-config runtime k)
         (set-config! runtime k v)
         (get-global-function runtime name)
         (register-global-function! runtime name f)
@@ -14,7 +13,6 @@
         (send runtime k . v)))
 
 (define-struct runtime-ops
-    get-config
     set-config!
     get-global-function
     register-global-function!
@@ -768,7 +766,7 @@
     (table-set! config-table k v))
 
 (define (get-config k)
-    (ref-value (table-ref config-table k)))
+    (ref-value (table-ref config-table (substring k 1))))
 
 (define (vector-cmap f vec tab set-entry!)
     ; note: in compiled program, two '#() instance compare eq? true
@@ -996,7 +994,8 @@
              (set! s state))
             (("--config" ?kv (help "Set configuration"))
              (let ((pos (string-char-index kv #\= )))
-                 (set-config! (substring kv 0 pos) (substring kv (+ pos 1)))))
+                 (set-config! (substring kv 0 pos)
+                              (mce-restore (substring kv (+ pos 1))))))
             (else
              (error "start" "Invalid argument " else)))
         (if execute
@@ -1005,7 +1004,6 @@
                 (start-string s :is_scan is_scan)))))
 
 (let ((runtime-ops (make-runtime-ops)))
-    (runtime-ops-get-config-set! runtime-ops get-config)
     (runtime-ops-set-config!-set! runtime-ops set-config!)
     (runtime-ops-get-global-function-set! runtime-ops get-global-function)
     (runtime-ops-register-global-function!-set! runtime-ops register-global-function!)
@@ -1018,9 +1016,6 @@
     runtime-ops)
 
 )
-
-(define (get-config runtime k)
-    ((runtime-ops-get-config runtime) k))
 
 (define (set-config! runtime k v)
     ((runtime-ops-set-config! runtime) k v))

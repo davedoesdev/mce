@@ -1,6 +1,9 @@
 import jsdom from 'jsdom';
-import { Char, Symbol, Pair } from '@davedoesdev/mce';
 const { JSDOM } = jsdom;
+
+const char_code = 'B'.charCodeAt(0);
+const string_code = 'C'.charCodeAt(0);
+const symbol_code = 'D'.charCodeAt(0);
 
 class Attribute {
     constructor(el) {
@@ -40,33 +43,38 @@ async function _parse_shtml(exp, parent, save) {
         } else {
             append(doc.createTextNode(exp ? 'true' : 'false'));
         }
-    } else if ((typeof exp === 'number') ||
-               (exp instanceof Char) ||
-               (typeof exp === 'string')) {
+    } else if (typeof exp === 'number') {
         append(doc.createTextNode(exp.toString()));
-    } else if (exp instanceof Symbol) {
-        const tag = exp.toString();
-        if (tag === '@') {
-            parent = new Attribute(parent);
-        } else {
-            if (parent === doc.documentElement) {
-                if (tag.localeCompare(parent.tagName, undefined, { sensitivity: 'accent' }) !== 0) {
-                    const matches = parent.getElementsByTagName(tag);
-                    if (matches.length) {
-                        parent = matches.item(0);
+    } else if (exp instanceof Buffer) {
+        switch (exp[0]) {
+            case char_code:
+            case string_code:
+                append(doc.createTextNode(exp.slice(1).toString()));
+                break;
+
+            case symbol_code:
+                const tag = exp.slice(1).toString();
+                if (tag === '@') {
+                    parent = new Attribute(parent);
+                } else {
+                    if (parent === doc.documentElement) {
+                        if (tag.localeCompare(parent.tagName, undefined, { sensitivity: 'accent' }) !== 0) {
+                            const matches = parent.getElementsByTagName(tag);
+                            if (matches.length) {
+                                parent = matches.item(0);
+                            } else {
+                                parent = append(doc.createElement(tag));
+                            }
+                        }
                     } else {
                         parent = append(doc.createElement(tag));
                     }
                 }
-            } else {
-                parent = append(doc.createElement(tag));
-            }
-        }
-    } else if (exp instanceof Pair) {
-        let p = parent;
-        while (exp instanceof Pair) {
-            p = await _parse_shtml(exp.car, p, save);
-            exp = exp.cdr;
+                break;
+
+            default:
+                append(doc.createTextNode(exp.toString('base64')));
+                break;
         }
     } else if (Array.isArray(exp)) {
         let p = parent;

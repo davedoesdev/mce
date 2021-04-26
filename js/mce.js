@@ -307,7 +307,7 @@ function set_config(k, v) {
 }
 
 function get_config(k) {
-    const v = config_table.get(k);
+    const v = config_table.get(k.slice(1).toString());
     return v === undefined ? false : v;
 }
 
@@ -947,7 +947,8 @@ async function start(argv) {
     if (args.config) {
         for (let config of args.config) {
             const pos = config.indexOf('=');
-            set_config(config.substr(0, pos), Buffer.from(config.substr(pos + 1)));
+            set_config(config.substr(0, pos),
+                       mce_restore(config.substr(pos + 1)));
         }
     }
     if (args.run) {
@@ -957,7 +958,6 @@ async function start(argv) {
 }
 
 return {
-    get_config,
     set_config,
     get_global_function,
     register_global_function,
