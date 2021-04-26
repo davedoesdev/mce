@@ -133,11 +133,11 @@
                         (begin (set! pr nr) (set! r nr))
                         (begin (set-cdr! pr nr) (set! pr nr)))
                     (loop (vector-ref vl 1)))
-                (let ((v (if (and (vector? vl) (= (vector-length vl) 0)) '() vl)))
+                (if (and (vector? vl) (= (vector-length vl) 0))
+                    r
                     (if (null? r)
-                        (set! r v)
-                        (set-cdr! pr v))
-                    r)))))
+                        (list vl)
+                        (begin (set-cdr! pr (list vl)) r)))))))
 
 (define (applyvl f vl)
     (apply f (vlist->list vl)))

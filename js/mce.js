@@ -78,9 +78,7 @@ function vlist_to_vector(vl) {
             v.push(vl[0]);
             vl = vl[1];
         } else {
-            if (v.length === 0) {
-                v = vl;
-            } else if (!(Array.isArray(vl) && (vl.length == 0))) {
+            if (!(Array.isArray(vl) && (vl.length == 0))) {
                 v.push(vl);
             }
             break;
@@ -503,14 +501,19 @@ function extend_rtenv(env, len, values) {
 
 function improper_extend_rtenv(env, len, values) {
     const v = [];
+    let i = 0;
 
-    for (let i = 0; (i < len) && values; ++i) {
-        if (i === (len - 1)) {
-            v.push(values);
-        } else {
-            v.push(values[0]);
-            values = values[1];
+    while (true) {
+        if ((i === (len - 1)) || !Array.isArray(values) || (values.length !== 2)) {
+            if (!Array.isArray(values) || (values.length !== 0)) {
+                v.push(values);
+            }
+            break;
         }
+
+        v.push(values[0]);
+        values = values[1];
+        ++i;
     }
 
     return [v, env];

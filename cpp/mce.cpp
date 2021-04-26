@@ -409,9 +409,7 @@ boxed vlist_to_vector(boxed vl) {
             (*v)->push_back((*v2)->at(0));
             vl = (*v2)->at(1);
         } else {
-            if ((*v)->empty()) {
-                a = vl;
-            } else if (!(is_vector && (size == 0))) {
+            if (!(is_vector && (size == 0))) {
                 (*v)->push_back(vl);
             }
             break;
@@ -812,7 +810,9 @@ boxed output_binary(boxed args, FILE *stream) {
     const auto b = vlist_ref(args, 0)->cast<binary>();
     const auto start = static_cast<size_t>(vlist_ref(args, 1)->cast<double>());
     const auto end = static_cast<size_t>(vlist_ref(args, 2)->cast<double>());
-    fwrite(b->data() + start, end - start, 1, stream);
+    assert(start <= end);
+    assert(end <= b->size());
+    fwrite(b->data() + start, 1, end - start, stream);
     return args->get_runtime_info().get_nil();
 }
 
@@ -1119,7 +1119,7 @@ boxed make_form(boxed n, boxed args) {
     auto f2 = memoize_lambda(make_lambda<lambda>([f](boxed args) -> boxed {
         return (**f->cast<lambda>())(args);
     }, info), defn);
-    *f = *memoize_lambda(forms[n->cast<double>()](vc(f2, args)), defn);
+    *f = *memoize_lambda(forms.at(n->cast<double>())(vc(f2, args)), defn);
 
     return f;
 }
@@ -1569,23 +1569,23 @@ std::string pickle(boxed exp) {
 boxed unpickle_aux(const json& j, const RuntimeInfo& info) {
     if (j.is_array()) {
         switch (j[0].get<std::string>()[0]) {
-        case true_code:
-            return box<bool>(true, info);
-        case false_code:
-            return box<bool>(false, info);
-        case number_code:
-            return box<double>(j[1].get<double>(), info);
-        case vector_code: {
-            auto a = make_vector(info);
-            auto v = a->cast<vector>();
-            auto size = j.size();
-            for (json::size_type i = 2; i < size; ++i) {
-                (*v)->push_back(unpickle_aux(j[i], info));
+            case true_code:
+                return box<bool>(true, info);
+            case false_code:
+                return box<bool>(false, info);
+            case number_code:
+                return box<double>(j[1].get<double>(), info);
+            case vector_code: {
+                auto a = make_vector(info);
+                auto v = a->cast<vector>();
+                auto size = j.size();
+                for (json::size_type i = 2; i < size; ++i) {
+                    (*v)->push_back(unpickle_aux(j[i], info));
+                }
+                return a;
             }
-            return a;
-        }
-        default:
-            throw std::range_error("unknown unpickle expression");
+            default:
+                throw std::range_error("unknown unpickle expression");
         }
     }
     if (j.is_string()) {
@@ -1671,8 +1671,11 @@ void bpickle(boxed exp,
         }
     } else if (exp->contains<vector>()) {
         auto vec = exp->cast<vector>();
+        auto size = (*vec)->size();
         if (vec_offset == 0) {
-            refs.push_back(static_cast<uint64_t>(v.size()));
+            if (size != 0) {
+                refs.push_back(static_cast<uint64_t>(v.size()));
+            }
             if (is_unmemoized(vec)) {
                 v.push_back(unmemoized_code);
                 bpickle_aux(static_cast<uint64_t>(v.size() + 8), v);
@@ -1696,7 +1699,6 @@ void bpickle(boxed exp,
         }
         v.push_back(vector_code);
         // Add size of vector
-        auto size = (*vec)->size();
         assert(vec_offset <= size);
         bpickle_aux(static_cast<uint64_t>(size - vec_offset), v);
         auto pos = v.size();
@@ -1796,7 +1798,7 @@ boxed bunpickle(const uint8_t *s,
             assert(i + 8 < len);
             for (uint64_t j = 0; j < *(uint64_t*)&s[i + 1]; ++j) {
                 const auto pos = i + 9 + j * 8;
-                assert(pos + 7 < len);
+                assert(pos + 8 <= len);
                 (*v)->push_back(bunpickle(s, len, *(uint64_t*)&s[pos], refs, info));
             }
             return r;    
@@ -1821,9 +1823,8 @@ boxed bunpickle(const uint8_t *s,
 
 void bconvert_in(const std::string& s, const RuntimeInfo& info) {
     std::unordered_map<uint64_t, boxed> refs;
-    json j = mce_save(bunpickle(
+    std::cout << mce_save(bunpickle(
         &reinterpret_cast<const uint8_t*>(s.c_str())[8], s.size(), 0, refs, info));
-    std::cout << j.dump();
 }
 
 void bconvert_in(std::istream &stream, const RuntimeInfo& info) {
@@ -1834,8 +1835,7 @@ void bconvert_in(std::istream &stream, const RuntimeInfo& info) {
     stream.read(reinterpret_cast<char*>(v.data()), size);
 
     std::unordered_map<uint64_t, boxed> refs;
-    json j = mce_save(bunpickle(v.data(), v.size(), 0, refs, info));
-    std::cout << j.dump();
+    std::cout << mce_save(bunpickle(v.data(), v.size(), 0, refs, info));
 }
 
 boxed start(int argc, char *argv[]) {
@@ -1926,8 +1926,7 @@ Runtime::Runtime() :
         { "cf-test", cf_test },
         { "set-gc-callback!", mce::set_gc_callback },
         { "output-binary-to-stdout", output_binary_to_stdout },
-        { "output-binary-to-stderr", output_binary_to_stderr },
-        { "error", error }
+        { "output-binary-to-stderr", output_binary_to_stderr }
     },
     core_globals {
         result,

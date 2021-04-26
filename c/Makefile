@@ -11,9 +11,10 @@ SOURCES = mce.c \
 HEADERS = config.h
 # Disable warnings for $(GNULIB_DIR)/localcharset.c
 CFLAGS = -Wno-misleading-indentation -Wno-unused-const-variable
+LIBS = -lm
 
 mce: $(SOURCES) $(HEADERS)
-	$(CC) $(CFLAGS) -g -Wall -Wextra -Werror -I. -idirafter $(GNULIB_DIR) -o $@ $(SOURCES)
+	$(CC) $(CFLAGS) -g -Wall -Wextra -Werror -I. -idirafter $(GNULIB_DIR) -o $@ $(SOURCES) $(LIBS)
 
 clean:
 	rm -f mce

@@ -9,7 +9,7 @@
                      (= (cdr second) 1)
                      (< (car third) 20000)
                      (< (cdr third) 10000)))
-            (< stats 0))))
+            (< stats 250000))))
     (let loop ()
         (let ((p (cons 1 2)))
             (set-cdr! p p)
