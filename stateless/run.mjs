@@ -25,21 +25,21 @@ export default async (v, key64, args = null) => {
     runtime.register_kenv_function(new_save);
     runtime.unregister_global_function('restore');
 
-    let alist = null;
+    let vlist = runtime.nil;
     if (args) {
         for (let [k, v] of args) {
-            alist = runtime.cons(runtime.cons(k, v), alist);
+            vlist = runtime.cons(runtime.cons(k, v), vlist);
         }
-        alist = runtime.cons(alist, null);
+        vlist = runtime.cons(vlist, runtime.nil);
     }
 
     let shtml;
     if (Array.isArray(v)) {
         shtml = await runtime.start(v);
     } else if ((typeof v === 'string') || Buffer.isBuffer(v)) {
-        shtml = await runtime.start_string(v, alist);
+        shtml = await runtime.start_string_or_buffer(v, vlist);
     } else {
-        shtml = await runtime.start_stream(v, alist);
+        shtml = await runtime.start_stream(v, vlist);
     }
     return await shtml_to_html(shtml, save_and_sign);
 }

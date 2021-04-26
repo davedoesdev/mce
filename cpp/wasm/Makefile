@@ -6,7 +6,7 @@ HEADERS = ../mce.hpp ../json.hpp ../cxxopts.hpp wasi.hpp
 CXX=/opt/wasi-sdk/bin/clang++
 
 mce.wasm: $(SOURCES) $(HEADERS) Makefile
-	$(CXX) -g --include=wasi.hpp -Wall -Wextra -Wl,--fatal-warnings,-z,stack-size=1048576 -o $@ $(SOURCES)
+	$(CXX) -g --include=wasi.hpp --std=c++17 -Wall -Wextra -Werror -Wl,--fatal-warnings,-z,stack-size=1048576 -o $@ $(SOURCES)
 
 clean:
 	rm -f mce.wasm

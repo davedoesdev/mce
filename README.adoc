@@ -22,9 +22,11 @@ State-saving mechanism::
 Stateless servers::
   An experimental Web framework is provided which serializes the whole program state into a HTML document when user interaction is required. The state is restored when the browser POSTs back the user input form. The framework is modelled after the stateless server arrangement described http://rawgit.davedoesdev.com/davedoesdev/mce/master/doc/dissertation.pdf#page=103[here].
 
+Core runtime::
+  Only booleans, numbers, vectors and binary arrays are implemented in the runtimes. Other types are implemented at language level. Pairs are 2-length vectors and characters, symbols and strings are tagged binary arrays.
+
 The macro expansion and CPS conversion components are implemented in Scheme.
-The CPS execution component has Scheme, C++, JavaScript, WebAssembly and C
-implementations.
+The CPS execution component has Scheme, C++, JavaScript, WebAssembly and C implementations.
 
 # Building
 
@@ -66,7 +68,7 @@ The CPS execution component is in link:js/mce.js[].
 
 ## WebAssembly
 
-Install https://github.com/CraneStation/wasi-sdk[wasi-sdk] to `/opt/wasi-sdk`
+Install https://github.com/WebAssembly/wasi-sdk[wasi-sdk] to `/opt/wasi-sdk`
 and then:
 
 ```bash
@@ -75,9 +77,9 @@ make -C cpp/wasm
 
 You should end up with `mce.wasm` in the link:cpp/wasm[] directory. This is the
 CPS execution component. You'll need a WebAssembly runtime which supports
-https://github.com/CraneStation/wasmtime/blob/master/docs/WASI-overview.md[WASI]
-to run it, for example https://github.com/CraneStation/wasmtime[wasmtime] or
-https://nodejs.org/dist/latest-v13.x/docs/api/wasi.html[Node.js].
+https://github.com/bytecodealliance/wasmtime/blob/main/docs/WASI-overview.md[WASI]
+to run it, for example https://github.com/bytecodealliance/wasmtime[wasmtime] or
+https://nodejs.org/dist/latest-v16.x/docs/api/wasi.html[Node.js].
 
 ## C
 

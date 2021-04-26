@@ -317,6 +317,7 @@ function error(proc, msg, obj) {
 
 function output_binary(stream, b, start, end) {
     stream.write(b.slice(start, end));
+    return nil;
 }
 
 const global_table = new Map([
@@ -325,7 +326,7 @@ const global_table = new Map([
     ['getpid', getpid],
     ['get-config', get_config],
     ['cf-test', cf_test],
-    ['set-gc-callback!', () => null],
+    ['set-gc-callback!', () => nil],
     ['output-binary-to-stdout', (...args) => output_binary(process.stdout, ...args)],
     ['output-binary-to-stderr', (...args) => output_binary(process.stderr, ...args)],
     ['error', error]
@@ -919,7 +920,7 @@ const read_all = promisify((stream, cb) => {
     stream.on('end', () => cb(null, Buffer.concat(bufs)));
 });
 
-async function start_string_or_buffer(s, args = null) {
+async function start_string_or_buffer(s, args = nil) {
     const r = mce_restore(s);
     if (typeof r === 'function') {
         return await r(args);
@@ -927,7 +928,7 @@ async function start_string_or_buffer(s, args = null) {
     return await run(r);
 }
 
-async function start_stream(stream, args = null) {
+async function start_stream(stream, args = nil) {
     return await start_string_or_buffer(await read_all(stream), args);
 }
 
@@ -966,7 +967,8 @@ return {
     start_stream,
     start,
     send,
-    sendv
+    sendv,
+    nil
 };
 
 }
