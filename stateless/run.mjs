@@ -1,7 +1,9 @@
 import { make_runtime } from '@davedoesdev/mce';
-import { shtml_to_html } from './shtml.mjs';
+import { shtml_to_html, string_code } from './shtml.mjs';
 import sodium_plus from 'sodium-plus';
 const { CryptographyKey, SodiumPlus } = sodium_plus;
+
+const string_prefix = Buffer.from([string_code]);
 
 export default async (v, key64, args = null) => {
     const sign = async buf => {
@@ -16,7 +18,7 @@ export default async (v, key64, args = null) => {
     const runtime = make_runtime();
     const save = runtime.get_global_function('save');
     const save_and_sign = async exp => {
-        return JSON.stringify(await sign(Buffer.from(save(exp))));
+        return JSON.stringify(await sign(save(exp)));
     };
     const new_save = async (k, env, exp) => {
         return runtime.send(k, await save_and_sign(exp));
@@ -28,9 +30,11 @@ export default async (v, key64, args = null) => {
     let vlist = runtime.nil;
     if (args) {
         for (let [k, v] of args) {
-            vlist = runtime.cons(runtime.cons(k, v), vlist);
+            vlist = [[Buffer.concat([string_prefix, Buffer.from(k)]),
+                      Buffer.concat([string_prefix, Buffer.from(v)])],
+                     vlist];
         }
-        vlist = runtime.cons(vlist, runtime.nil);
+        vlist = [vlist, runtime.nil];
     }
 
     let shtml;

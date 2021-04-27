@@ -1,9 +1,9 @@
 import jsdom from 'jsdom';
 const { JSDOM } = jsdom;
 
-const char_code = 'B'.charCodeAt(0);
-const string_code = 'C'.charCodeAt(0);
-const symbol_code = 'D'.charCodeAt(0);
+export const char_code = 'B'.charCodeAt(0);
+export const string_code = 'C'.charCodeAt(0);
+export const symbol_code = 'D'.charCodeAt(0);
 
 class Attribute {
     constructor(el) {
