@@ -9,7 +9,6 @@
 #include <string.h>
 #include <unistd.h>
 #include <inttypes.h>
-#include <quotearg.h>
 #include <argp.h>
 
 #define DEFAULT_MEMORY_SIZE         10
