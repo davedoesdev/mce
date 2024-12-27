@@ -1,12 +1,12 @@
 all: mce.wasm
 
 SOURCES = ../main.cpp ../mce.cpp wasi.cpp
-HEADERS = ../mce.hpp ../json.hpp ../cxxopts.hpp wasi.hpp
+HEADERS = ../mce.hpp ../json.hpp ../cxxopts.hpp ../base64.hpp
 
 CXX=/opt/wasi-sdk/bin/clang++
 
-mce.wasm: $(SOURCES) $(HEADERS) Makefile
-	$(CXX) -g --include=wasi.hpp --std=c++17 -Wall -Wextra -Werror -Wl,--fatal-warnings,-z,stack-size=1048576 -o $@ $(SOURCES)
+mce.wasm: $(SOURCES) $(HEADERS)
+	$(CXX) -D_WASI_EMULATED_GETPID -g --std=c++17 -Wall -Wextra -Werror -Wl,--fatal-warnings,-z,stack-size=1048576 -o $@ $(SOURCES) -lwasi-emulated-getpid
 
 clean:
 	rm -f mce.wasm

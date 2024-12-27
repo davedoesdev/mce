@@ -3,6 +3,7 @@ import { promises as fs } from 'fs';
 import { fileURLToPath } from 'url';
 import { WASI } from 'wasi';
 const wasi = new WASI({
+    version: 'preview1',
     args: process.argv.slice(1)
 });
 

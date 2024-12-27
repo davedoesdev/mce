@@ -1,6 +1,6 @@
 {
     "name": "@davedoesdev/mce",
-    "version": "0.0.6",
+    "version": "0.0.7",
     "main": "mce.js",
     "type": "module",
     "description": "State-saving, continuation-passing metacircular evaluator for Scheme",
@@ -10,6 +10,6 @@
     },
     "license": "MIT",
     "dependencies": {
-        "yargs": "^17.2.1"
+        "yargs": "^17.7.2"
     }
 }

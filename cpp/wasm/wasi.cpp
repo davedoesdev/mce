@@ -1,9 +1,4 @@
 #include <stdlib.h>
-#include "wasi.hpp"
-
-pid_t getpid() {
-    return -1;
-}
 
 // Hack exception handling until wasm supports them
 // https://github.com/WebAssembly/proposals/issues/4

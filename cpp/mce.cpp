@@ -1838,7 +1838,7 @@ void bconvert_in(std::istream &stream, const RuntimeInfo& info) {
     std::cout << mce_save(bunpickle(v.data(), v.size(), 0, refs, info));
 }
 
-boxed start(int argc, char *argv[]) {
+boxed start(const int argc, const char *const argv[]) {
     cxxopts::Options options("mce", "Metacircular Evaluator");
     options.add_options()
         ("h,help", "help")

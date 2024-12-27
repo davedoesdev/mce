@@ -123,7 +123,7 @@ And using the WebAssembly engine:
 or
 
 ```bash
-./scm/expand < examples/test-loop.scm | ./scm/scan | node --experimental-wasi-unstable-preview1 js/run_wasm.js
+./scm/expand < examples/test-loop.scm | ./scm/scan | node js/run_wasm.js
 ```
 
 Using the C engine:
@@ -143,7 +143,7 @@ for example:
 ./scm/expand < examples/test-loop.scm | ./scm/scan > test-loop.cps
 ./scm/mce < test-loop.cps
 ./cpp/mce < test-loop.cps
-node --experimental-wasi-unstable-preview1 js/main.js < test-loop.cps
+node js/main.js < test-loop.cps
 wasmtime cpp/wasm/mce.wasm < test-loop.cps
 node js/run_wasm.js < test-loop.cps
 ./cpp/mce --bconvert-out < test-loop.cps | ./c/mce
@@ -255,7 +255,7 @@ $ ./scm/expand < examples/test-state2.scm | ./scm/scan | ./scm/mce | wasmtime cp
 4
 5
 save 1025
-restore -1
+restore 42 
 6
 7
 8
@@ -263,7 +263,7 @@ restore -1
 10
 ```
 
-Note the WebAssembly process ID is always -1 because https://github.com/CraneStation/wasi-libc[wasi-libc] doesn't implement `getpid`.
+Note the WebAssembly process ID is always 42 because https://github.com/CraneStation/wasi-libc[wasi-libc] doesn't implement `getpid`.
 
 # C++ (and WebAssembly) garbage collector
 
