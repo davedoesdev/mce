@@ -67,8 +67,8 @@ enum core_globals {
     g_is_number,
     g_less_than,
     g_greater_than,
-    g_plus,
-    g_minus,
+    g_add,
+    g_subtract,
     g_multiply,
     g_divide,
     g_is_number_equal,
@@ -553,44 +553,28 @@ uint64_t greater_than(memory *mem, uint64_t args) {
         double_val(mem, vlist_ref(mem, args, 1)));
 }
 
-uint64_t plus(memory *mem, uint64_t args) {
-    double r = 0;
-    while (vector_size(mem, args) == 2) {
-        r += double_val(mem, vector_ref(mem, args, 0));
-        args = vector_ref(mem, args, 1);
-    }
-    return make_double(mem, r);
+uint64_t add(memory *mem, uint64_t args) {
+    return make_double(mem, 
+        double_val(mem, vlist_ref(mem, args, 0)) +
+        double_val(mem, vlist_ref(mem, args, 1)));
 }
 
-uint64_t minus(memory *mem, uint64_t args) {
-    double n = double_val(mem, vector_ref(mem, args, 0));
-    if (vector_size(mem, vector_ref(mem, args, 1)) != 2) {
-        return make_double(mem, -n);
-    }
-    while (vector_size(mem, args = vector_ref(mem, args, 1)) == 2) {
-        n -= double_val(mem, vector_ref(mem, args, 0));
-    }
-    return make_double(mem, n);
+uint64_t subtract(memory *mem, uint64_t args) {
+    return make_double(mem, 
+        double_val(mem, vlist_ref(mem, args, 0)) -
+        double_val(mem, vlist_ref(mem, args, 1)));
 }
 
 uint64_t multiply(memory *mem, uint64_t args) {
-    double r = 1;
-    while (vector_size(mem, args) == 2) {
-        r *= double_val(mem, vector_ref(mem, args, 0));
-        args = vector_ref(mem, args, 1);
-    }
-    return make_double(mem, r);
+    return make_double(mem, 
+        double_val(mem, vlist_ref(mem, args, 0)) *
+        double_val(mem, vlist_ref(mem, args, 1)));
 }
 
 uint64_t divide(memory *mem, uint64_t args) {
-    double n = double_val(mem, vector_ref(mem, args, 0));
-    if (vector_size(mem, vector_ref(mem, args, 1)) != 2) {
-        return make_double(mem, 1 / n);
-    }
-    while (vector_size(mem, args = vector_ref(mem, args, 1)) == 2) {
-        n /= double_val(mem, vector_ref(mem, args, 0));
-    }
-    return make_double(mem, n);
+    return make_double(mem, 
+        double_val(mem, vlist_ref(mem, args, 0)) /
+        double_val(mem, vlist_ref(mem, args, 1)));
 }
 
 uint64_t is_same_object(memory *mem, uint64_t args) {
@@ -823,11 +807,11 @@ uint64_t global_lambda(memory *mem,
         case g_greater_than:
             return sendv(mem, k, greater_than(mem, args));
 
-        case g_plus:
-            return sendv(mem, k, plus(mem, args));
+        case g_add:
+            return sendv(mem, k, add(mem, args));
 
-        case g_minus:
-            return sendv(mem, k, minus(mem, args));
+        case g_subtract:
+            return sendv(mem, k, subtract(mem, args));
 
         case g_multiply:
             return sendv(mem, k, multiply(mem, args));

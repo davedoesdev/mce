@@ -607,5 +607,35 @@
 
 (toplevel (write x . args)
     (display-aux x (port-from-args args) #t))
-) 
+
+(toplevel (+ . args)
+    (let loop ((r 0) (l args))
+        (if (null? l)
+            r
+            (loop (add r (car l)) (cdr l)))))
+
+; can we hide plus so only toplevel can access it?
+
+(toplevel (- n . args)
+    (if (null? args)
+        (subtract 0 n)
+        (let loop ((r n) (l args))
+            (if (null? l)
+                r
+                (loop (subtract r (car l)) (cdr l))))))
+
+(toplevel (* . args)
+    (let loop ((r 1) (l args))
+        (if (null? l)
+            r
+            (loop (multiply r (car l)) (cdr l)))))
+
+(toplevel (/ n . args)
+    (if (null? args)
+        (divide 1 n)
+        (let loop ((r n) (l args))
+            (if (null? l)
+                r
+                (loop (divide r (car l)) (cdr l))))))
+)
 ,(read))))))

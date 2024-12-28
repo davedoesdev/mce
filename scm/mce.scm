@@ -401,7 +401,7 @@
            (let ((i (ctenv-index ctenv exp)))
                (if i
                    (make-form symbol-lookup i)
-                   (let ((g (lookup-global exp #f)))
+                   (let ((g (lookup-global exp #f (cadr fixups))))
                        (if (procedure? g)
                            (make-form send-value g)
                            (make-undefined-lookup exp ctenv fixups))))))
@@ -458,7 +458,7 @@
 
 (define (scan exp global-ctenv)
     (let* ((toplevels (car exp))
-           (fixups-holder (list '()))
+           (fixups-holder (list '() #f))
            (r (scan-aux (cadr exp) global-ctenv fixups-holder))
            (f (lambda args (apply r args)))
            (fixups (car fixups-holder))
@@ -475,7 +475,7 @@
                                 (if (and helper? (< count fixups-len))
                                     (error-lookup-not-found name))
                                 (let* ((i (putin-ctenv! global-ctenv name))
-                                       (fixups2 (list '()))
+                                       (fixups2 (list '() #t))
                                        (toplevel (if helper? (cddr entry) (cdr entry)))
                                        (initialize? (equal? (car toplevel) 'initialize))
                                        (scanned (scan-aux (if initialize?
@@ -583,7 +583,7 @@
 (define (transfer-args exp)
     (cdr exp))
 
-(define (find-global sym #!optional (err #t))
+(define (find-global sym #!optional (err #t) (helpers #f))
     (if (number? sym)
         (let ((r (if (< sym (vector-length core-globals))
                      (vector-ref core-globals sym)
@@ -600,7 +600,9 @@
                                    (if (string? sym)
                                        (string->symbol (substring sym 1))
                                        sym))))
-                   (if r
+                   (if (and r
+                            (or helpers
+                                (< (vector-index (ref-value r) helper-globals 0) 0)))
                        (ref-value r)
                        (if err
                            (error-lookup-not-found sym)
@@ -613,8 +615,8 @@
             (vector-index v vec (+ i 1)))
         -1))
 
-(define (lookup-global sym #!optional (err #t))
-    (let ((r (find-global sym err)))
+(define (lookup-global sym #!optional (err #t) (helpers #f))
+    (let ((r (find-global sym err helpers)))
         (if (procedure? r)
             (letrec*
                 ((i (vector-index r core-globals 0))
@@ -660,10 +662,10 @@
 (table-set! global-table 'number? number?)
 (table-set! global-table '< <)
 (table-set! global-table '> >)
-(table-set! global-table '+ +)
-(table-set! global-table '- -)
-(table-set! global-table '* *)
-(table-set! global-table '/ /)
+(table-set! global-table 'add +)
+(table-set! global-table 'subtract -)
+(table-set! global-table 'multiply *)
+(table-set! global-table 'divide /)
 (table-set! global-table 'same-object? eq?)
 (table-set! global-table '= =)
 (table-set! global-table 'floor floor)
@@ -690,6 +692,14 @@
 (table-set! global-table 'output-binary-to-stdout output-binary-to-stdout)
 (table-set! global-table 'output-binary-to-stderr output-binary-to-stderr)
 (table-set! global-table 'error error)
+
+(define helper-globals (vector
+    ; arithmetic operations only visible at toplevel
+    +
+    -
+    *
+    /
+))
 
 (define core-globals (vector
     ; result needs to be accessible from core for when we run a

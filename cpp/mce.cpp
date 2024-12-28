@@ -620,48 +620,28 @@ boxed greater_than(boxed args) {
                      args->get_runtime_info());
 }
 
-boxed plus(boxed args) {
-    double r = 0;
-    std::shared_ptr<vector> v;
-    while ((*(v = args->cast<vector>()))->size() == 2) {
-        r += (*v)->at(0)->cast<double>();
-        args = (*v)->at(1);
-    }
-    return box<double>(r, args->get_runtime_info());
+boxed add(boxed args) {
+    return box<double>(vlist_ref(args, 0)->cast<double>() +
+                       vlist_ref(args, 1)->cast<double>(),
+                       args->get_runtime_info());
 }
 
-boxed minus(boxed args) {
-    auto v = args->cast<vector>();
-    double n = (*v)->at(0)->cast<double>();
-    if ((*(*v)->at(1)->cast<vector>())->size() != 2) {
-        return box<double>(-n, args->get_runtime_info());
-    }
-    while ((*(v = (*v)->at(1)->cast<vector>()))->size() == 2) {
-        n -= (*v)->at(0)->cast<double>();
-    }
-    return box<double>(n, args->get_runtime_info());
+boxed subtract(boxed args) {
+    return box<double>(vlist_ref(args, 0)->cast<double>() -
+                       vlist_ref(args, 1)->cast<double>(),
+                       args->get_runtime_info());
 }
 
 boxed multiply(boxed args) {
-    double r = 1;
-    std::shared_ptr<vector> v;
-    while ((*(v = args->cast<vector>()))->size() == 2) {
-        r *= (*v)->at(0)->cast<double>();
-        args = (*v)->at(1);
-    }
-    return box<double>(r, args->get_runtime_info());
+    return box<double>(vlist_ref(args, 0)->cast<double>() *
+                       vlist_ref(args, 1)->cast<double>(),
+                       args->get_runtime_info());
 }
 
 boxed divide(boxed args) {
-    auto v = args->cast<vector>();
-    double n = (*v)->at(0)->cast<double>();
-    if ((*(*v)->at(1)->cast<vector>())->size() != 2) {
-        return box<double>(1 / n, args->get_runtime_info());
-    }
-    while ((*(v = (*v)->at(1)->cast<vector>()))->size() == 2) {
-        n /= (*v)->at(0)->cast<double>();
-    }
-    return box<double>(n, args->get_runtime_info());
+    return box<double>(vlist_ref(args, 0)->cast<double>() /
+                       vlist_ref(args, 1)->cast<double>(),
+                       args->get_runtime_info());
 }
 
 boxed gfloor(boxed args) {
@@ -1934,8 +1914,8 @@ Runtime::Runtime() :
         is_number,
         less_than,
         greater_than,
-        plus,
-        minus,
+        add,
+        subtract,
         multiply,
         divide,
         is_number_equal,

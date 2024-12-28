@@ -158,46 +158,28 @@ class UnknownUnpickleExpressionError extends Error {
     }
 }
 
-function plus(...args) {
-    let r = 0;
-    for (let arg of args) {
-        check_type_is(arg, 'number');
-        r += arg;
-    }
-    return r;
+function add(x, y) {
+    check_type_is(x, 'number');
+    check_type_is(y, 'number');
+    return x + y;
 }
 
-function minus(n, ...args) {
-    check_type_is(n, 'number');
-    if (args.length === 0) {
-        return -n;
-    }
-    for (let arg of args) {
-        check_type_is(arg, 'number');
-       n -= arg;
-    }
-    return n;
+function subtract(x, y) {
+    check_type_is(x, 'number');
+    check_type_is(y, 'number');
+    return x - y;
 }
 
-function multiply(...args) {
-    let r = 1;
-    for (let arg of args) {
-        check_type_is(arg, 'number');
-        r *= arg;
-    }
-    return r;
+function multiply(x, y) {
+    check_type_is(x, 'number');
+    check_type_is(y, 'number');
+    return x * y;
 }
 
-function divide(n, ...args) {
-    check_type_is(n, 'number');
-    if (args.length === 0) {
-        return 1 / n;
-    }
-    for (let arg of args) {
-        check_type_is(arg, 'number');
-        n /= arg;
-    }
-    return n;
+function divide(x, y) {
+    check_type_is(x, 'number');
+    check_type_is(y, 'number');
+    return x / y;
 }
 
 function less_than(x, y) {
@@ -339,8 +321,8 @@ const core_globals = [
         is_number,
         less_than,
         greater_than,
-        plus,
-        minus,
+        add,
+        subtract,
         multiply,
         divide,
         is_number_equal,
