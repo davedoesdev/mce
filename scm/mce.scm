@@ -716,10 +716,10 @@
     number?
     <
     >
-    +
-    -
-    *
-    /
+    + ; add
+    - ; subtract
+    * ; multiply
+    / ; divide
     =
     floor
 
