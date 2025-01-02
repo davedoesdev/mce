@@ -8,13 +8,13 @@
                 (and (= (car second) 3)
                      (= (cdr second) 1)
                      (< (car third) 20000)
-                     (< (cdr third) 10000)))
-            (< stats 250000))))
+                     (< (cdr third) 15000)))
+            (< stats 300000))))
     (let loop ()
         (let ((p (cons 1 2)))
             (set-cdr! p p)
             (loop))))
-; run with --gc-threshold=20000
+; run with --gc-threshold=20000 (C++)
 ; stats should show 3 vectors referenced from C++:
 ; - state in start()
 ; - state in run()

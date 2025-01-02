@@ -109,98 +109,125 @@ bool gc_callback_set = false;
 uint64_t gc_callback;
 bool calling_gc_callback = false;
 
+typedef struct {
+    uint64_t src_state;
+    uint64_t dest_state;
+} gc_todo;
+
 /* Note: src is modified during gc() and gc_aux() */
 uint64_t gc_aux(memory *src, uint64_t state, memory *dest) {
-    uint64_t size = dest->size;
+    gc_todo *todos = (gc_todo*) malloc(src->size * sizeof(gc_todo));
+    assert(todos);
 
     assert(state < src->size);
-    uint8_t code = src->bytes[state];
+    uint64_t r = dest->size;
 
-    assert(dest->size < dest->capacity);
-    dest->bytes[dest->size++] = code;
+    uint64_t num_todos = 0;
+    assert(num_todos < src->size);
+    todos[num_todos].src_state = state;
+    todos[num_todos++].dest_state = r;
 
-    switch (code) {
-        case true_code:
-        case false_code:
-            break;
-
-        case number_code:
-            assert(state + sizeof(double) < src->size);
-            assert(dest->size + sizeof(double) <= dest->capacity);
-            memcpy(&dest->bytes[dest->size], &src->bytes[state + 1], sizeof(double));
-            dest->size += sizeof(double);
-            break;
-
-        case binary_code: {
-            assert(state + 8 < src->size);
-            uint64_t len = *(uint64_t*)&src->bytes[state + 1];
-
-            assert(dest->size + 8 <= dest->capacity);
-            *(uint64_t*)&dest->bytes[dest->size] = len;
-            dest->size += 8;
-
-            assert(state + 8 + len < src->size);
-            assert(dest->size + len <= dest->capacity);
-            memcpy(&dest->bytes[dest->size], &src->bytes[state + 9], len);
-            dest->size += len;
-            break;
+    while (num_todos > 0) {
+        uint64_t src_state = todos[--num_todos].src_state;
+        uint64_t dest_state = todos[num_todos].dest_state;
+        if (dest_state != r) {
+            *(uint64_t*)&dest->bytes[dest_state] = dest->size;
         }
 
-        case vector_code: {
-            assert(state + 8 < src->size);
-            uint64_t len = *(uint64_t*)&src->bytes[state + 1];
+        assert(dest->size < dest->capacity);
+        uint8_t code = src->bytes[src_state];
+        dest->bytes[dest->size++] = code;
 
-            if (len == 0) {
-                dest->nil = dest->size - 1;
+        switch (code) {
+            case true_code:
+            case false_code:
+                break;
+
+            case number_code:
+                assert(src_state + sizeof(double) < src->size);
+                assert(dest->size + sizeof(double) <= dest->capacity);
+                memcpy(&dest->bytes[dest->size], &src->bytes[src_state + 1], sizeof(double));
+                dest->size += sizeof(double);
+                break;
+
+            case binary_code: {
+                assert(src_state + 8 < src->size);
+                uint64_t len = *(uint64_t*)&src->bytes[src_state + 1];
+
+                assert(dest->size + 8 <= dest->capacity);
+                *(uint64_t*)&dest->bytes[dest->size] = len;
+                dest->size += 8;
+
+                assert(src_state + 8 + len < src->size);
+                assert(dest->size + len <= dest->capacity);
+                memcpy(&dest->bytes[dest->size], &src->bytes[src_state + 9], len);
+                dest->size += len;
+                break;
             }
 
-            src->bytes[state] = gc_code;
-            *(uint64_t*)&src->bytes[state + 1] = dest->size - 1;
+            case vector_code: {
+                assert(src_state + 8 < src->size);
+                uint64_t len = *(uint64_t*)&src->bytes[src_state + 1];
 
-            assert(dest->size + 8 <= dest->capacity);
-            *(uint64_t*)&dest->bytes[dest->size] = len;
-            dest->size += 8;
+                if (len == 0) {
+                    dest->nil = dest->size - 1;
+                }
 
-            assert(state + 8 + len * 8 < src->size);
-            assert(dest->size + len * 8 <= dest->capacity);
+                src->bytes[src_state] = gc_code;
+                *(uint64_t*)&src->bytes[src_state + 1] = dest->size - 1;
 
-            uint64_t pos = dest->size;
-            dest->size += len * 8;
+                assert(dest->size + 8 <= dest->capacity);
+                *(uint64_t*)&dest->bytes[dest->size] = len;
+                dest->size += 8;
 
-            for (uint64_t i = 0; i < len; ++i) {
-                *(uint64_t*)&dest->bytes[pos + i * 8] = gc_aux(
-                    src, *(uint64_t*)&src->bytes[state + 9 + i * 8], dest);
+                assert(src_state + 8 + len * 8 < src->size);
+                assert(dest->size + len * 8 <= dest->capacity);
+
+                uint64_t pos = dest->size;
+                dest->size += len * 8;
+
+                for (uint64_t i = 0; i < len; ++i) {
+                    assert(num_todos < src->size);
+                    todos[num_todos].src_state = *(uint64_t*)&src->bytes[src_state + 9 + i * 8];
+                    todos[num_todos++].dest_state = pos + i * 8;
+                }
+                break;
             }
-            break;
+
+            case unmemoized_code:
+            case result_code:
+            case step_contn_code:
+            case transfer_code: {
+                assert(src_state + 8 < src->size);
+                uint64_t vec_state = *(uint64_t*)&src->bytes[src_state + 1];
+
+                src->bytes[src_state] = gc_code;
+                *(uint64_t*)&src->bytes[src_state + 1] = dest->size - 1;
+
+                assert(dest->size + 8 <= dest->capacity);
+                uint64_t pos = dest->size;
+                dest->size += 8;
+
+                assert(num_todos < src->size);
+                todos[num_todos].src_state = vec_state;
+                todos[num_todos++].dest_state = pos;
+                break;
+            }
+
+            case gc_code:
+                assert(src_state + 8 < src->size);
+                if (dest_state != r) {
+                    *(uint64_t*)&dest->bytes[dest_state] = *(uint64_t*)&src->bytes[src_state + 1];
+                }
+                break;
+
+            default:
+                assert_perror(EINVAL);
         }
-
-        case unmemoized_code:
-        case result_code:
-        case step_contn_code:
-        case transfer_code: {
-            assert(state + 8 < src->size);
-            uint64_t vec_state = *(uint64_t*)&src->bytes[state + 1];
-
-            src->bytes[state] = gc_code;
-            *(uint64_t*)&src->bytes[state + 1] = dest->size - 1;
-
-            assert(dest->size + 8 <= dest->capacity);
-            uint64_t pos = dest->size;
-            dest->size += 8;
-
-            *(uint64_t*)&dest->bytes[pos] = gc_aux(src, vec_state, dest);
-            break;
-        }
-
-        case gc_code:
-            assert(state + 8 < src->size);
-            return *(uint64_t*)&src->bytes[state + 1];
-
-        default:
-            assert_perror(EINVAL);
     }
 
-    return size;
+    free(todos);
+    return r;
 }
 
 void gc(memory *src, uint64_t state, memory *dest) {
