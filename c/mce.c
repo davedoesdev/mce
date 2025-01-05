@@ -12,7 +12,6 @@
 #include <argp.h>
 
 #define DEFAULT_MEMORY_SIZE         10
-#define DEFAULT_GC_THRESHOLD_SIZE   8
 #define MEBIBYTES                   (1024 * 1024)
 
 #define true_code                   '0'
@@ -93,9 +92,11 @@ enum core_globals {
 typedef struct {
     uint64_t capacity;
     uint64_t size;
-    uint64_t gc_threshold;
     uint8_t *bytes;
     uint64_t nil;
+    bool gc_callback_set;
+    uint64_t gc_callback;
+    bool calling_gc_callback;
 } memory;
 
 typedef struct {
@@ -112,32 +113,36 @@ allocation allocate(memory *mem, uint64_t size) {
     return (allocation) { true, cur_size };
 }
 
-bool gc_callback_set = false;
-uint64_t gc_callback;
-bool calling_gc_callback = false;
-
 typedef struct {
     uint64_t src_state;
     uint64_t dest_state;
 } gc_todo;
 
-/* Note: src is modified during gc() and gc_aux() */
-uint64_t gc_aux(memory *src, uint64_t state, memory *dest) {
-    gc_todo *todos = (gc_todo*) malloc(src->size * sizeof(gc_todo));
+/* Note: src is modified during gc() */
+uint64_t gc(memory *src, uint64_t state, memory *dest) {
+    gc_todo *todos = (gc_todo*) malloc((src->size + 1 /* for gc_callback */) * sizeof(gc_todo));
     assert(todos);
 
     assert(state < src->size);
     uint64_t r = dest->size;
 
     uint64_t num_todos = 0;
+    if (src->gc_callback_set) {
+        assert(num_todos < src->size);
+        todos[num_todos].src_state = src->gc_callback;
+        todos[num_todos++].dest_state = 0; /* not used */
+    }
     assert(num_todos < src->size);
     todos[num_todos].src_state = state;
-    todos[num_todos++].dest_state = r;
+    todos[num_todos++].dest_state = 0; /* not used */
 
     while (num_todos > 0) {
         uint64_t src_state = todos[--num_todos].src_state;
         uint64_t dest_state = todos[num_todos].dest_state;
-        if (dest_state != r) {
+        if (src->gc_callback_set && (src_state == src->gc_callback)) {
+            dest->gc_callback_set = true;
+            dest->gc_callback = dest->size;
+        } else if (src_state != state) {
             *(uint64_t*)&dest->bytes[dest_state] = dest->size;
         }
 
@@ -223,7 +228,10 @@ uint64_t gc_aux(memory *src, uint64_t state, memory *dest) {
 
             case gc_code:
                 assert(src_state + 8 < src->size);
-                if (dest_state != r) {
+                if (src->gc_callback_set && (src_state == src->gc_callback)) {
+                    dest->gc_callback_set = true;
+                    dest->gc_callback = *(uint64_t*)&src->bytes[src_state + 1];
+                } else if (src_state != state) {
                     *(uint64_t*)&dest->bytes[dest_state] = *(uint64_t*)&src->bytes[src_state + 1];
                 }
                 break;
@@ -234,12 +242,8 @@ uint64_t gc_aux(memory *src, uint64_t state, memory *dest) {
     }
 
     free(todos);
-    return r;
-}
-
-void gc(memory *src, uint64_t state, memory *dest) {
-    gc_aux(src, state, dest);
     assert(dest->size > 0);
+    return r;
 }
 
 allocation make_uninitialised_vector(memory *mem, uint64_t n) {
@@ -484,9 +488,11 @@ allocation save(memory *mem, uint64_t state) {
     memory dest = {
         mem->size,
         0,
-        0,
         (uint8_t*) malloc(mem->size),
-        0
+        0,
+        false,
+        0,
+        false
     };
     assert(dest.bytes);
 
@@ -514,9 +520,11 @@ uint64_t restore(memory *mem, uint64_t b) {
     memory src = {
         size,
         size,
-        0,
         bytes,
-        0
+        0,
+        false,
+        0,
+        false
     };
 
     size = mem->size;
@@ -556,10 +564,20 @@ allocation vlist_to_vector(memory *mem, uint64_t vl, uint64_t len) {
 }
 
 allocation extend_rtenv(memory *mem,
-                      uint64_t env,
-                      uint64_t len,
-                      uint64_t values) {
+                        uint64_t env,
+                        uint64_t len,
+                        uint64_t values) {
     return vc_av(mem, vlist_to_vector(mem, values, len), env);
+}
+
+allocation extend_rtenv_a(memory *mem,
+                          uint64_t env,
+                          uint64_t len,
+                          allocation values) {
+    if (!values.succeeded) {
+        return values;
+    }
+    return extend_rtenv(mem, env, len, values.v);
 }
 
 allocation improper_extend_rtenv(memory *mem,
@@ -660,25 +678,25 @@ allocation greater_than(memory *mem, uint64_t args) {
 }
 
 allocation add(memory *mem, uint64_t args) {
-    return make_double(mem, 
+    return make_double(mem,
         double_val(mem, vlist_ref(mem, args, 0)) +
         double_val(mem, vlist_ref(mem, args, 1)));
 }
 
 allocation subtract(memory *mem, uint64_t args) {
-    return make_double(mem, 
+    return make_double(mem,
         double_val(mem, vlist_ref(mem, args, 0)) -
         double_val(mem, vlist_ref(mem, args, 1)));
 }
 
 allocation multiply(memory *mem, uint64_t args) {
-    return make_double(mem, 
+    return make_double(mem,
         double_val(mem, vlist_ref(mem, args, 0)) *
         double_val(mem, vlist_ref(mem, args, 1)));
 }
 
 allocation divide(memory *mem, uint64_t args) {
-    return make_double(mem, 
+    return make_double(mem,
         double_val(mem, vlist_ref(mem, args, 0)) /
         double_val(mem, vlist_ref(mem, args, 1)));
 }
@@ -782,14 +800,14 @@ allocation make_form(memory *mem, double form, uint64_t args) {
     if (!state.succeeded) {
         return state;
     }
-    mem->bytes[state.v] = unmemoized_code;
-    *(uint64_t*)&mem->bytes[state.v + 1] = state.v + 9;
-    mem->bytes[state.v + 9] = vector_code;
-    *(uint64_t*)&mem->bytes[state.v + 10] = 1;
     allocation form_state = vc_av(mem, make_double(mem, form), args);
     if (!form_state.succeeded) {
         return form_state;
     }
+    mem->bytes[state.v] = unmemoized_code;
+    *(uint64_t*)&mem->bytes[state.v + 1] = state.v + 9;
+    mem->bytes[state.v + 9] = vector_code;
+    *(uint64_t*)&mem->bytes[state.v + 10] = 1;
     *(uint64_t*)&mem->bytes[state.v + 18] = form_state.v;
     return state;
 }
@@ -802,7 +820,7 @@ allocation make_form_a(memory* mem, double form, allocation args) {
 }
 
 allocation make_global_rtenv(memory *mem) {
-    return vc_av(mem, make_vector(mem, 0), mem->nil);
+    return vc(mem, mem->nil, mem->nil);
 }
 
 allocation applyx(memory *mem,
@@ -811,6 +829,23 @@ allocation applyx(memory *mem,
                   uint64_t fn,
                   uint64_t args) {
     return send_va(mem, fn, make_step_contn(mem, k, env, args));
+}
+
+allocation applyx_a(memory *mem,
+                    allocation k,
+                    allocation env,
+                    uint64_t fn,
+                    allocation args) {
+    if (!k.succeeded) {
+        return k;
+    }
+    if (!env.succeeded) {
+        return env;
+    }
+    if (!args.succeeded) {
+        return args;
+    }
+    return applyx(mem, k.v, env.v, fn, args.v);
 }
 
 allocation transfer_test(memory *mem, uint64_t args) {
@@ -871,16 +906,8 @@ allocation constructed_function0(memory *mem,
                                uint64_t args) {
     uint64_t args2 = vlist_ref(mem, form_args, 0);
     uint64_t cf = vlist_ref(mem, form_args, 1);
-    allocation form_state = make_form_a(mem, constructed_function1_form,
-                                        vc(mem, args, mem->nil));
-    if (!form_state.succeeded) {
-        return form_state;
-    }
-    allocation genv_state = make_global_rtenv(mem);
-    if (!genv_state.succeeded) {
-        return genv_state;
-    }
-    return applyx(mem, form_state.v, genv_state.v, cf, args2);
+    return applyx_a(mem, make_form_a(mem, constructed_function1_form, vc(mem, args, mem->nil)),
+                    make_global_rtenv(mem), cf, (allocation) { true, args2 });
 }
 
 allocation constructed_function1(memory *mem,
@@ -909,20 +936,12 @@ allocation global_lambda(memory *mem,
         args = transfer_args(mem, args);
 
         if (g == g_transfer_test) {
-            allocation form_state = make_form_a(mem, global_lambda_form,
-                                                vc_av(mem, make_double(mem, g_result), mem->nil));
-            if (!form_state.succeeded) {
-                return form_state;
-            }
-            allocation genv_state = make_global_rtenv(mem);
-            if (!genv_state.succeeded) {
-                return genv_state;
-            }
-            return applyx(mem,
-                          form_state.v,
-                          genv_state.v,
-                          vlist_ref(mem, args, 0),
-                          vlist_rest(mem, args, 0));
+            return applyx_a(mem,
+                            make_form_a(mem, global_lambda_form,
+                                        vc_av(mem, make_double(mem, g_result), mem->nil)),
+                            make_global_rtenv(mem),
+                            vlist_ref(mem, args, 0),
+                            (allocation) { true, vlist_rest(mem, args, 0) });
         }
 
         assert_perror(EINVAL);
@@ -1049,8 +1068,8 @@ allocation global_lambda(memory *mem,
     }
 
     if (symbol_equals(mem, defn, "set-gc-callback!")) {
-        gc_callback = vlist_ref(mem, args, 0);
-        gc_callback_set = true;
+        mem->gc_callback = vlist_ref(mem, args, 0);
+        mem->gc_callback_set = true;
         return sendv(mem, k, mem->nil);
     }
 
@@ -1066,156 +1085,156 @@ allocation global_lambda(memory *mem,
     return (allocation) { false, 0 };
 }
 
-uint64_t if0(memory *mem,
-             uint64_t form_args,
-             uint64_t args) {
+allocation if0(memory *mem,
+               uint64_t form_args,
+               uint64_t args) {
     uint64_t scan0 = vlist_ref(mem, form_args, 0);
     uint64_t scan1 = vlist_ref(mem, form_args, 1);
     uint64_t scan2 = vlist_ref(mem, form_args, 2);
     uint64_t k = vlist_ref(mem, args, 0);
     uint64_t env = vlist_ref(mem, args, 1);
-    return send(mem, scan0,
-        vc(mem, make_form(mem, if1_form,
-                          vc(mem, k,
-                             vc(mem, env, vc(mem, scan1, vc(mem, scan2, mem->nil))))),
-           vc(mem, env, mem->nil)));
+    return send_va(mem, scan0,
+        vc_aa(mem, make_form_a(mem, if1_form,
+                               vc_va(mem, k,
+                                     vc_va(mem, env, vc_va(mem, scan1, vc(mem, scan2, mem->nil))))),
+              vc(mem, env, mem->nil)));
 }
 
-uint64_t if1(memory *mem,
-             uint64_t form_args,
-             uint64_t args) {
+allocation if1(memory *mem,
+               uint64_t form_args,
+               uint64_t args) {
     uint64_t k = vlist_ref(mem, form_args, 0);
     uint64_t env = vlist_ref(mem, form_args, 1);
     uint64_t scan1 = vlist_ref(mem, form_args, 2);
     uint64_t scan2 = vlist_ref(mem, form_args, 3);
     bool v = boolean_val(mem, vlist_ref(mem, args, 0));
-    return send(mem, v ? scan1 : scan2, vc(mem, k, vc(mem, env, mem->nil)));
+    return send_va(mem, v ? scan1 : scan2, vc_va(mem, k, vc(mem, env, mem->nil)));
 }
 
-uint64_t sclis0(memory *mem,
-                uint64_t form_args,
-                uint64_t args) {
+allocation sclis0(memory *mem,
+                  uint64_t form_args,
+                  uint64_t args) {
     uint64_t first = vlist_ref(mem, form_args, 0);
     uint64_t rest = vlist_ref(mem, form_args, 1);
     uint64_t k = vlist_ref(mem, args, 0);
     uint64_t env = vlist_ref(mem, args, 1);
-    return send(mem, first,
-        vc(mem, make_form(mem, sclis1_form,
-                          vc(mem, k, vc(mem, env, vc(mem, rest, mem->nil)))),
-           vc(mem, env, mem->nil)));
+    return send_va(mem, first,
+        vc_aa(mem, make_form_a(mem, sclis1_form,
+                               vc_va(mem, k, vc_va(mem, env, vc(mem, rest, mem->nil)))),
+              vc(mem, env, mem->nil)));
 }
 
-uint64_t sclis1(memory *mem,
-                uint64_t form_args,
-                uint64_t args) {
+allocation sclis1(memory *mem,
+                  uint64_t form_args,
+                  uint64_t args) {
     uint64_t k = vlist_ref(mem, form_args, 0);
     uint64_t env = vlist_ref(mem, form_args, 1);
     uint64_t rest = vlist_ref(mem, form_args, 2);
     uint64_t v = vlist_ref(mem, args, 0);
-    return send(mem, rest,
-        vc(mem, make_form(mem, sclis2_form, vc(mem, k, vc(mem, v, mem->nil))),
-           vc(mem, env, mem->nil)));
+    return send_va(mem, rest,
+        vc_aa(mem, make_form_a(mem, sclis2_form, vc_va(mem, k, vc(mem, v, mem->nil))),
+              vc(mem, env, mem->nil)));
 }
 
-uint64_t sclis2(memory *mem,
+allocation sclis2(memory *mem,
                 uint64_t form_args,
                 uint64_t args) {
     uint64_t k = vlist_ref(mem, form_args, 0);
     uint64_t v = vlist_ref(mem, form_args, 1);
     uint64_t w = vlist_ref(mem, args, 0);
-    return sendv(mem, k, vc(mem, v, w));
+    return sendv_va(mem, k, vc(mem, v, w));
 }
 
-uint64_t scseq0(memory *mem,
-                uint64_t form_args,
-                uint64_t args) {
+allocation scseq0(memory *mem,
+                  uint64_t form_args,
+                  uint64_t args) {
     uint64_t first = vlist_ref(mem, form_args, 0);
     uint64_t rest = vlist_ref(mem, form_args, 1);
     uint64_t k = vlist_ref(mem, args, 0);
     uint64_t env = vlist_ref(mem, args, 1);
-    return send(mem, first,
-        vc(mem, make_form(mem, scseq1_form,
-                          vc(mem, k, vc(mem, env, vc(mem, rest, mem->nil)))),
-           vc(mem, env, mem->nil)));
+    return send_va(mem, first,
+        vc_aa(mem, make_form_a(mem, scseq1_form,
+                               vc_va(mem, k, vc_va(mem, env, vc(mem, rest, mem->nil)))),
+              vc(mem, env, mem->nil)));
 }
 
-uint64_t scseq1(memory *mem,
-                uint64_t form_args) {
+allocation scseq1(memory *mem,
+                  uint64_t form_args) {
     uint64_t k = vlist_ref(mem, form_args, 0);
     uint64_t env = vlist_ref(mem, form_args, 1);
     uint64_t rest = vlist_ref(mem, form_args, 2);
-    return send(mem, rest, vc(mem, k, vc(mem, env, mem->nil)));
+    return send_va(mem, rest, vc_va(mem, k, vc(mem, env, mem->nil)));
 }
 
-uint64_t lambda0(memory *mem,
-                 uint64_t form_args,
-                 uint64_t args) {
+allocation lambda0(memory *mem,
+                   uint64_t form_args,
+                   uint64_t args) {
     uint64_t len = vlist_ref(mem, form_args, 0);
     uint64_t scanned = vlist_ref(mem, form_args, 1);
     uint64_t k = vlist_ref(mem, args, 0);
     uint64_t env = vlist_ref(mem, args, 1);
-    return sendv(mem, k,
-                 make_form(mem, lambda1_form,
-                           vc(mem, len, vc(mem, scanned, vc(mem, env, mem->nil)))));
+    return sendv_va(mem, k,
+                    make_form_a(mem, lambda1_form,
+                                vc_va(mem, len, vc_va(mem, scanned, vc(mem, env, mem->nil)))));
 }
 
-uint64_t lambda1(memory *mem,
-                 uint64_t form_args,
-                 uint64_t args) {
+allocation lambda1(memory *mem,
+                   uint64_t form_args,
+                   uint64_t args) {
     uint64_t len = (uint64_t)double_val(mem, vlist_ref(mem, form_args, 0));
     uint64_t scanned = vlist_ref(mem, form_args, 1);
     uint64_t env = vlist_ref(mem, form_args, 2);
 
-    return send(mem, scanned,
-        vc(mem, step_contn_k(mem, args),
-           vc(mem, extend_rtenv(mem, env, len, step_contn_args(mem, args)),
-              mem->nil)));
+    return send_va(mem, scanned,
+        vc_va(mem, step_contn_k(mem, args),
+              vc_av(mem, extend_rtenv(mem, env, len, step_contn_args(mem, args)),
+                    mem->nil)));
 }
 
-uint64_t improper_lambda0(memory *mem,
-                          uint64_t form_args,
-                          uint64_t args) {
+allocation improper_lambda0(memory *mem,
+                            uint64_t form_args,
+                            uint64_t args) {
     uint64_t len = vlist_ref(mem, form_args, 0);
     uint64_t scanned = vlist_ref(mem, form_args, 1);
     uint64_t k = vlist_ref(mem, args, 0);
     uint64_t env = vlist_ref(mem, args, 1);
-    return sendv(mem, k,
-                 make_form(mem, improper_lambda1_form,
-                           vc(mem, len, vc(mem, scanned, vc(mem, env, mem->nil)))));
+    return sendv_va(mem, k,
+                    make_form_a(mem, improper_lambda1_form,
+                                vc_va(mem, len, vc_va(mem, scanned, vc(mem, env, mem->nil)))));
 }
 
-uint64_t improper_lambda1(memory *mem,
-                          uint64_t form_args,
-                          uint64_t args) {
+allocation improper_lambda1(memory *mem,
+                            uint64_t form_args,
+                            uint64_t args) {
     uint64_t len = (uint64_t)double_val(mem, vlist_ref(mem, form_args, 0));
     uint64_t scanned = vlist_ref(mem, form_args, 1);
     uint64_t env = vlist_ref(mem, form_args, 2);
 
-    return send(mem, scanned,
-        vc(mem, step_contn_k(mem, args),
-           vc(mem, improper_extend_rtenv(mem, env, len, step_contn_args(mem, args)),
-              mem->nil)));
+    return send_va(mem, scanned,
+        vc_va(mem, step_contn_k(mem, args),
+              vc_av(mem, improper_extend_rtenv(mem, env, len, step_contn_args(mem, args)),
+                    mem->nil)));
 }
 
-uint64_t letcc0(memory *mem,
-                uint64_t form_args,
-                uint64_t args) {
+allocation letcc0(memory *mem,
+                  uint64_t form_args,
+                  uint64_t args) {
     uint64_t scanned = vlist_ref(mem, form_args, 0); 
     uint64_t k = vlist_ref(mem, args, 0);
     uint64_t env = vlist_ref(mem, args, 1);
-    return send(mem, scanned,
-        vc(mem, k,
-           vc(mem, extend_rtenv(mem,
-                                env,
-                                1,
-                                vc(mem, make_form(mem, letcc1_form, vc(mem, k, mem->nil)),
-                                   mem->nil)),
+    return send_va(mem, scanned,
+        vc_va(mem, k,
+              vc_av(mem, extend_rtenv_a(mem,
+                                        env,
+                                        1,
+                                        vc_av(mem, make_form_a(mem, letcc1_form, vc(mem, k, mem->nil)),
+                                              mem->nil)),
               mem->nil)));
 }
 
-uint64_t letcc1(memory *mem,
-                uint64_t form_args,
-                uint64_t args) {
+allocation letcc1(memory *mem,
+                  uint64_t form_args,
+                  uint64_t args) {
     uint64_t k = vlist_ref(mem, form_args, 0);
 
     assert(args < mem->size);
@@ -1226,62 +1245,62 @@ uint64_t letcc1(memory *mem,
     return send(mem, k, step_contn_args(mem, args));
 }
 
-uint64_t define0(memory *mem,
-                 uint64_t form_args,
-                 uint64_t args) {
+allocation define0(memory *mem,
+                   uint64_t form_args,
+                   uint64_t args) {
     uint64_t i = vlist_ref(mem, form_args, 0);
     uint64_t scanned = vlist_ref(mem, form_args, 1);
     uint64_t k = vlist_ref(mem, args, 0);
     uint64_t env = vlist_ref(mem, args, 1);
-    return send(mem, scanned,
-        vc(mem, make_form(mem, define1_form,
-                          vc(mem, k, vc(mem, env, vc(mem, i, mem->nil)))),
-           vc(mem, env, mem->nil)));
+    return send_va(mem, scanned,
+        vc_aa(mem, make_form_a(mem, define1_form,
+                               vc_va(mem, k, vc_va(mem, env, vc(mem, i, mem->nil)))),
+              vc(mem, env, mem->nil)));
 }
 
-uint64_t define1(memory *mem,
-                 uint64_t form_args,
-                 uint64_t args) {
+allocation define1(memory *mem,
+                   uint64_t form_args,
+                   uint64_t args) {
     uint64_t k = vlist_ref(mem, form_args, 0);
     uint64_t env = vlist_ref(mem, form_args, 1);
     uint64_t i = vlist_ref(mem, form_args, 2);
     uint64_t v = vlist_ref(mem, args, 0);
-    return sendv(mem, k, rtenv_setvar(mem, i, v, env));
+    return sendv_va(mem, k, rtenv_setvar(mem, i, v, env));
 }
 
-uint64_t application0(memory *mem,
-                      uint64_t form_args,
-                      uint64_t args) {
+allocation application0(memory *mem,
+                        uint64_t form_args,
+                        uint64_t args) {
     uint64_t scanned = vlist_ref(mem, form_args, 0);
     uint64_t k = vlist_ref(mem, args, 0);
     uint64_t env = vlist_ref(mem, args,  1);
-    return send(mem, scanned,
-        vc(mem, make_form(mem, application1_form,
-                          vc(mem, k, vc(mem, env, mem->nil))),
-           vc(mem, env, mem->nil)));
+    return send_va(mem, scanned,
+        vc_aa(mem, make_form_a(mem, application1_form,
+                               vc_va(mem, k, vc(mem, env, mem->nil))),
+              vc(mem, env, mem->nil)));
 }
 
-uint64_t application1(memory *mem,
-                      uint64_t form_args,
-                      uint64_t args) {
+allocation application1(memory *mem,
+                        uint64_t form_args,
+                        uint64_t args) {
     uint64_t k = vlist_ref(mem, form_args, 0);
     uint64_t env = vlist_ref(mem, form_args, 1);
     uint64_t v = vlist_ref(mem, args, 0);
     return applyx(mem, k, env, vector_ref(mem, v, 0), vector_ref(mem, v, 1));
 }
 
-uint64_t evalx_initial(memory *mem,
-                       uint64_t form_args) {
+allocation evalx_initial(memory *mem,
+                         uint64_t form_args) {
     uint64_t k = vlist_ref(mem, form_args, 0);
     uint64_t env = vlist_ref(mem, form_args, 1);
     uint64_t scanned = vlist_ref(mem, form_args, 2);
-    return send(mem, scanned, vc(mem, k, vc(mem, env, mem->nil)));
+    return send_va(mem, scanned, vc_va(mem, k, vc(mem, env, mem->nil)));
 }
 
-uint64_t handle_form(memory *mem,
-                     double form_n,
-                     uint64_t form_args,
-                     uint64_t args) {
+allocation handle_form(memory *mem,
+                       double form_n,
+                       uint64_t form_args,
+                       uint64_t args) {
     switch ((int)form_n) {
         case symbol_lookup_form:
             return symbol_lookup(mem, form_args, args);
@@ -1356,10 +1375,10 @@ uint64_t handle_form(memory *mem,
             assert_perror(EINVAL);
     }
 
-    return 0;
+    return (allocation) { false, 0 };
 }
 
-uint64_t handle_unmemoized(memory *mem, uint64_t state, uint64_t args) {
+allocation handle_unmemoized(memory *mem, uint64_t state, uint64_t args) {
     assert(state + 8 < mem->size);
     assert(mem->bytes[state] == unmemoized_code);
     uint64_t exp = vector_ref(mem, *(uint64_t*)&mem->bytes[state + 1], 0);
@@ -1368,55 +1387,64 @@ uint64_t handle_unmemoized(memory *mem, uint64_t state, uint64_t args) {
 
 uint64_t run(memory *mem, uint64_t state);
 
-uint64_t maybe_gc(memory *mem, uint64_t state) {
-    if (mem->size > mem->gc_threshold && !calling_gc_callback) {
-        if (gc_callback_set) {
-            state = vc(mem, state, gc_callback);
+allocation call_gc(memory *mem, uint64_t state) {
+    memory dest = {
+        mem->capacity,
+        0,
+        (uint8_t*) malloc(mem->capacity),
+        0,
+        false,
+        0,
+        false
+    };
+    assert(dest.bytes);
+    state = gc(mem, state, &dest);
+    if ((dest.nil >= dest.size) ||
+        (dest.bytes[dest.nil] != vector_code) ||
+        (vector_size(&dest, dest.nil) != 0)) {
+        allocation nil_state = make_uninitialised_vector(&dest, 0);
+        if (!nil_state.succeeded) {
+            return nil_state;
         }
-        memory dest = {
-            mem->capacity,
-            0,
-            mem->gc_threshold,
-            (uint8_t*) malloc(mem->capacity),
-            0
-        };
-        assert(dest.bytes);
-        gc(mem, state, &dest);
-        if ((dest.nil >= dest.size) ||
-            (dest.bytes[dest.nil] != vector_code) ||
-            (vector_size(&dest, dest.nil) != 0)) {
-            dest.nil = make_uninitialised_vector(&dest, 0);
-        }
-        free(mem->bytes);
-        *mem = dest;
-        if (gc_callback_set) {
-            state = vector_ref(mem, 0, 0);
-            gc_callback = vector_ref(mem, 0, 1);
-            calling_gc_callback = true;
-            uint64_t r = run(mem, applyx(mem,
-               make_form(mem, global_lambda_form,
-                         vc(mem, make_double(mem, g_result), mem->nil)),
-               make_global_rtenv(mem),
-               gc_callback,
-               vc(mem, make_double(mem, mem->size), mem->nil)));
-            calling_gc_callback = false;
-            assert(r < mem->size);
-            assert(mem->bytes[r] != false_code);
-        } else {
-            state = 0;
-        }
+        dest.nil = nil_state.v;
     }
-    return state;
+    free(mem->bytes);
+    *mem = dest;
+    if (mem->gc_callback_set) {
+        allocation cb_state = applyx_a(mem,
+           make_form_a(mem, global_lambda_form,
+                       vc_av(mem, make_double(mem, g_result), mem->nil)),
+           make_global_rtenv(mem),
+           mem->gc_callback,
+           vc_av(mem, make_double(mem, mem->size), mem->nil));
+        if (!cb_state.succeeded) {
+            return cb_state;
+        }
+        mem->calling_gc_callback = true;
+        uint64_t r = run(mem, cb_state.v);
+        mem->calling_gc_callback = false;
+        assert(r < mem->size);
+        assert(mem->bytes[r] != false_code);
+    }
+    return (allocation) { true, state };
 }
 
-uint64_t step(memory *mem, uint64_t state) {
+allocation step(memory *mem, uint64_t state) {
     return handle_unmemoized(mem, vector_ref(mem, state, 0), vector_ref(mem, state, 1));
 }
 
 uint64_t run(memory *mem, uint64_t state) {
     while (assert(state < mem->size),
            mem->bytes[state] != result_code) {
-        state = maybe_gc(mem, step(mem, state));
+        allocation new_state = step(mem, state);
+        if (!new_state.succeeded && !mem->calling_gc_callback) {
+            new_state = call_gc(mem, state);
+            if (new_state.succeeded) {
+                new_state = step(mem, new_state.v);
+            }
+        }
+        assert(new_state.succeeded);
+        state = new_state.v;
     }
     assert(state + 8 < mem->size);
     return vector_ref(mem, *(uint64_t*)&mem->bytes[state + 1], 0);
@@ -1425,12 +1453,14 @@ uint64_t run(memory *mem, uint64_t state) {
 uint64_t start(memory *mem, uint64_t state) {
     assert(state < mem->size);
     if (mem->bytes[state] == unmemoized_code) {
-        return run(mem, applyx(mem,
-            make_form(mem, global_lambda_form,
-                      vc(mem, make_double(mem, g_result), mem->nil)),
+        allocation form_state = applyx_a(mem,
+            make_form_a(mem, global_lambda_form,
+                        vc_av(mem, make_double(mem, g_result), mem->nil)),
             make_global_rtenv(mem),
             state,
-            mem->nil));
+            (allocation) { true, mem->nil });
+        assert(form_state.succeeded);
+        return run(mem, form_state.v);
     }
     return run(mem, state);
 }
@@ -1440,21 +1470,16 @@ const char *argp_program_bug_address = "dave@davedoesdev.com";
 const char argp_doc[] = "mce -- Metacircular Evaluator";
 struct argp_option options[] = {
     {"memory-capacity", 'm', "MEBIBYTES", 0, "Maximum memory size", 0},
-    {"gc-threshold", 'g', "MEBIBYTES", 0, "GC when memory exceeds this size", 0},
     {0}
 };
 struct arguments {
     uint64_t memory_capacity;
-    uint64_t gc_threshold;
 };
 error_t parse_opt(int key, char *arg, struct argp_state *state) {
     struct arguments *arguments = state->input;
     switch (key) {
         case 'm':
             arguments->memory_capacity = strtoull(arg, NULL, 0) * MEBIBYTES;
-            break;
-        case 'g':
-            arguments->gc_threshold = strtoull(arg, NULL, 0) * MEBIBYTES;
             break;
         default:
             return ARGP_ERR_UNKNOWN;
@@ -1467,14 +1492,13 @@ int main(int argc, char **argv) {
     /* Get memory capacity */
     struct arguments arguments = {
         DEFAULT_MEMORY_SIZE * MEBIBYTES,
-        DEFAULT_GC_THRESHOLD_SIZE * MEBIBYTES
     };
     argp_parse(&argp, argc, argv, 0, 0, &arguments);
 
     /* Read size of state */
     uint64_t size;
     assert(fread(&size, 1, sizeof(size), stdin) == sizeof(size));
-    assert(size + 1 <= arguments.memory_capacity);
+    assert(size <= arguments.memory_capacity);
 
     /* Allocate all memory */
     uint8_t *bytes = (uint8_t*) malloc(arguments.memory_capacity);
@@ -1487,13 +1511,17 @@ int main(int argc, char **argv) {
     memory mem = {
         arguments.memory_capacity,
         size,
-        arguments.gc_threshold,
         bytes,
-        0
+        0,
+        false,
+        0,
+        false
     };
 
     /* Make an index for nil */
-    mem.nil = make_uninitialised_vector(&mem, 0);
+    allocation nil_state = make_uninitialised_vector(&mem, 0);
+    assert(nil_state.succeeded);
+    mem.nil = nil_state.v;
 
     /* Run state */
     start(&mem, 0);
