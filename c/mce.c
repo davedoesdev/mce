@@ -965,43 +965,43 @@ allocation global_lambda(memory *mem,
                           vlist_ref(mem, args, 1));
 
         case g_is_boolean:
-            return send_va(mem, k, is_boolean(mem, args));
+            return sendv_va(mem, k, is_boolean(mem, args));
 
         case g_is_number:
-            return send_va(mem, k, is_number(mem, args));
+            return sendv_va(mem, k, is_number(mem, args));
 
         case g_less_than:
-            return send_va(mem, k, less_than(mem, args));
+            return sendv_va(mem, k, less_than(mem, args));
 
         case g_greater_than:
-            return send_va(mem, k, greater_than(mem, args));
+            return sendv_va(mem, k, greater_than(mem, args));
 
         case g_add:
-            return send_va(mem, k, add(mem, args));
+            return sendv_va(mem, k, add(mem, args));
 
         case g_subtract:
-            return send_va(mem, k, subtract(mem, args));
+            return sendv_va(mem, k, subtract(mem, args));
 
         case g_multiply:
-            return send_va(mem, k, multiply(mem, args));
+            return sendv_va(mem, k, multiply(mem, args));
 
         case g_divide:
-            return send_va(mem, k, divide(mem, args));
+            return sendv_va(mem, k, divide(mem, args));
 
         case g_is_number_equal:
-            return send_va(mem, k, is_number_equal(mem, args));
+            return sendv_va(mem, k, is_number_equal(mem, args));
 
         case g_floor:
-            return send_va(mem, k, make_double(mem, floor(double_val(mem, vector_ref(mem, args, 0)))));
+            return sendv_va(mem, k, make_double(mem, floor(double_val(mem, vector_ref(mem, args, 0)))));
 
         case g_make_vector:
-            return send_va(mem, k, make_vector(mem, double_val(mem, vector_ref(mem, args, 0))));
+            return sendv_va(mem, k, make_vector(mem, double_val(mem, vector_ref(mem, args, 0))));
 
         case g_is_vector:
-            return send_va(mem, k, is_vector(mem, args));
+            return sendv_va(mem, k, is_vector(mem, args));
 
         case g_vector_length:
-            return send_va(mem, k, make_double(mem, vector_size(mem, vector_ref(mem, args, 0))));
+            return sendv_va(mem, k, make_double(mem, vector_size(mem, vector_ref(mem, args, 0))));
 
         case g_vector_ref:
             return sendv(mem, k, vector_ref(mem,
@@ -1015,19 +1015,19 @@ allocation global_lambda(memory *mem,
                                             vlist_ref(mem, args, 2)));
 
         case g_is_procedure:
-            return send_va(mem, k, is_procedure(mem, args));
+            return sendv_va(mem, k, is_procedure(mem, args));
 
         case g_make_binary:
-            return send_va(mem, k, make_binary(mem, double_val(mem, vector_ref(mem, args, 0))));
+            return sendv_va(mem, k, make_binary(mem, double_val(mem, vector_ref(mem, args, 0))));
 
         case g_is_binary:
-            return send_va(mem, k, is_binary(mem, args));
+            return sendv_va(mem, k, is_binary(mem, args));
 
         case g_binary_length:
-            return send_va(mem, k, make_double(mem, binary_size(mem, vector_ref(mem, args, 0))));
+            return sendv_va(mem, k, make_double(mem, binary_size(mem, vector_ref(mem, args, 0))));
 
         case g_binary_ref:
-            return send_va(mem, k, binary_ref(mem,
+            return sendv_va(mem, k, binary_ref(mem,
                                              vlist_ref(mem, args, 0),
                                              double_val(mem, vlist_ref(mem, args, 1))));
 
@@ -1041,14 +1041,14 @@ allocation global_lambda(memory *mem,
             return sendv(mem, k, error(mem, args));
 
         case g_is_same_object:
-            return send_va(mem, k, is_same_object(mem, args));
+            return sendv_va(mem, k, is_same_object(mem, args));
 
         case g_transfer:
             return transfer(mem, args);
     }
 
     if (symbol_equals(mem, defn, "save")) {
-        return send_va(mem, k, save(mem, vector_ref(mem, args, 0)));
+        return sendv_va(mem, k, save(mem, vector_ref(mem, args, 0)));
     }
 
     if (symbol_equals(mem, defn, "restore")) {
@@ -1056,15 +1056,15 @@ allocation global_lambda(memory *mem,
     }
 
     if (symbol_equals(mem, defn, "getpid")) {
-        return send_va(mem, k, make_double(mem, getpid()));
+        return sendv_va(mem, k, make_double(mem, getpid()));
     }
 
     if (symbol_equals(mem, defn, "cf-test")) {
-        return send_va(mem, k, cf_test(mem, args));
+        return sendv_va(mem, k, cf_test(mem, args));
     }
 
     if (symbol_equals(mem, defn, "cf-test-aux")) {
-        return send_va(mem, k, cf_test_aux(mem, vlist_ref(mem, form_args, 1), args));
+        return sendv_va(mem, k, cf_test_aux(mem, vlist_ref(mem, form_args, 1), args));
     }
 
     if (symbol_equals(mem, defn, "set-gc-callback!")) {
