@@ -122,17 +122,17 @@ typedef struct {
 uint64_t gc(memory *src, uint64_t state, memory *dest) {
     gc_todo *todos = (gc_todo*) malloc((src->size + 1 /* for gc_callback */) * sizeof(gc_todo));
     assert(todos);
+    uint64_t num_todos = 0;
 
     assert(state < src->size);
     uint64_t r = dest->size;
 
-    uint64_t num_todos = 0;
     if (src->gc_callback_set) {
-        assert(num_todos < src->size);
+        assert(num_todos < src->size + 1);
         todos[num_todos].src_state = src->gc_callback;
         todos[num_todos++].dest_state = 0; /* not used */
     }
-    assert(num_todos < src->size);
+    assert(num_todos < src->size + 1);
     todos[num_todos].src_state = state;
     todos[num_todos++].dest_state = 0; /* not used */
 
@@ -199,7 +199,7 @@ uint64_t gc(memory *src, uint64_t state, memory *dest) {
                 dest->size += len * 8;
 
                 for (uint64_t i = 0; i < len; ++i) {
-                    assert(num_todos < src->size);
+                    assert(num_todos < src->size + 1);
                     todos[num_todos].src_state = *(uint64_t*)&src->bytes[src_state + 9 + i * 8];
                     todos[num_todos++].dest_state = pos + i * 8;
                 }
@@ -220,7 +220,7 @@ uint64_t gc(memory *src, uint64_t state, memory *dest) {
                 uint64_t pos = dest->size;
                 dest->size += 8;
 
-                assert(num_todos < src->size);
+                assert(num_todos < src->size + 1);
                 todos[num_todos].src_state = vec_state;
                 todos[num_todos++].dest_state = pos;
                 break;
