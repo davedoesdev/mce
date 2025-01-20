@@ -357,8 +357,8 @@ netlify init
 ```
 
 Then visit your repository's site on Netlify and in
-Settings->Build & deploy->Environment
-(https://app.netlify.com/sites/XXX/settings/deploys#environment)
+Settings->Site configuration->Environment
+(https://app.netlify.com/sites/XXX/configuration/env#content)
 add an environment variable called `STATELESS_KEY` with value set to the
 content of the `stateless/key` file.
 

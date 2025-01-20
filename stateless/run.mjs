@@ -1,17 +1,16 @@
 import { make_runtime } from '@davedoesdev/mce';
 import { shtml_to_html, string_code } from './shtml.mjs';
-import sodium_plus from 'sodium-plus';
-const { CryptographyKey, SodiumPlus } = sodium_plus;
+import sodium from 'sodium-native';
 
 const string_prefix = Buffer.from([string_code]);
 
-export default async (v, key64, args = null) => {
+export default async (v, key, args = null) => {
     const sign = async buf => {
-        const key = new CryptographyKey(Buffer.from(key64, 'base64'));
-        const sodium = await SodiumPlus.auto();
+        const mac = Buffer.alloc(sodium.crypto_auth_BYTES);
+        sodium.crypto_auth(mac, buf, key);
         return {
             msg: buf.toString('base64'),
-            mac: (await sodium.crypto_auth(buf, key)).toString('base64')
+            mac: mac.toString('base64')
         };
     };
 

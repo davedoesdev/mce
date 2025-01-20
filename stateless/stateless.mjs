@@ -1,7 +1,6 @@
 import qs from 'querystring';
 import run from './run.mjs';
-import sodium_plus from 'sodium-plus';
-const { CryptographyKey, SodiumPlus } = sodium_plus;
+import sodium from 'sodium-native';
 
 export async function handler(event) {
     const form = qs.parse(event.body);
@@ -10,9 +9,8 @@ export async function handler(event) {
     const mac = Buffer.from(state.mac, 'base64');
 
     const key64 = process.env.STATELESS_KEY;
-    const key = new CryptographyKey(Buffer.from(key64, 'base64'));
-    const sodium = await SodiumPlus.auto();
-    if (!await sodium.crypto_auth_verify(msg, key, mac)) {
+    const key = Buffer.from(key64, 'base64');
+    if (!sodium.crypto_auth_verify(mac, msg, key)) {
         throw new Error('failed to verify state');
     }
 
@@ -26,6 +24,6 @@ export async function handler(event) {
         headers: {
             'Content-Type': 'text/html'
         },
-        body: await run(msg, key64, args)
+        body: await run(msg, key, args)
     };
 }
